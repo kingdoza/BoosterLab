@@ -7,7 +7,7 @@
 #include "FirstPersonMovementComponent.generated.h"
 
 UCLASS(ClassGroup = (Movement), meta = (BlueprintSpawnableComponent))
-class FIRSTPERSONTEMPLATE_API UFirstPersonMovementComponent : public UCharacterMovementComponent
+class BOOSTERLAB_API UFirstPersonMovementComponent : public UCharacterMovementComponent
 {
 	GENERATED_BODY()
 

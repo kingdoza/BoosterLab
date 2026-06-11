@@ -1,4 +1,4 @@
-# FirstPersonTemplate Architecture Map
+# BoosterLab Architecture Map
 
 ## 문서 기준
 
@@ -10,8 +10,8 @@
 ## 분석 범위
 
 - 주 분석 범위:
-  - `Source/FirstPersonTemplate/Public`
-  - `Source/FirstPersonTemplate/Private`
+  - `Source/BoosterLab/Public`
+  - `Source/BoosterLab/Private`
 - 현재 대상 C++ 하위 시스템:
   - Core
   - Character
@@ -28,7 +28,7 @@
 ## Source 구조
 
 ```text
-Source/FirstPersonTemplate/
+Source/BoosterLab/
   Public/
     Character/
     Camera/
@@ -54,7 +54,7 @@ Source/FirstPersonTemplate/
 - Camera는 player camera manager를 통해 상하 시야각 제한 기본값을 제공하고, Blueprint 파생 class에서 값을 조정할 수 있게 한다.
 - Camera는 비로컬 플레이어에서 Tick interval 조정과 shake 중단으로 비용을 줄인다.
 - Core는 런타임 gameplay 상태를 소유하지 않고 모듈 의존성, Source 경계, Content/Config 정책, Core Redirect 기준을 문서화한다.
-- 현재 문서화된 Core, Character, Camera 외 도메인 기능은 FirstPersonTemplate의 Source 책임이 아니다.
+- 현재 문서화된 Core, Character, Camera 외 도메인 기능은 BoosterLab의 Source 책임이 아니다.
 
 ## 주요 의존 방향
 
@@ -87,7 +87,7 @@ Source/FirstPersonTemplate/
 - 새 시스템, 새 의존 방향, Blueprint/API 계약 변경은 이 문서와 관련 `.md/Architecture/*System.md`를 함께 갱신한다.
 - Content asset 수정이나 resave가 필요한 변경은 별도 사용자 지시와 Editor 검증 계획 없이는 진행하지 않는다.
 
-## Update 2026-06-11 (FirstPersonTemplate Source Baseline)
+## Update 2026-06-11 (BoosterLab Source Baseline)
 
 - Source 기준 하위 시스템을 Core, Character, Camera로 정리했다.
 - Character는 1인칭 입력, 이동, 점프, sprint, 플레이어 조립 책임을 가진다.

@@ -21,7 +21,7 @@ enum class EFirstPersonCameraMoveState : uint8
 };
 
 UCLASS(ClassGroup = (Camera), meta = (BlueprintSpawnableComponent))
-class FIRSTPERSONTEMPLATE_API UFirstPersonCameraShakeComponent : public UActorComponent
+class BOOSTERLAB_API UFirstPersonCameraShakeComponent : public UActorComponent
 {
 	GENERATED_BODY()
 

@@ -2,10 +2,10 @@
 
 ## Scope
 
-- `Source/FirstPersonTemplate/Public/Camera/FirstPersonCameraShakeComponent.h`
-- `Source/FirstPersonTemplate/Private/Camera/FirstPersonCameraShakeComponent.cpp`
-- `Source/FirstPersonTemplate/Public/Camera/FirstPersonCameraManager.h`
-- `Source/FirstPersonTemplate/Private/Camera/FirstPersonCameraManager.cpp`
+- `Source/BoosterLab/Public/Camera/FirstPersonCameraShakeComponent.h`
+- `Source/BoosterLab/Private/Camera/FirstPersonCameraShakeComponent.cpp`
+- `Source/BoosterLab/Public/Camera/FirstPersonCameraManager.h`
+- `Source/BoosterLab/Private/Camera/FirstPersonCameraManager.cpp`
 
 ## Responsibilities
 

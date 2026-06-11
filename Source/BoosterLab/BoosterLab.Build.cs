@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class FirstPersonTemplate : ModuleRules
+public class BoosterLab : ModuleRules
 {
-	public FirstPersonTemplate(ReadOnlyTargetRules Target) : base(Target)
+	public BoosterLab(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	

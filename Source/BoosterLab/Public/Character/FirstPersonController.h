@@ -9,7 +9,7 @@
 class UInputMappingContext;
 
 UCLASS()
-class FIRSTPERSONTEMPLATE_API AFirstPersonController : public APlayerController
+class BOOSTERLAB_API AFirstPersonController : public APlayerController
 {
 	GENERATED_BODY()
 

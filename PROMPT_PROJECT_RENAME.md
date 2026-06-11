@@ -5,7 +5,7 @@
 아래 한 줄의 값만 원하는 새 프로젝트 이름으로 바꾼 뒤 이 프롬프트를 실행한다.
 
 ```text
-PROJECT_NAME = __CHANGE_ME__
+PROJECT_NAME = BoosterLab
 ```
 
 ## Role

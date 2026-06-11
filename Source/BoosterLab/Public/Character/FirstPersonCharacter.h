@@ -13,7 +13,7 @@ class UInputAction;
 struct FInputActionValue;
 
 UCLASS()
-class FIRSTPERSONTEMPLATE_API AFirstPersonCharacter : public ACharacter
+class BOOSTERLAB_API AFirstPersonCharacter : public ACharacter
 {
 	GENERATED_BODY()
 

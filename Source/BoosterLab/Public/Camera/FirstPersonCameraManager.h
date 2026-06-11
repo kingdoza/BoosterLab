@@ -7,7 +7,7 @@
 #include "FirstPersonCameraManager.generated.h"
 
 UCLASS(Blueprintable)
-class FIRSTPERSONTEMPLATE_API AFirstPersonCameraManager : public APlayerCameraManager
+class BOOSTERLAB_API AFirstPersonCameraManager : public APlayerCameraManager
 {
 	GENERATED_BODY()
 

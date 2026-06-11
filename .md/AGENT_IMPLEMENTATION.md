@@ -2,7 +2,7 @@
 
 ## 역할
 
-이 에이전트는 FirstPersonTemplate의 **구현 담당**이다.
+이 에이전트는 BoosterLab의 **구현 담당**이다.
 
 구현은 현재 정본 아키텍처 문서와 사용자 지시를 기준으로 수행한다. 임의의 구조 변경, Public API 삭제, Blueprint 계약 변경은 금지한다.
 
@@ -108,7 +108,7 @@
 가능한 경우 UBT 빌드를 수행한다.
 
 ```powershell
-& "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\DotNET\AutomationTool\UnrealBuildTool.exe" FirstPersonTemplateEditor Win64 Development -Project="C:\UnrealProjects\FirstPersonTemplate\FirstPersonTemplate.uproject" -WaitMutex -NoHotReloadFromIDE
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\DotNET\AutomationTool\UnrealBuildTool.exe" BoosterLabEditor Win64 Development -Project="C:\UnrealProjects\BoosterLab\BoosterLab.uproject" -WaitMutex -NoHotReloadFromIDE
 ```
 
 경로가 없으면 임의의 엔진 버전을 사용하지 말고 사용자에게 확인한다.

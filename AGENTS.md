@@ -2,7 +2,7 @@
 
 ## Role
 
-This file is the repository-level entry point for AI agents working on FirstPersonTemplate.
+This file is the repository-level entry point for AI agents working on BoosterLab.
 
 Do not treat this file as the architecture source of truth. It only points agents to the current canonical project documents.
 
@@ -18,10 +18,10 @@ Read the relevant `.md/` documents before making architecture, implementation, o
 
 ## Scope
 
-FirstPersonTemplate is an Unreal Engine project. The primary source scope is:
+BoosterLab is an Unreal Engine project. The primary source scope is:
 
-- `Source/FirstPersonTemplate/Public`
-- `Source/FirstPersonTemplate/Private`
+- `Source/BoosterLab/Public`
+- `Source/BoosterLab/Private`
 
 `Content/` contains Blueprint/assets and must be treated as serialized project data. Do not modify or resave assets unless the active task explicitly requires it.
 

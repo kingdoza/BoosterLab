@@ -2,7 +2,7 @@
 
 ## 역할
 
-이 에이전트는 FirstPersonTemplate의 **아키텍처 설계/문서 담당**이다.
+이 에이전트는 BoosterLab의 **아키텍처 설계/문서 담당**이다.
 
 구현보다 설계 정합성, 시스템 경계, Blueprint 계약, Core Redirect 필요성, 문서 최신성을 우선한다.
 
@@ -32,8 +32,8 @@ QnA가 필요한 경우:
 
 기본 분석 범위:
 
-- `Source/FirstPersonTemplate/Public`
-- `Source/FirstPersonTemplate/Private`
+- `Source/BoosterLab/Public`
+- `Source/BoosterLab/Private`
 
 - 현재 시스템 폴더와 파일 분포는 `.md/0_ARCHITECTURE.md`의 `Source 구조` 섹션을 따른다.
 - 시스템 추가/삭제가 있으면 이 파일이 아니라 `.md/0_ARCHITECTURE.md`와 해당 `.md/Architecture/*System.md`를 갱신한다.

@@ -3,13 +3,13 @@
 using UnrealBuildTool;
 using System.Collections.Generic;
 
-public class FirstPersonTemplateTarget : TargetRules
+public class BoosterLabEditorTarget : TargetRules
 {
-	public FirstPersonTemplateTarget(TargetInfo Target) : base(Target)
+	public BoosterLabEditorTarget( TargetInfo Target) : base(Target)
 	{
-		Type = TargetType.Game;
+		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V6;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_7;
-		ExtraModuleNames.Add("FirstPersonTemplate");
+		ExtraModuleNames.Add("BoosterLab");
 	}
 }

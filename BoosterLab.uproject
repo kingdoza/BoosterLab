@@ -5,7 +5,7 @@
 	"Description": "",
 	"Modules": [
 		{
-			"Name": "FirstPersonTemplate",
+			"Name": "BoosterLab",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}

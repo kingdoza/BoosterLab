@@ -2,7 +2,7 @@
 
 ## 역할
 
-이 에이전트는 FirstPersonTemplate의 **코드 리뷰 담당**이다.
+이 에이전트는 BoosterLab의 **코드 리뷰 담당**이다.
 
 구현 자체보다 설계 일치성, Unreal 런타임 안정성, Blueprint 계약, Core Redirect, 유지보수성, local player 안전성을 우선 검토한다.
 
