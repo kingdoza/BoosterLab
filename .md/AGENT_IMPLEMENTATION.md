@@ -2,152 +2,128 @@
 
 ## 역할
 
-이 에이전트는 BoosterLab의 **구현 담당**이다.
+이 에이전트는 승인된 아키텍처와 `.md/PROMPT_IMPLEMENTATION.md`를 기준으로 C++를 구현하고 코드 리뷰·Unreal 작업 프롬프트를 생산한다.
 
-구현은 현재 정본 아키텍처 문서와 사용자 지시를 기준으로 수행한다. 임의의 구조 변경, Public API 삭제, Blueprint 계약 변경은 금지한다.
+임의의 구조 변경, Public API 삭제, Blueprint 계약 변경과 Content 수정은 하지 않는다.
 
-## 정본 문서
+## 필수 문서
 
-작업 시작 시 반드시 읽는다.
-
+- `.md/AGENT_WORKFLOW.md`
+- `.md/PROMPT_IMPLEMENTATION.md`
+- 재작업이면 `.md/PROMPT_IMPLEMENTATION_R.md`
 - `.md/0_ARCHITECTURE.md`
-- 작업과 직접 관련된 `.md/Architecture/*System.md`
+- 작업과 관련된 `.md/Architecture/*System.md`
+- `.md/Architecture/CoreSystem.md`
+- UI 작업이면 `.md/Architecture/UISystem.md`
 - `.md/QNA_IMPLEMENTATION.md`
 
-필요 시 함께 참고한다.
+## 허용 범위
 
-- `.md/Architecture/CoreSystem.md`: Core Redirect와 공통 규칙
-- `.md/USER_UNREAL.md`: Editor 수동 검증이 필요한 경우
+- 승인된 `Source/BathhouseSim/Public`, `Source/BathhouseSim/Private`
+- 명시적으로 승인된 `Config/`
+- 구현으로 현재 구조가 바뀐 경우 관련 아키텍처 정본
+- 정기 결과물 `.md/PROMPT_REVIEW.md`, `.md/PROMPT_UNREAL.md`
 
-## 주요 작업 경로
-
-| 용도 | 경로 |
-|---|---|
-| 전체 아키텍처 지도 | `.md/0_ARCHITECTURE.md` |
-| 시스템별 아키텍처 | `.md/Architecture/*.md` |
-| 구현 QnA | `.md/QNA_IMPLEMENTATION.md` |
-| 리뷰 프롬프트 | `.md/PROMPT_REVIEW.md` |
-| Unreal Editor 사용자 작업 | `.md/USER_UNREAL.md` |
-
-## Source 구조 기준
-
-- 현재 Source 시스템 폴더와 파일 분포는 `.md/0_ARCHITECTURE.md`의 `Source 구조` 섹션을 단일 출처로 삼는다.
-- 시스템별 책임과 의존 방향은 `.md/0_ARCHITECTURE.md`의 `시스템 문서`, `시스템 간 책임 흐름`, `주요 의존 방향` 섹션을 따른다.
-- `Core`는 문서상 경계이며 소스 폴더가 아니다.
-- 시스템 추가/삭제가 있으면 이 파일이 아니라 `.md/0_ARCHITECTURE.md`와 관련 `.md/Architecture/*System.md`를 갱신한다.
+`Content/` 에셋은 검사할 수 있지만 수정하거나 저장하지 않는다.
 
 ## 구현 절차
 
-1. `.md/0_ARCHITECTURE.md`를 읽고 작업과 직접 관련된 `.md/Architecture/*System.md`를 선택해 읽는다.
-2. 작업 범위와 영향 파일을 보고한다.
-3. Blueprint/API/Core Redirect 영향이 있는지 확인한다.
-4. 애매한 점이 있으면 `.md/QNA_IMPLEMENTATION.md`에 질문을 작성하고 중단한다.
-5. 구현한다.
-6. 빌드 또는 가능한 검증을 수행한다.
-7. 구조 변경이 있으면 `.md/0_ARCHITECTURE.md`와 관련 `.md/Architecture/*System.md`를 갱신한다.
-8. 리뷰용 프롬프트가 필요하면 `.md/PROMPT_REVIEW.md`를 작성한다.
-9. Editor 수동 검증이 필요하면 `.md/USER_UNREAL.md` 또는 최종 보고에 사용자 작업을 명시한다.
+1. 구현 프롬프트와 정본 문서가 일치하는지 확인한다.
+2. 대상 파일, 기존 책임, Blueprint/API/Core Redirect 영향을 보고한다.
+3. 대상 클래스의 변경 전 크기와 신규 책임을 확인한다.
+4. 불명확한 선택이 있으면 `QNA_IMPLEMENTATION.md`를 작성하고 중단한다.
+5. 승인된 책임 경계 안에서 구현한다.
+6. 변경 후 클래스 성장과 Widget 책임 경계를 다시 확인한다.
+7. diff 검사, focused search와 가능한 UBT 빌드를 수행한다.
+8. 실제 구조가 바뀌었다면 관련 정본을 현재 상태로 갱신한다.
+9. `PROMPT_REVIEW.md`와 `PROMPT_UNREAL.md`를 작성한다.
 
-## QnA 규칙
+## 클래스 성장 검사
 
-다음 상황에서는 구현하지 말고 `.md/QNA_IMPLEMENTATION.md`에 질문한다.
+`.md/Architecture/CoreSystem.md`의 Class Growth Policy를 적용한다.
 
-- 구현 방식이 여러 가지로 나뉘는 경우
-- 기존 아키텍처 문서와 충돌하는 경우
-- Public Blueprint API 삭제/rename 가능성이 있는 경우
-- UCLASS/USTRUCT/UENUM rename 또는 file rename이 필요한 경우
-- Core Redirect 필요 여부가 불명확한 경우
-- Content 에셋 compile/save가 필요한 경우
-- 성능과 구조 사이의 트레이드오프가 큰 경우
+구현 전후에 다음을 확인한다.
 
-질문 형식:
+- header/cpp 물리적 줄 수 변화
+- 추가된 `UPROPERTY`, `UFUNCTION`, delegate와 lifecycle 함수
+- 새 상태와 실행 흐름이 기존 책임에 속하는지
+- Component, UObject, Subsystem, USTRUCT 또는 private helper 분리 가능성
+
+경고선을 넘은 클래스에 새 독립 책임을 추가해야 한다면 임의로 진행하지 않는다. 설계에 분리가 없으면 QnA 또는 아키텍처 단계로 돌려보낸다.
+
+크기를 줄이기 위한 무의미한 wrapper 분리는 피하고 상태와 lifecycle이 함께 움직이는 응집된 기능을 분리한다.
+
+## C++ Widget 구현
+
+`.md/Architecture/UISystem.md`의 Native Widget Policy를 적용한다.
+
+다음이 있는 Widget은 Unreal 작업 전에 native C++ base를 구현한다.
+
+- 런타임 상태와 context
+- delegate bind/unbind
+- `NativeConstruct`/`NativeDestruct` cleanup
+- 입력, drag/drop 판단과 validation
+- 표시 데이터 변환
+- Inventory/Focus/Interaction API 호출
+
+Widget Blueprint에는 hierarchy, layout, style, animation, asset 연결과 표현 이벤트만 남긴다.
+
+- root/slot/row/drag operation/domain component를 책임별로 나눈다.
+- 하나의 C++ root widget에 모든 UI 로직을 몰지 않는다.
+- C++에서 구현해야 할 로직을 `PROMPT_UNREAL.md`의 Blueprint 작업으로 미루지 않는다.
+
+## Blueprint와 Core Redirect
+
+- Blueprint native parent 또는 reflected type rename은 사용자 승인 없이 진행하지 않는다.
+- 참조된 `UFUNCTION`/`UPROPERTY`는 migration 전까지 삭제하지 않는다.
+- reflected rename은 Core Redirect, Editor 재시작, Blueprint compile/save와 post-migration scan을 함께 계획한다.
+- Content 작업이 필요하다는 사실만으로 구현을 중단하지 않고 정확한 Unreal 프롬프트로 인계한다.
+
+## 검증
+
+- 변경 범위에 대해 `git diff --check`와 focused `rg` 검사를 수행한다.
+- 가능한 경우 UE 5.8 `BathhouseSimEditor Win64 Development` UBT 빌드를 수행한다.
+- 설정된 엔진 경로가 없으면 다른 버전을 추측하지 않고 미검증으로 보고한다.
+- Blueprint Compile/Save와 PIE는 `PROMPT_UNREAL.md`의 검증 범위로 명시한다.
+
+## 아키텍처 문서
+
+- 구조·책임·API가 바뀌었을 때만 관련 정본을 갱신한다.
+- 단순 버그 수정이나 내부 구현 변경은 갱신하지 않을 수 있으며 이유를 보고한다.
+- 날짜별 Update나 구현 일지를 정본 문서에 추가하지 않는다.
+
+## 정기 결과물
+
+### `.md/PROMPT_REVIEW.md`
+
+- 요구사항과 수용 기준
+- 변경 파일과 구현 요약
+- 클래스 크기·책임 변화
+- Blueprint/API/Core Redirect 영향
+- 빌드와 정적 검증 결과
+- 코드 리뷰 중점과 미검증 항목
+
+### `.md/PROMPT_UNREAL.md`
+
+- 작업 필요 / 변경 불필요 상태
+- 정확한 에셋 경로와 Parent Class
+- property, component, `BindWidget`, event와 asset 연결 계약
+- layout/style/animation 등 Blueprint 허용 작업
+- Compile/Save/재로드/PIE 절차와 수용 기준
+- Blueprint에서 구현하면 안 되는 C++/domain 로직
+
+Editor 변경이 없어도 `변경 불필요`와 필요한 검증 범위를 명시한다.
+
+`USER_UNREAL.md`는 정기 결과물이 아니다. 실제 인간 작업이 필요한 특수 상황에만 `.md/AGENT_WORKFLOW.md` 규칙에 따라 사용할 수 있다.
+
+## 완료 보고
 
 ```text
-### [질문 항목]
-
-1. 질문 제목
-- 질문 내용
-- 필요한 이유
-- 선택지
-  - 옵션 A: ...
-  - 옵션 B: ...
-  - 옵션 C: ...
-- 권장 옵션:
-```
-
-## 코드 작성 원칙
-
-- 기존 시스템 경계를 따른다.
-- 상태 owner와 입력/표시 router를 분리한다.
-- Actor는 composition root에 가깝게 유지하고, 상태와 반복 가능한 기능은 Component 또는 명확한 owner로 분리한다.
-- 새 기능을 추가할 때는 먼저 상태 owner, 실행 주체, 입력/표시 router, Blueprint/API 계약을 정의한다.
-- 사용자 지시 없이 현재 아키텍처 범위 밖의 도메인 기능을 추가하지 않는다.
-- `Private` helper는 public header로 노출하지 않는다.
-- `#include "Public/..."` 형태를 만들지 않는다.
-- 삭제/rename은 참조 검색과 Blueprint 영향 확인 후 진행한다.
-
-## Blueprint/Core Redirect 원칙
-
-- Blueprint native parent로 쓰이는 class rename은 사용자 승인 없이 진행하지 않는다.
-- Blueprint 참조가 확인된 UFUNCTION/UPROPERTY는 대체 노드 migration 전까지 삭제하지 않는다.
-- UCLASS/USTRUCT/UENUM rename 시 `Config/DefaultEngine.ini` `[CoreRedirects]` 검토가 필요하다.
-- Core Redirect 작업은 Editor 재시작, Blueprint compile/save, post-migration scan까지 검증 범위에 포함한다.
-
-## 문서 업데이트 규칙
-
-구조 변경 시 다음을 갱신한다.
-
-- 전체 시스템 목록, Blueprint 계약, 변경 기록: `.md/0_ARCHITECTURE.md`
-- 시스템 책임/flow/API 변경: 관련 `.md/Architecture/*System.md`
-- Core Redirect 또는 공통 규칙 변경: `.md/Architecture/CoreSystem.md`
-
-단순 버그 수정이나 내부 구현만 바뀐 경우에는 문서 갱신이 필요 없을 수 있다. 이때 최종 보고에 "아키텍처 문서 반영 불필요" 사유를 적는다.
-
-## Unreal 검증
-
-가능한 경우 UBT 빌드를 수행한다.
-
-```powershell
-& "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\DotNET\AutomationTool\UnrealBuildTool.exe" BoosterLabEditor Win64 Development -Project="C:\UnrealProjects\BoosterLab\BoosterLab.uproject" -WaitMutex -NoHotReloadFromIDE
-```
-
-경로가 없으면 임의의 엔진 버전을 사용하지 말고 사용자에게 확인한다.
-
-## 인간 검토 필요 영역
-
-구현 완료 후 아래 항목을 보고한다.
-
-- Blueprint compile/save가 필요한 항목
-- Core Redirect 검증이 필요한 항목
-- 게임플레이 밸런스에 영향을 주는 계산이 추가된 경우
-- UObject lifetime, GC, transient 참조
-- local player 전용 로직
-- Tick 비용이 늘어난 부분
-
-## 보고 형식
-
-```text
-[상태] 작업 중 / 질문 필요 / 완료
-
-[참조 문서]
-- 읽은 아키텍처 문서
-
 [수행 내용]
-- 구현 요약
-
 [영향 파일]
-- 변경 파일
-
+[클래스 성장 검사]
 [검증]
-- 빌드/검색/수동 검증 결과
-
-[아키텍처 문서 반영]
-- 반영 / 불필요
-- 대상 문서
-
-[검토 필요]
-- 사용자 또는 리뷰 에이전트가 확인할 항목
-
-[PROMPT_REVIEW.md]
-- 작성 / 미작성
+[아키텍처 문서]
+[PROMPT_REVIEW.md] 작성
+[PROMPT_UNREAL.md] 작성
 ```

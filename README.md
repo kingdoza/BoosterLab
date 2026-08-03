@@ -1,4 +1,4 @@
-# BoosterLab
+# BathhouseSim
 
 Unreal Engine C++ 기반 범용 1인칭 템플릿 프로젝트입니다.
 

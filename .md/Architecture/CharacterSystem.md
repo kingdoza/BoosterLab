@@ -1,5 +1,9 @@
 # Character System
 
+## Implementation Status
+
+1인칭 이동, sprint, camera, Interaction/Carry 조립과 Interact 입력은 현재 Source에 구현되어 있다.
+
 ## Responsibilities
 
 Character System은 범용 1인칭 조작 템플릿의 플레이어 조작을 담당한다.
@@ -10,18 +14,20 @@ Character System은 범용 1인칭 조작 템플릿의 플레이어 조작을 �
 - Move/Look/Jump 입력 처리
 - Sprint 시작, 종료, toggle 처리
 - sprint 상태와 걷기/달리기 속도 관리
+- player interaction/carry component와 first-person held key anchor 조립
+- InteractAction 입력 라우팅
 
 현재 문서화된 Character 책임 밖의 도메인 gameplay logic은 Character System 책임이 아니다.
 
 ## Source Scope
 
 ```text
-Source/BoosterLab/Public/Character/
+Source/BathhouseSim/Public/Character/
   FirstPersonCharacter.h
   FirstPersonController.h
   FirstPersonMovementComponent.h
 
-Source/BoosterLab/Private/Character/
+Source/BathhouseSim/Private/Character/
   FirstPersonCharacter.cpp
   FirstPersonController.cpp
   FirstPersonMovementComponent.cpp
@@ -39,6 +45,8 @@ Source/BoosterLab/Private/Character/
 - `MoveAction`, `LookAction`, `JumpAction`, `SprintAction`을 Enhanced Input에 바인딩한다.
 - 입력 scale 값(`MoveSpeedScale`, `LookSpeedScale`)을 적용한 뒤 Unreal movement/controller API로 전달한다.
 - `bSprintToggle`에 따라 sprint 입력을 toggle 방식 또는 hold 방식으로 처리한다.
+- `UPlayerInteractionComponent`, `UPlayerCarryComponent`와 camera 하위 `HeldKeyAnchor`를 조립한다.
+- `InteractAction`은 `UPlayerInteractionComponent::TryInteract()`로 전달한다.
 
 ### AFirstPersonController
 
@@ -66,6 +74,7 @@ Source/BoosterLab/Private/Character/
 3. `FirstPersonCamera`를 capsule에 부착하고 control rotation 기반 시점을 구성한다.
 4. `AFirstPersonController::SetupInputComponent`가 `DefaultMappingContext`를 로컬 Enhanced Input subsystem에 등록한다.
 5. `AFirstPersonCharacter::SetupPlayerInputComponent`가 설정된 input action들을 바인딩한다.
+6. Interaction/Carry component에 camera와 held anchor context를 제공한다.
 
 ### Shutdown
 
@@ -95,11 +104,18 @@ Source/BoosterLab/Private/Character/
 3. `bSprintToggle=false`이면 `StartSprinting`을 호출하고, completed 시 `StopSprinting`을 호출한다.
 4. `UFirstPersonMovementComponent`는 tick에서 sprint 유지 조건을 확인한다.
 
+### Interact
+
+1. `InteractAction` started
+2. Character가 `UPlayerInteractionComponent::TryInteract()`를 호출한다.
+3. Interaction component가 focus target을 재조회하고 target API를 실행한다.
+
 ## Dependencies
 
 - Character System -> Engine Character/Pawn/Movement
 - Character System -> `Camera/CameraComponent`
 - Character System -> Camera System
+- Character System -> Interaction System
 - Character System -> Enhanced Input
 - Character System -> InputCore
 
@@ -116,6 +132,8 @@ Blueprint에서 접근 가능한 주요 API:
 - `AFirstPersonCharacter::DoLook`
 - `AFirstPersonCharacter::DoJumpStart`
 - `AFirstPersonCharacter::DoJumpEnd`
+- `AFirstPersonCharacter::GetPlayerInteraction`
+- `AFirstPersonCharacter::GetPlayerCarry`
 - `UFirstPersonMovementComponent::StartSprinting`
 - `UFirstPersonMovementComponent::StopSprinting`
 - `UFirstPersonMovementComponent::SwitchSprinting`
@@ -129,6 +147,7 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - `AFirstPersonCharacter::LookAction`
 - `AFirstPersonCharacter::JumpAction`
 - `AFirstPersonCharacter::SprintAction`
+- `AFirstPersonCharacter::InteractAction`
 - `AFirstPersonCharacter::MoveSpeedScale`
 - `AFirstPersonCharacter::LookSpeedScale`
 - `AFirstPersonCharacter::bSprintToggle`
@@ -138,6 +157,7 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 ## Design Notes
 
 - Character는 입력 라우팅과 pawn 조작만 담당하고, sprint의 실제 상태/속도는 MovementComponent가 소유한다.
+- Character는 component composition과 input routing만 담당하고 focus/key transaction을 직접 소유하지 않는다.
 - Controller는 mapping context 등록/해제 외 책임을 갖지 않는다.
 - Sprint 시작 조건은 전방 가속과 지상 상태를 요구한다.
 - 현재 카메라는 capsule 기준 고정 offset을 사용한다. skeletal mesh socket 기반 카메라나 weapon/hand mesh는 별도 시스템이 생길 때 설계한다.
@@ -151,4 +171,6 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - gamepad/mouse look 축 방향과 scale은 input asset 설정과 함께 플레이 테스트로 확인한다.
 - `bSprintToggle=false` hold 방식에서는 `SprintAction` completed 이벤트가 반드시 발생해야 sprint가 종료된다.
 - Controller 종료/교체 시 `DefaultMappingContext`가 제거되는지 확인한다.
+- InteractAction이 Started 한 번마다 한 번만 실행되는지 확인한다.
+- pawn 종료/교체 시 interaction focus와 held key attachment가 정리되는지 확인한다.
 - Blueprint native parent rename이 필요한 경우 Core Redirect 필요 여부를 먼저 검토한다.

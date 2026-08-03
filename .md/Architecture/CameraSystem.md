@@ -2,10 +2,10 @@
 
 ## Scope
 
-- `Source/BoosterLab/Public/Camera/FirstPersonCameraShakeComponent.h`
-- `Source/BoosterLab/Private/Camera/FirstPersonCameraShakeComponent.cpp`
-- `Source/BoosterLab/Public/Camera/FirstPersonCameraManager.h`
-- `Source/BoosterLab/Private/Camera/FirstPersonCameraManager.cpp`
+- `Source/BathhouseSim/Public/Camera/FirstPersonCameraShakeComponent.h`
+- `Source/BathhouseSim/Private/Camera/FirstPersonCameraShakeComponent.cpp`
+- `Source/BathhouseSim/Public/Camera/FirstPersonCameraManager.h`
+- `Source/BathhouseSim/Private/Camera/FirstPersonCameraManager.cpp`
 
 ## Responsibilities
 

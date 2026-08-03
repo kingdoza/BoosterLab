@@ -1,0 +1,69 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Character.h"
+#include "Customer/BathhouseCustomerTypes.h"
+#include "Interaction/PlayerInteractable.h"
+#include "BathhouseCustomerCharacter.generated.h"
+
+class ABathhouseCounterActor;
+class ABathhouseCustomerCharacter;
+class UCustomerMontagePlaybackComponent;
+class UCustomerRoutineDefinition;
+class UCustomerSessionComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBathhouseCustomerFinished, ABathhouseCustomerCharacter*, Customer, EBathhouseCustomerDepartureReason, Reason);
+
+UCLASS(Blueprintable)
+class BATHHOUSESIM_API ABathhouseCustomerCharacter : public ACharacter, public IPlayerInteractable
+{
+	GENERATED_BODY()
+
+public:
+	ABathhouseCustomerCharacter();
+
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual FPlayerInteractionQuery QueryInteraction(const FPlayerInteractionContext& Context) const override;
+	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
+
+	void InitializeCustomer(UCustomerRoutineDefinition* InRoutineDefinition, ABathhouseCounterActor* InCounter);
+	void NotifyActivityStarted(EBathhouseCustomerActivity Activity);
+	void NotifyActivityFinished(EBathhouseCustomerActivity Activity);
+	void NotifyPresentationState(EBathhouseCustomerPresentationState PresentationState);
+	void NotifyCustomerFinished(EBathhouseCustomerDepartureReason Reason);
+
+	UFUNCTION(BlueprintPure, Category = "Customer")
+	UCustomerSessionComponent* GetCustomerSession() const { return CustomerSession; }
+
+	UFUNCTION(BlueprintPure, Category = "Customer")
+	UCustomerMontagePlaybackComponent* GetCustomerMontagePlayback() const { return CustomerMontagePlayback; }
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Customer|Presentation")
+	void OnActivityStarted(EBathhouseCustomerActivity ActivityType);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Customer|Presentation")
+	void OnActivityFinished(EBathhouseCustomerActivity ActivityType);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Customer|Presentation")
+	void OnCustomerPresentationStateChanged(EBathhouseCustomerPresentationState PresentationState);
+
+	UPROPERTY(BlueprintAssignable, Category = "Customer")
+	FOnBathhouseCustomerFinished OnCustomerFinished;
+
+protected:
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Customer")
+	TObjectPtr<UCustomerRoutineDefinition> RoutineDefinition = nullptr;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Customer")
+	TObjectPtr<ABathhouseCounterActor> Counter = nullptr;
+
+private:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Customer", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCustomerSessionComponent> CustomerSession;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Customer", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCustomerMontagePlaybackComponent> CustomerMontagePlayback;
+
+	bool bFinishBroadcast = false;
+};

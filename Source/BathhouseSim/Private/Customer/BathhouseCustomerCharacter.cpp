@@ -1,0 +1,78 @@
+#include "Customer/BathhouseCustomerCharacter.h"
+
+#include "Customer/BathhouseCustomerAIController.h"
+#include "Customer/CustomerMontagePlaybackComponent.h"
+#include "Customer/CustomerSessionComponent.h"
+#include "Customer/CustomerRoutineDefinition.h"
+#include "Facility/BathhouseCounterActor.h"
+
+ABathhouseCustomerCharacter::ABathhouseCustomerCharacter()
+{
+	PrimaryActorTick.bCanEverTick = false;
+	CustomerSession = CreateDefaultSubobject<UCustomerSessionComponent>(TEXT("CustomerSession"));
+	CustomerMontagePlayback = CreateDefaultSubobject<UCustomerMontagePlaybackComponent>(TEXT("CustomerMontagePlayback"));
+	AIControllerClass = ABathhouseCustomerAIController::StaticClass();
+	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+}
+
+void ABathhouseCustomerCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+	CustomerSession->InitializeSession(RoutineDefinition, Counter);
+	NotifyPresentationState(EBathhouseCustomerPresentationState::Entering);
+}
+
+void ABathhouseCustomerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	OnCustomerFinished.Clear();
+	Super::EndPlay(EndPlayReason);
+}
+
+FPlayerInteractionQuery ABathhouseCustomerCharacter::QueryInteraction(const FPlayerInteractionContext& Context) const
+{
+	return CustomerSession ? CustomerSession->QueryCheckInInteraction(Context) : FPlayerInteractionQuery();
+}
+
+FPlayerInteractionResult ABathhouseCustomerCharacter::ExecuteInteraction(const FPlayerInteractionContext& Context)
+{
+	return CustomerSession
+		? CustomerSession->ExecuteCheckInInteraction(Context)
+		: FPlayerInteractionResult::Failed(NSLOCTEXT("BathhouseCustomer", "MissingSession", "손님 상태를 확인할 수 없습니다."));
+}
+
+void ABathhouseCustomerCharacter::InitializeCustomer(
+	UCustomerRoutineDefinition* InRoutineDefinition,
+	ABathhouseCounterActor* InCounter)
+{
+	RoutineDefinition = InRoutineDefinition;
+	Counter = InCounter;
+	if (CustomerSession)
+	{
+		CustomerSession->InitializeSession(RoutineDefinition, Counter);
+	}
+}
+
+void ABathhouseCustomerCharacter::NotifyActivityStarted(const EBathhouseCustomerActivity Activity)
+{
+	OnActivityStarted(Activity);
+}
+
+void ABathhouseCustomerCharacter::NotifyActivityFinished(const EBathhouseCustomerActivity Activity)
+{
+	OnActivityFinished(Activity);
+}
+
+void ABathhouseCustomerCharacter::NotifyPresentationState(const EBathhouseCustomerPresentationState PresentationState)
+{
+	OnCustomerPresentationStateChanged(PresentationState);
+}
+
+void ABathhouseCustomerCharacter::NotifyCustomerFinished(const EBathhouseCustomerDepartureReason Reason)
+{
+	if (bFinishBroadcast)
+	{
+		return;
+	}
+	bFinishBroadcast = true;
+	OnCustomerFinished.Broadcast(this, Reason);
+}
