@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 facility slot, 번호 시설과 분리된 counter queue 경계를 정의한다.
+이 문서는 현재 구현된 facility slot, 번호 시설과 분리된 counter queue 및 Towel target의 customer navigation 위치 경계를 정의한다.
 
 ## Source Scope
 
@@ -31,8 +31,9 @@ Source/BathhouseSim/Private/Tests/
 - 번호 기반 shoe locker/clothes locker lookup과 유효성 검사
 - check-in/checkout의 독립 FIFO queue와 service 순서
 - checkout key world object를 보관하는 counter return slot
+- clean towel stack과 used towel bin의 customer navigation/reservation 위치 제공
 
-Facility는 customer phase, key actor state, player interaction과 money를 소유하지 않는다.
+Facility는 towel 수량/overflow/machine, customer phase, key actor state, player interaction과 money를 소유하지 않는다.
 
 ## Facility Types
 
@@ -45,18 +46,21 @@ Facility는 customer phase, key actor state, player interaction과 money를 소�
 - `DryingSpot`
 - `TowelBasket`
 - `Exit`
+- `TowelShelf`  # target, 기존 ordinal 보존을 위해 enum 끝에 추가
 
 `ShoeLocker`와 `ClothesLocker`는 `FacilityNumber`가 필수다. 나머지는 `INDEX_NONE`을 사용한다.
+
+기존 reflected `TowelBasket` 값은 rename하지 않고 customer의 used towel return 위치로 유지한다. `TowelShelf`는 clean towel 획득 위치를 위해 enum 끝에 추가한다.
 
 ## `UBathhouseFacilitySlotComponent`
 
 시설 actor 하나에 여러 개를 배치할 수 있는 scene component다.
 
-- component transform은 NPC의 logical `ActionPoint`다.
-- `ApproachOffset`은 component-local 위치 offset으로 approach transform에만 적용한다.
+- component transform은 NPC 발바닥 기준의 logical `ActionPoint`다. capsule center/ActorLocation 높이를 authoring하지 않는다.
+- `ApproachOffset`은 component-local 위치 offset으로 발바닥 기준 approach transform에만 적용한다.
 - `FacingRotation`은 action/approach transform에 정확히 한 번 합성된다.
 - Bath slot의 `ApproachPoint`는 NavMesh 위의 보행 도착점이고 `ActionPoint`는 NavMesh 밖일 수 있는 실제 입욕 위치다.
-- Facility는 두 transform만 제공하며 customer 이동, snap과 movement mode를 직접 변경하지 않는다.
+- Facility는 발바닥 기준의 두 transform만 제공하며 capsule 높이를 더하지 않는다. customer 이동, capsule-center 변환, snap과 movement mode는 Customer Session 책임이다.
 - state는 `Available`, `Reserved`, `Occupied`다.
 - reservation/occupant는 generic `AActor` identity로 저장한다.
 - `TryReserve`, `BeginUse`, `EndUse`, `Release`는 같은 actor만 허용한다.
@@ -141,16 +145,25 @@ Check-in timeout은 queue 진입이 아니라 front customer가 check-in service
 
 Counter는 customer routine phase를 직접 변경하지 않는다.
 
+## Towel Facility Boundary
+
+- `ACleanTowelStackActor`는 `ABathhouseFacilityActor`를 확장하고 `TowelShelf` slot을 제공한다.
+- `AUsedTowelBinActor`는 기존 `TowelBasket` slot을 제공한다.
+- Facility slot은 customer 이동/reservation만 소유한다.
+- clean/used count, bin capacity, overflow world towel과 player E/F transfer는 Towel System이 소유한다.
+- washer, dryer와 player-carried basket은 customer navigation facility로 등록하지 않는다.
+
 ## Blueprint/API Contracts
 
 Editor authoring 값:
 
 - facility type/number와 selection weight
 - 시설별 slot component transform과 facing
-- Bath slot별 NavMesh 위 `ApproachOffset`과 NavMesh 밖일 수 있는 정확한 action transform
+- Bath slot별 발바닥 기준의 NavMesh 위 `ApproachOffset`과 NavMesh 밖일 수 있는 정확한 action transform
 - check-in/checkout service point
 - 두 lane의 `FComponentReference` queue point 목록. 배열 순서가 queue 순서다.
 - checkout `FComponentReference` key return slot 목록. 배열 순서가 return slot 순서다.
+- clean towel stack과 used towel bin의 customer approach/action slot
 
 Blueprint 조회·표현 API:
 
@@ -162,6 +175,7 @@ Blueprint 조회·표현 API:
 
 - Facility -> Engine Actor/SceneComponent/WorldSubsystem
 - Customer -> Facility
+- Towel -> Facility actor/slot contract
 - Interaction -> Facility의 numbered facility validation
 - Facility는 Customer, Interaction과 UI concrete class에 의존하지 않는다.
 
@@ -177,3 +191,5 @@ Blueprint 조회·표현 API:
 - 이동 실패, timeout, StateTree 중단과 actor destruction에서 slot/queue가 정리되는지 확인한다.
 - Bath approach point만 NavMesh 위에 있고 action point가 NavMesh 밖이어도 입·퇴탕과 다음 MoveTo가 성공하는지 확인한다.
 - BathStay 만료와 technical abort가 action point에서 slot을 먼저 풀지 않고 approach point 복귀를 시도하는지 확인한다.
+- `TowelShelf` 추가가 기존 reflected enum ordinal을 바꾸지 않고 `TowelBasket` asset을 유지하는지 확인한다.
+- towel actor의 slot reservation과 towel inventory mutation이 서로 다른 owner에 남는지 확인한다.

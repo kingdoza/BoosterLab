@@ -42,9 +42,20 @@ Create customer Montage assets under `/Game/Bathhouse/Animations/Customer/`. Reu
 
 - Open `BP_Bath` and every placed Bath instance used by `DefaultMap`.
 - For each `UBathhouseFacilitySlotComponent`:
-  - component transform plus `FacingRotation` is the exact in-bath `ActionPoint`.
-  - `ApproachOffset` produces the NavMesh-reachable `ApproachPoint` outside the bath.
-  - leave enough blocking-collision clearance for the customer capsule at the action transform.
+  - component transform plus `FacingRotation` is the exact in-bath character-feet `ActionPoint`.
+  - `ApproachOffset` produces the character-feet `ApproachPoint` on reachable NavMesh outside the bath.
+  - do not author either point at capsule-center height. Native Session code adds the customer's scaled capsule half height when it resolves the actual actor transform.
+  - leave enough blocking-collision clearance for the full customer capsule at the resolved action transform.
+- For the current DefaultMap Bath blockout, use these relative values after resetting any placed-instance override:
+
+| Slot | action-feet relative location | `ApproachOffset` | `FacingRotation` |
+|---|---:|---:|---:|
+| A | `(0, -60, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
+| B | `(0, 0, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
+| C | `(0, 60, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
+
+- With the placed Bath actor at `(1750, 0, 0)`, the authored action-feet world Z is `74.5` and approach-feet world Z is `2.0`.
+- With the current capsule half height `88`, native runtime actor-center Z becomes `162.5` at action and `90.0` at approach.
 - Do not extend NavMesh into the bath and do not project the action point onto navigation.
 - Visualize/check both transforms, then save `BP_Bath` and `DefaultMap`.
 
@@ -125,7 +136,7 @@ Restart the Editor, reload all listed assets and compile `ST_CustomerRoutine` ag
 
 ## PIE Verification
 
-1. Confirm a customer walks only to the NavMesh approach point, stops, then snaps exactly to the action transform.
+1. Confirm a customer walks with its feet on the NavMesh approach point, stops, then snaps with its feet exactly on the action point.
 2. Confirm movement remains disabled while inside the Bath and is restored at approach before the next `Move To`.
 3. Block an action point with collision; snap must fail without moving the customer and must log the diagnostic.
 4. Let Bath dwell finish naturally; the selected montage stays unchanged, stops at duration, activity finishes, customer returns to approach and only then releases the slot.

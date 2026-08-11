@@ -26,22 +26,24 @@
 - 실제 고객 AnimBP는 `/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed`다.
 - 고객 Skeletal Mesh는 `/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple`, Skeleton은 `/Game/Characters/Mannequins/Meshes/SK_Mannequin`이다.
 
-### Bath Action/Approach authoring
+### Bath Action/Approach 재설정 필요
 
-- `BP_Bath`와 `DefaultMap`의 `Bathhouse_Bath` 배치 인스턴스에 동일한 값을 저장했다.
+- 네이티브 코드는 이제 `FacilitySlot`의 Action/Approach transform을 캡슐 중심이 아니라 **캐릭터 발바닥 위치**로 해석한다.
+- 이 코드 변경에서는 기존 dirty `BP_Bath`/`DefaultMap` 에셋을 수정하거나 저장하지 않았다. 새 DLL로 에디터를 완전히 재시작한 뒤 아래 값을 Blueprint 기본값과 `Bathhouse_Bath` 배치 인스턴스에 다시 적용해야 한다.
 - `FacilityVisual` 상대 스케일은 `(1.5, 1.8, 0.45)`다.
 - 고객 Capsule은 Radius 25, Half Height 88이다.
-- Bath blockout 상단은 World Z 72.5이며 Action Capsule 바닥을 그보다 2cm 위에 두었다.
-- 슬롯 값은 다음과 같다.
+- Bath blockout 상단은 World Z 72.5이며 Action 발바닥을 그보다 2cm 위인 World Z 74.5에 둔다.
+- 적용할 슬롯 값은 다음과 같다. `162.5`는 런타임 캡슐 중심 높이이므로 슬롯 위치에 입력하지 않는다.
 
-| Slot | Action 상대 위치 | ApproachOffset | FacingRotation |
+| Slot | Action 발바닥 상대 위치 | ApproachOffset | FacingRotation |
 |---|---:|---:|---:|
-| A | `(0, -60, 162.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
-| B | `(0, 0, 162.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
-| C | `(0, 60, 162.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
+| A | `(0, -60, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
+| B | `(0, 0, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
+| C | `(0, 60, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
 
-- 배치 액터가 `(1750, 0, 0)`이므로 Action World 위치는 `(1750, -60/0/60, 162.5)`, Approach World 위치는 `(1900, -60/0/60, 90)`이다.
-- Action은 Bath blockout footprint 위이며 NavMesh 목표가 아니다. Approach는 Bath 바깥 지면의 고객 중심 높이다.
+- 배치 액터가 `(1750, 0, 0)`이므로 발바닥 기준 Action World 위치는 `(1750, -60/0/60, 74.5)`, Approach World 위치는 `(1900, -60/0/60, 2)`다.
+- 네이티브 코드가 scaled capsule half height 88을 한 번 더해 실제 ActorLocation을 Action Z 162.5, Approach Z 90으로 만든다.
+- Action은 Bath blockout footprint 위이며 NavMesh 목표가 아니다. Approach는 Bath 바깥 지면의 발바닥/NavMesh 위치다.
 - 세 Action 사이 거리는 60cm로, 지름 50cm인 고객 Capsule끼리 겹치지 않는다.
 
 ### 생성한 Montage

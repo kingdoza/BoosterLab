@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-03(KST) Source 재대조와 Bath snap/customer montage 확정 설계 기준
-- 상태: Bath 접근/사용 지점 분리와 customer montage Task를 포함한 customer loop C++ 구현 완료, Unreal asset 연결 대기
+- 기준일: 2026-08-11(KST) 청소·수건 순환 확정 설계 기준
+- 상태: 기존 customer loop C++ 구현과 key/counter/UI 계약 유지, Cleaning/Towel C++ 구현 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -21,6 +21,9 @@
   - Economy
   - Customer
   - UI
+- 확정 구현 target:
+  - Cleaning
+  - Towel
 - `Content`는 Blueprint 참조 검증 범위로만 다룬다. C++ 시스템 책임의 정본은 Source 하위 문서에 둔다.
 - `Config/DefaultEngine.ini`는 GameMode/Pawn/Controller 연결 또는 Core Redirect가 필요한 rename 호환 경로로만 문서화한다.
 
@@ -28,11 +31,13 @@
 
 - [CharacterSystem.md](Architecture/CharacterSystem.md): 1인칭 입력, 컨트롤러 입력 매핑, 이동, 점프, sprint, 캐릭터 조립
 - [CameraSystem.md](Architecture/CameraSystem.md): 이동/착지 기반 카메라 셰이크, camera manager 기반 pitch limit
-- [InteractionSystem.md](Architecture/InteractionSystem.md): camera trace, primary interaction, 단일 physical key carry
+- [InteractionSystem.md](Architecture/InteractionSystem.md): camera trace, primary/secondary intent와 단일 physical carry
 - [FacilitySystem.md](Architecture/FacilitySystem.md): 다중 facility slot과 분리된 check-in/checkout queue
 - [EconomySystem.md](Architecture/EconomySystem.md): PlayerState wallet과 일회성 cash 획득
 - [CustomerSystem.md](Architecture/CustomerSystem.md): UE 5.8 StateTree customer routine, session과 cleanup
 - [UISystem.md](Architecture/UISystem.md): native Widget/Widget Blueprint 경계와 interaction prompt target
+- [CleaningSystem.md](Architecture/CleaningSystem.md): water stain spawn, wet mop hold cleaning과 presentation
+- [TowelSystem.md](Architecture/TowelSystem.md): towel circulation, atomic transfer, overflow와 processing machine
 - [CoreSystem.md](Architecture/CoreSystem.md): 공통 문서 규칙, 모듈 경계, Source/Content/Config 경계, Core Redirect
 
 ## Source 구조
@@ -47,6 +52,8 @@ Source/BathhouseSim/
     Economy/
     Customer/
     UI/
+    Cleaning/  # target
+    Towel/     # target
   Private/
     Character/
     Camera/
@@ -80,14 +87,18 @@ Source/BathhouseSim/
 - Camera는 player camera manager를 통해 상하 시야각 제한 기본값을 제공하고, Blueprint 파생 class에서 값을 조정할 수 있게 한다.
 - Camera는 비로컬 플레이어에서 Tick interval 조정과 shake 중단으로 비용을 줄인다.
 - Character는 Interact 입력을 Interaction에 전달하고 carry/held key component를 조립한다.
-- Interaction은 camera trace와 physical key 하나의 held state를 소유한다.
+- Interaction은 camera trace와 key/wet mop/towel basket 중 physical actor 하나의 held state를 소유한다.
 - Facility는 다중 use slot과 check-in/checkout 독립 FIFO queue를 소유한다.
 - Economy는 PlayerState wallet을 소유하고 cash claim을 한 번만 반영한다.
 - Customer StateTree는 routine을 조율하고 session/queue/facility/key/wallet API에 실행을 위임한다.
 - Customer bath stay는 pre-shower 완료부터 고정 60초이며 그동안 available bath를 random 이동한다.
-- Bath 사용은 NavMesh 위 `ApproachPoint`까지 이동한 뒤 `ActionPoint`로 snap하고, 퇴탕 시 `ApproachPoint`로 복귀한 뒤 navigation을 재개한다.
+- Bath의 `ApproachPoint`와 `ActionPoint`는 모두 캐릭터 발바닥 transform으로 authoring하며, Customer Session이 scaled capsule half height를 한 번 더해 실제 actor/capsule-center transform으로 변환한다. 고객은 NavMesh 위 `ApproachPoint`까지 이동한 뒤 `ActionPoint`로 snap하고, 퇴탕 시 `ApproachPoint`로 복귀한 뒤 navigation을 재개한다.
 - Customer 행동 montage는 native StateTree Task가 유효 후보 중 하나를 EnterState에서 선택하며 one-shot 종료 또는 선택된 한 montage의 duration loop를 완료 기준으로 사용한다.
 - UI는 Interaction query를 표시하고 domain 상태를 직접 판단하거나 변경하지 않는다.
+- Cleaning은 zone 기반 water stain spawn과 wet mop hold-cleaning state를 소유한다.
+- Towel은 homogeneous count, atomic transfer, used-bin overflow와 washer/dryer state를 소유한다.
+- 사용 수건통 내부는 container 단위 E/F interaction이고, overflow world towel만 개별 E interaction이다.
+- Customer는 clean towel token과 satisfaction을 session에 보관하고, used bin full이면 floor overflow로 반납한다.
 - Core는 런타임 gameplay 상태를 소유하지 않고 모듈 의존성, Source 경계, Content/Config 정책, Core Redirect 기준을 문서화한다.
 
 ## 주요 의존 방향
@@ -106,6 +117,10 @@ Source/BathhouseSim/
 - Customer -> Economy
 - Customer -> UE GameplayStateTree/AI/Navigation
 - UI -> Interaction
+- Cleaning -> Interaction
+- Towel -> Interaction
+- Towel -> Facility
+- Customer -> Towel
 - Core -> Engine module boundary
 
 의존 방향은 Unreal 컴포넌트 조합을 반영한다. 새 기능을 추가할 때는 "상태 오너"와 "입력/표시 라우터"를 먼저 구분한다.
@@ -128,7 +143,9 @@ Source/BathhouseSim/
 - UCLASS/USTRUCT/UENUM rename 또는 삭제는 Core Redirect, Editor 재시작, Blueprint compile/save, post-migration scan까지 한 세트로 계획한다.
 - 새 시스템, 새 의존 방향, Blueprint/API 계약 변경은 이 문서와 관련 `.md/Architecture/*System.md`를 함께 갱신한다.
 - Content asset 수정이나 resave가 필요한 변경은 별도 사용자 지시와 Editor 검증 계획 없이는 진행하지 않는다.
-- Player carry는 inventory/hotbar가 아닌 physical key actor 하나만 허용하고 cash는 carry하지 않는다.
+- Player carry는 inventory/hotbar가 아닌 key/wet mop/towel basket 중 physical actor 하나만 허용한다. key의 hook/customer transaction과 cash 비소지 계약은 유지한다.
+- E는 primary, F는 secondary, G는 droppable equipment release intent다. Character는 intent만 routing하고 domain mutation은 상태 owner가 수행한다.
+- 모든 towel endpoint 이동은 source 감소와 destination 증가를 단일 native transaction으로 commit한다.
 - Customer routine의 gameplay 상태 변경은 native C++ API를 통해 수행하고 StateTree/Blueprint asset에 domain mutation을 두지 않는다.
 
 ## Implementation Boundary
@@ -136,3 +153,4 @@ Source/BathhouseSim/
 - 현재 Source에는 Core, Character, Camera, Interaction, Facility, Economy, Customer와 UI native class가 존재한다.
 - `ST_CustomerRoutine`, Data Asset, Blueprint facility/key/customer/cash/UI와 Level 배치는 C++ 코드 리뷰 승인 후 Unreal 단계 target이다.
 - 현재 Source는 customer-owned montage playback component, Bath action/approach snap과 두 native montage StateTree Task까지 구현한다. AnimNotify, Motion Warping, 신발·의상 전환은 포함하지 않는다.
+- Cleaning/Towel Source, secondary/drop input, prompt 확장과 customer towel StateTree 연결은 다음 구현 target이다.

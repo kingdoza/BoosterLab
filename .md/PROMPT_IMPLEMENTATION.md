@@ -1,169 +1,170 @@
-# Implementation Prompt — Bath Approach Snap And Customer Montage Tasks
+# Implementation Prompt — Cleaning And Towel Circulation
 
 ## 목적
 
-기존 customer gameplay loop에 다음 두 변경만 native C++로 구현한다.
+기존 player primary interaction, physical key transaction, customer StateTree, facility slot과 native interaction prompt 계약을 보존하면서 다음 target을 native C++로 구현한다.
 
-1. Bath slot의 NavMesh 위 `ApproachPoint`까지 이동한 뒤 NavMesh 밖일 수 있는 `ActionPoint`로 snap하고, 퇴탕 전에 approach로 복귀한다.
-2. 유효 후보 중 하나를 EnterState에서 선택하는 one-shot과 duration-loop customer montage StateTree Task를 추가한다.
-
-신발·의상 mesh, visibility, skin weight, AnimNotify와 appearance state는 이번 작업에서 제외한다.
+1. E hold wet-mop water-stain cleaning과 zone 기반 random spawn
+2. key/wet mop/towel basket 중 정확히 하나인 physical carry와 G equipment throw
+3. E one/F max-possible towel transfer, washer/dryer와 clean-used-wet circulation
+4. used bin full 시 주변 floor individual used towel overflow
+5. customer clean towel token, shortage fallback과 satisfaction
+6. primary/secondary/failure/hold progress native interaction prompt
 
 기준 문서:
 
 - `.md/AGENT_WORKFLOW.md`
 - `.md/AGENT_IMPLEMENTATION.md`
 - `.md/0_ARCHITECTURE.md`
-- `.md/Architecture/CoreSystem.md`
+- `.md/Architecture/InteractionSystem.md`
+- `.md/Architecture/CleaningSystem.md`
+- `.md/Architecture/TowelSystem.md`
 - `.md/Architecture/FacilitySystem.md`
 - `.md/Architecture/CustomerSystem.md`
+- `.md/Architecture/CharacterSystem.md`
+- `.md/Architecture/UISystem.md`
 
-이 파일은 기존 interaction/counter 구현 프롬프트를 전부 대체한다.
+이 파일은 이전 Bath montage/snap 구현 프롬프트를 전부 대체한다.
 
 ## 수용 기준
 
-- Bath action point가 NavMesh 밖이어도 customer가 approach까지 보행하고 정확한 action transform으로 snap한다.
-- 정상 dwell, `BathStayExpired`, StateTree interruption과 technical abort가 모두 approach 복귀와 movement 복구를 slot release보다 먼저 시도한다.
-- 다음 Bath 또는 main shower `MoveTo`는 NavMesh 위 approach 위치에서 시작한다.
-- 두 montage Task 모두 null 후보를 제외한 유효 후보가 0개면 실패, 1개면 그 하나, 여러 개면 균등 random 하나를 선택한다.
-- 선택은 EnterState에서 한 번만 하며 loop Task는 duration 동안 같은 montage만 반복한다.
-- one-shot은 실제 montage 정상 종료에 성공하고 interruption에는 실패한다.
-- montage stop/exit는 playback token을 확인해 자신이 시작한 montage만 정리한다.
-- 기존 reflected Task/property/component 이름을 rename 또는 delete하지 않고 timer-only activity 경로를 유지한다.
-- 신발·의상 관련 Source와 Content를 추가하거나 변경하지 않는다.
+- E는 기존 instant primary를 한 번 실행하고 water stain에서는 누르는 동안만 progress한다.
+- F는 target secondary intent이며 towel destination remaining capacity까지만 이동한다.
+- G는 mop/basket만 camera forward로 짧게 throw하고 key는 기존 hook-only 반환을 유지한다.
+- key/mop/basket 중 둘 이상을 동시에 들거나 자동 swap하지 않는다.
+- water stain은 valid authored floor zone에만 생성되고 기존 stain/Pawn과 겹치지 않는다.
+- 모든 towel 이동은 source 감소와 destination 증가를 한 native transaction으로 commit하며 실패 시 양쪽을 유지한다.
+- used bin 내부는 container 단위 E/F, floor overflow towel은 individual E-only interaction이다.
+- machine은 Waiting/Processing/Complete를 가지며 별도 control interaction으로 시작한다.
+- clean towel shortage는 bounded wait 후 towel 없이 진행하고 satisfaction을 한 번 감소시킨다.
+- used bin full은 customer를 막지 않고 individual floor towel 또는 PendingSpill로 token을 보존한다.
+- native prompt가 primary/secondary action, 각각의 failure와 hold progress를 직접 bound widget에 적용한다.
+- Source/Config/Content의 기존 reflected 이름을 불필요하게 rename/delete하지 않는다.
 
-## 책임 변화와 신규 타입
+## 책임 변화와 분리
 
-`UCustomerSessionComponent`는 기존 facility runtime owner 책임을 확장해 현재 Bath snap 여부, 예약 시점 approach/action transform과 movement 복구를 소유한다. 별도 Component로 나누면 reservation과 cleanup 순서를 분산시키므로 Session에 유지한다.
+- `AFirstPersonCharacter`: E/F/G input intent routing만 추가한다.
+- `UPlayerInteractionComponent`: intent dispatch, active hold lifecycle와 attempt result를 소유한다. Cleaning/Towel concrete type을 판별하지 않는다.
+- `UPlayerCarryComponent`: one generic held actor를 소유하되 기존 key API/delegate를 호환 유지한다.
+- Cleaning 폴더: stain registry/spawn, mop과 stain cleaning state를 소유한다.
+- Towel 폴더: inventory, atomic transfer, machine, container/world towel와 recovery ledger를 소유한다.
+- `UCustomerSessionComponent`: customer-held towel handle과 satisfaction만 소유한다. endpoint count를 직접 변경하지 않는다.
+- Facility는 TowelShelf/기존 TowelBasket 이동 slot만 소유한다.
+- UI는 Interaction presentation data만 소비한다.
 
-montage delegate, AnimInstance와 playback token은 session domain state와 독립된 lifecycle이다. `ABathhouseCustomerCharacter`에 새 `UCustomerMontagePlaybackComponent` default subobject를 조립하고 재생 책임을 분리한다.
-
-StateTree는 순서와 Task parameter/binding을 소유한다. native Task는 session transaction과 montage playback API만 호출하며 Blueprint graph에 domain mutation을 추가하지 않는다.
-
-## 구현 파일
+## Target Files
 
 신규:
 
-- `Source/BathhouseSim/Public/Customer/CustomerMontagePlaybackComponent.h`
-- `Source/BathhouseSim/Private/Customer/CustomerMontagePlaybackComponent.cpp`
+- `Source/BathhouseSim/Public|Private/Cleaning/*`
+- `Source/BathhouseSim/Public|Private/Towel/*`
+- `Source/BathhouseSim/Public/Interaction/PhysicalCarryable.h`
+- 필요한 focused native automation test 파일
 
 수정:
 
-- `Source/BathhouseSim/Public/Customer/BathhouseCustomerTypes.h`
-- `Source/BathhouseSim/Public/Customer/CustomerSessionComponent.h`
-- `Source/BathhouseSim/Private/Customer/CustomerSessionComponent.cpp`
-- `Source/BathhouseSim/Public/Customer/BathhouseCustomerCharacter.h`
-- `Source/BathhouseSim/Private/Customer/BathhouseCustomerCharacter.cpp`
-- `Source/BathhouseSim/Public/Customer/StateTree/CustomerStateTreeTasks.h`
-- `Source/BathhouseSim/Private/Customer/StateTree/CustomerStateTreeTasks.cpp`
-- 필요한 focused native automation test
+- Character `FirstPersonCharacter.h/.cpp`
+- Interaction types/interface/component/carry/key 관련 파일
+- Facility types
+- Customer types/routine definition/session/StateTree Task·Condition 관련 파일
+- UI `InteractionPromptWidget.h/.cpp`
+- `BathhouseSim.Build.cs`는 실제 새 module dependency가 필요한 경우에만 수정
 
-실제 구현 뒤 갱신할 정본:
+Content, Config와 `.uproject`는 구현 단계에서 수정하지 않는다.
 
-- `.md/0_ARCHITECTURE.md`
-- `.md/Architecture/FacilitySystem.md`
-- `.md/Architecture/CustomerSystem.md`
+## 1. Input And Interaction Intent
 
-정기 결과물:
+- 기존 `InteractAction`/`TryInteract()`와 primary query fields를 유지한다.
+- `SecondaryInteractAction`, `DropCarryAction` reflected property를 Character에 추가한다.
+- E Started/Completed/Canceled를 primary begin/end에 bind한다.
+- F Started는 secondary attempt 한 번, G Started는 equipment release attempt 한 번이다.
+- primary query에 default `Instant`/optional `Hold` mode를 추가하고 secondary 표시/가능/action/failure fields를 추가한다.
+- 기존 interactable은 변경 없이 instant primary로 작동하게 optional virtual default를 제공한다.
+- hold session은 target identity, same focus, input held, query/carry validity를 Tick마다 검사하고 invalidation에서 정확히 한 번 cancel한다.
+- 모든 attempt는 최신 query refresh 뒤 intent가 포함된 result를 정확히 한 번 방송한다.
 
-- `.md/PROMPT_REVIEW.md`
-- `.md/PROMPT_UNREAL.md`
+## 2. Generic Single Carry
 
-`Content/`, `Config/`, `.uproject`와 `BathhouseSim.Build.cs`는 수정하지 않는다. `Engine` 의존성으로 Animation/AnimInstance API를 사용하며 private GameplayInteractions montage Task를 include하거나 복제하지 않는다.
+- carry authoritative field를 generic held actor 하나로 바꾸고 `IsHandEmpty`, `GetHeldKey`, key commit과 `OnHeldKeyChanged`를 유지한다.
+- `IPhysicalCarryable`은 pickup presentation, free-drop 허용, throw parameter와 recovery를 제공한다.
+- existing `HeldKeyAnchor` property/default-subobject 이름은 rename하지 않고 공용 anchor로 사용한다.
+- key state/owner transition은 기존 `ABathhouseKeyActor` API만 사용하며 G를 거부한다.
+- mop/basket pickup은 empty-hand revalidation 뒤 attach/collision-off하고 G는 detach/collision-on/physics impulse를 적용한다.
+- carrier/actor EndPlay와 falling-out-of-world cleanup을 idempotent하게 구현한다.
 
-## 1. Bath Approach/Action Snap
+## 3. Cleaning
 
-- `UBathhouseFacilitySlotComponent`의 기존 component transform을 action point, `ApproachOffset` 결과를 approach point로 유지한다.
-- slot reflected property를 rename하거나 새 이동 상태를 Facility에 추가하지 않는다.
-- facility 예약 성공 시 현재 slot의 approach/action transform을 Session에 캐시한다.
-- Session에 `bSnappedToFacilityActionPoint`와 snap/복구 API를 추가한다.
-- action 진입은 AIController 이동 취소, CharacterMovement velocity 정지, 기존 movement mode 보관, movement 비활성화, action 위치/회전 적용 순서다.
-- approach 복귀는 cached approach 위치/회전 적용 후 보관한 movement mode를 복원하되 walking customer의 기본 fallback은 `MOVE_Walking`이다.
-- snap은 capsule이 blocking geometry와 겹치는지 검증하고 실패 시 위치를 변경하지 않은 채 false와 진단 로그를 반환한다.
-- 일반 facility는 기존 이동과 activity 동작을 유지하며 새 snap을 자동 적용하지 않는다.
-- `ReleaseCurrentFacility`, `AbortActivity`, `TechnicalAbort`, EndPlay cleanup은 snap 상태면 approach 복귀를 먼저 시도한 뒤 slot을 release한다.
-- 정상 경로에는 명시적 snap-out Task를 사용하고 cleanup의 복귀는 누락·중단에 대한 fallback으로 둔다.
+- `UCleaningWorldSubsystem`은 zone/stain weak registry만 소유한다.
+- `ACleaningDirectorActor`는 interval, total limit, bounded placement attempts와 stain class를 authoring한다.
+- `AStainSpawnZoneActor`는 Box bounds, kind/weight/per-zone limit, floor trace/tag/slope와 spacing/Pawn clearance를 authoring한다.
+- random candidate는 valid floor, zone membership, stain spacing과 Pawn overlap을 모두 통과해야 spawn한다.
+- `AWetMopActor`는 carryable pickup/G drop을 구현한다.
+- `AWaterStainActor`는 Idle/Cleaning/Removed, cleaner identity, removal duration/progress와 terminal guard를 소유한다.
+- E hold release/focus loss/mop loss/EndPlay에서 progress를 0으로 cancel한다.
+- Blueprint events는 start/progress/cancel/complete와 held presentation만 제공하고 mutation을 허용하지 않는다.
 
-`ECustomerFacilitySnapTarget`은 `ActionPoint`, `ApproachPoint` 두 값만 가진다. `FCustomerFacilitySnapTask`는 Session context와 Target parameter를 받고 EnterState에서 즉시 성공/실패를 반환한다.
+## 4. Towel Inventory And Transfer
 
-## 2. Montage Playback Component
+- `ETowelState=None/Used/Wet/Clean`, snapshot state/count/capacity/revision 불변식을 구현한다.
+- `UTowelInventoryComponent`에 public count setter를 만들지 않는다.
+- `UTowelTransferSubsystem::TryTransfer`가 validity/revision/state/capacity/machine gate를 모두 검증한다.
+- E requested count 1, F requested count max; actual은 source/destination/request minimum이다.
+- 양쪽 internal mutation과 revision을 commit한 뒤에만 delegate를 방송한다.
+- mixed state/full/invalid/processing/reentry 실패는 양쪽 snapshot을 유지한다.
+- transaction result에 moved count, failure와 committed revisions를 담는다.
 
-- `UCustomerMontagePlaybackComponent`는 tick하지 않는 native ActorComponent다.
-- Character constructor에서 `CustomerMontagePlayback` 이름의 private default subobject로 생성한다.
-- property는 `VisibleAnywhere`, `BlueprintReadOnly`, `AllowPrivateAccess`를 사용하고 public getter를 제공한다.
-- owner `USkeletalMeshComponent`의 AnimInstance를 runtime에 조회하며 asset을 소유하지 않는다.
-- monotonic playback token, 현재 montage와 `Playing/Succeeded/Interrupted` 결과를 저장한다.
-- `Montage_Play` 반환값이 0 이하이거나 AnimInstance/montage가 없으면 시작에 실패한다.
-- `FOnMontageEnded`의 `bInterrupted`로 정상 종료와 중단을 구분한다. montage 길이 타이머로 one-shot 완료를 추정하지 않는다.
-- 새 playback이 기존 것을 대체하면 기존 token은 interrupted로 끝난다.
-- stop/query는 token 일치 여부를 검사해 이전 Task가 새 montage를 중단하지 못하게 한다.
-- component EndPlay와 owner 종료에서 delegate와 현재 playback을 안전하게 정리한다.
+## 5. Towel Actors And Machines
 
-## 3. Montage StateTree Tasks
+- `ATowelBasketActor`: capacity/homogeneous inventory, carryable/G throw, EndPlay contents recovery.
+- `ACleanTowelStackActor`: Clean-only inventory, player basket E/F deposit와 customer one-token acquire, TowelShelf facility.
+- `AUsedTowelBinActor`: Used-only inventory, customer return, bin-to-basket E/F, 기존 TowelBasket facility.
+- bin 내부 visible towel은 presentation-only이며 interaction collision을 갖지 않는다.
+- `AWorldUsedTowelActor`: one Used token, basket-compatible E-only claim, consumed/recovery guard.
+- bin full customer return은 valid random floor staged spawn 후 handle-to-actor commit한다. 실패하면 PendingSpill ledger로 commit하고 retry한다.
+- washer는 Used->Wet, dryer는 Wet->Clean이다.
+- machine transfer port와 separate primary control component를 구분한다.
+- Processing 중 mutation을 막고 timer 완료에서 count 보존/state conversion/Complete를 한 번 commit한다.
+- Complete output은 empty 또는 same-state non-full basket에만 이동하며 empty가 되면 Waiting/None으로 복귀한다.
 
-두 Task의 instance data는 customer context, `TArray<TObjectPtr<UAnimMontage>> MontageCandidates`, play rate, section/ blend 값과 선택된 montage/token runtime 값을 분리한다.
+## 6. Customer Integration
 
-공통 후보 규칙:
+- `EBathhouseFacilityType::TowelShelf`를 enum 끝에 추가하고 기존 ordinal/`TowelBasket`을 유지한다.
+- `FTowelUseHandle`은 token, original stack, used flag와 terminal cleanup guard를 가진다.
+- undress 뒤 TowelShelf에서 acquire; shortage면 authorable limit 동안 event wait 후 towel-less branch로 진행한다.
+- `UCustomerRoutineDefinition`에 wait limit과 satisfaction penalty를 추가한다.
+- `UCustomerSessionComponent`에 satisfaction getter/change event와 handle transaction API를 추가한다.
+- towel handle이 있으면 Drying에서 Used로 mark하고 ReturnTowel에서 bin/overflow/PendingSpill로 commit한다.
+- handle이 없으면 towel-dependent use/return을 건너뛴다.
+- normal, StateTree interruption, TechnicalAbort와 EndPlay cleanup이 token stage에 따라 clean return 또는 used recovery를 한 번 수행한다.
 
-- null을 제외한 유효 후보 배열을 만든다.
-- 0개는 오류 로그와 `Failed`다.
-- 1개는 random API를 호출하지 않고 index 0을 사용한다.
-- 2개 이상은 편향 없는 균등 random으로 하나를 선택한다.
-- 선택 결과는 instance data에 저장하고 Tick/reselect 도중 다시 선택하지 않는다.
+## 7. Prompt And Blueprint Boundary
 
-`FPlayCustomerMontageOnceTask` (`DisplayName="Play Customer Montage Once"`):
+- 기존 `ActionNameText`, `FailureReasonText`와 `OnInteractionPromptChanged` signature를 primary compatibility로 유지한다.
+- `SecondaryActionNameText`, `SecondaryFailureReasonText`, `InteractionProgressBar` BindWidget을 추가한다.
+- native widget이 E/F row visibility/enabled/text, intent별 transient failure와 hold percent를 직접 적용한다.
+- secondary/progress용 새 optional Blueprint presentation hook을 만들되 정확성이 Event Graph에 의존하지 않게 한다.
+- bulk towel presentation event는 previous/new state/count, capacity, revision, transaction id를 제공한다.
+- Blueprint count animation은 최신 authoritative snapshot에 수렴하며 count를 직접 변경하지 않는다.
 
-- EnterState에서 후보 하나를 선택하고 재생해 `Running`이 된다.
-- playback token 결과가 `Succeeded`면 Task 성공, `Interrupted`/invalid면 실패한다.
-- ExitState에서 아직 자신이 소유한 playback만 configured blend-out으로 중단한다.
+## Tests And Verification
 
-`FPlaySelectedMontageLoopForDurationTask` (`DisplayName="Play Selected Montage Loop For Duration"`):
+- existing key/carry/interaction/customer/facility/economy tests를 유지한다.
+- instant primary, hold begin/cancel/complete, F intent와 G key rejection/mop-basket release를 검증한다.
+- stain zone/limit/floor/spacing/Pawn rejection과 EndPlay registry cleanup을 검증한다.
+- towel conservation, primary/secondary partial, mixed/full/revision/reentry와 source/destination EndPlay를 검증한다.
+- bin container E/F와 individual overflow E-only, staged spawn failure/PendingSpill/consumed recovery를 검증한다.
+- machine start/processing block/completion/output와 same-frame revalidation을 검증한다.
+- customer acquire/shortage satisfaction/used overflow와 interruption 단계별 token owner를 검증한다.
+- reflected legacy names와 enum ordinal을 focused search로 확인하고 `git diff --check`를 실행한다.
+- UE 5.8 `Build.bat`을 첫 시도부터 승인된 sandbox 밖에서 실행해 Editor target을 빌드한다.
 
-- `Duration >= 0.1`, 유효 `LoopSection`과 재생 가능한 montage를 요구한다.
-- EnterState에서 선택한 montage의 loop section을 자기 자신으로 연결하고 한 번만 재생한다.
-- Tick은 remaining duration만 감소시키며 후보를 다시 뽑거나 montage를 교체하지 않는다.
-- duration 전에 montage가 정상/비정상 종료되면 malformed loop로 실패한다.
-- duration 만료 시 자신이 소유한 montage를 configured blend-out하고 성공한다.
-- external StateTree exit도 동일 token ownership으로 정리한다.
-
-## 4. Activity Lifecycle Integration
-
-- 기존 `FCustomerActivityTask`와 `Timed Customer Activity` 이름은 timer-only/serialized 호환 경로로 유지한다.
-- 새 `FCustomerBeginActivityTask`는 `Session`, `Activity`를 받아 `BeginActivity`를 호출하고 계산된 `ResolvedDuration` output을 제공한다.
-- 새 `FCustomerFinishActivityTask`는 현재 Activity가 parameter와 일치할 때 `FinishActivity`를 commit한다. facility release는 수행하지 않는다.
-- animation StateTree 경로는 `Begin Activity -> montage Task -> Finish Activity` 순서를 사용한다.
-- duration-loop Task의 Duration은 앞선 Begin Task의 `ResolvedDuration`에 bind할 수 있어야 한다.
-- `FCustomerFacilityTask::ExitState` fallback은 active Activity abort, snap 복귀, wait 해제와 slot release를 순서대로 수행한다.
-- Bath dwell 자연 완료와 `BathStayExpired`는 모두 Activity를 정리하고 snap-out한 다음 facility parent를 빠져나가게 Editor 프롬프트에 명시한다.
-- one-shot action의 완료 기준은 montage 정상 종료다. 기존 duration property는 삭제하지 않고 timer-only fallback에 남긴다.
-
-## Blueprint/API/Core Redirect 영향
-
-- 신규 component와 Task만 추가하며 기존 reflected type/property를 rename/delete하지 않으므로 Core Redirect는 추가하지 않는다.
-- `BP_BathhouseCustomer`는 inherited `CustomerMontagePlayback`을 갖지만 별도 Blueprint logic이 필요하지 않다.
-- `ST_CustomerRoutine`은 새 Task 배치와 context/output binding이 필요하다.
-- Bath Blueprint의 각 slot action transform은 탕 내부, `ApproachOffset`은 NavMesh 위에 authoring해야 한다.
-- Montage asset, AnimBP Slot node와 loop section은 Editor 작업이며 구현 단계는 Content를 수정하지 않는다.
-- 신발·의상 mesh/component, visibility, AnimNotify, hand prop과 Motion Warping은 `PROMPT_UNREAL.md`에도 포함하지 않는다.
-
-## 검증
-
-- candidate helper는 0/1/여러 후보와 null 혼합을 검증한다.
-- one-shot 정상 종료/interrupt, loop 단일 후보/다중 후보/조기 종료/duration 종료와 stale token stop을 검증한다.
-- Bath snap은 action 진입, approach 복귀, release-before-return 방지와 cleanup idempotency를 검증한다.
-- 기존 facility exclusivity, bath timer와 technical cleanup test를 유지한다.
-- reflected type/property 이름과 외부 `CustomerSession` 직접 접근을 focused search로 확인한다.
-- `git diff --check`를 실행한다.
-- UE 5.8 `Build.bat`으로 `BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE` 링크 빌드를 수행한다.
-- 구현 결과로 `PROMPT_REVIEW.md`에는 class growth, delegate/token cleanup, 테스트와 빌드 결과를 기록한다.
-- `PROMPT_UNREAL.md`에는 Bath approach/action authoring, AnimBP Slot/Montage 준비와 StateTree 수동 구성·binding·PIE 검증만 기록한다.
+구현 완료 후 `.md/PROMPT_REVIEW.md`와 `.md/PROMPT_UNREAL.md`만 정기 결과물로 작성한다. Unreal 프롬프트에는 E/F/G InputAction/IMC, WBP BindWidget, cleaning director/zones, mop/stain/towel/machine Blueprint, facility slot, customer StateTree와 presentation PIE 검증을 인계한다.
 
 ## 금지사항
 
-- NavMesh를 action point까지 억지로 확장하거나 action point를 runtime navigation projection으로 대체하지 않는다.
-- action point에서 slot을 먼저 release한 뒤 다음 MoveTo를 시작하지 않는다.
-- montage 후보를 Tick마다 재추첨하거나 loop 도중 다른 montage로 shuffle하지 않는다.
-- one-shot 성공을 montage asset 길이 기반 단순 timer로 판정하지 않는다.
-- montage asset 참조를 `UCustomerSessionComponent` 또는 `UCustomerRoutineDefinition`에 저장하지 않는다.
-- 신발·옷, modular mesh, skin weight, AnimNotify와 appearance system을 구현하지 않는다.
-- UI, Interaction, Economy, input mapping과 unrelated gameplay를 변경하지 않는다.
+- inventory/hotbar, multi-carry 또는 key free drop을 추가하지 않는다.
+- UI/Character/StateTree Blueprint에서 Cleaning/Towel domain state를 변경하지 않는다.
+- transfer 중 한 endpoint만 먼저 delegate에 노출하거나 실패 후 rollback에 의존하지 않는다.
+- bin 내부 towel을 individual interactable actor로 만들지 않는다.
+- 다른 stain/tool/towel state, mop washing, bucket, durability와 consumable을 추가하지 않는다.
+- satisfaction을 이용료나 다른 customer 행동에 연결하지 않는다.

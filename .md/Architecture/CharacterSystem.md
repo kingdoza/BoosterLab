@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-1인칭 이동, sprint, camera, Interaction/Carry 조립과 Interact 입력은 현재 Source에 구현되어 있다.
+1인칭 이동, sprint, camera, Interaction/Carry 조립과 primary Interact 입력은 현재 Source에 구현되어 있다. secondary interaction과 droppable equipment release 입력은 확정 구현 target이다.
 
 ## Responsibilities
 
@@ -16,6 +16,7 @@ Character System은 범용 1인칭 조작 템플릿의 플레이어 조작을 �
 - sprint 상태와 걷기/달리기 속도 관리
 - player interaction/carry component와 first-person held key anchor 조립
 - InteractAction 입력 라우팅
+- SecondaryInteractAction과 DropCarryAction 입력 라우팅
 
 현재 문서화된 Character 책임 밖의 도메인 gameplay logic은 Character System 책임이 아니다.
 
@@ -46,7 +47,10 @@ Source/BathhouseSim/Private/Character/
 - 입력 scale 값(`MoveSpeedScale`, `LookSpeedScale`)을 적용한 뒤 Unreal movement/controller API로 전달한다.
 - `bSprintToggle`에 따라 sprint 입력을 toggle 방식 또는 hold 방식으로 처리한다.
 - `UPlayerInteractionComponent`, `UPlayerCarryComponent`와 camera 하위 `HeldKeyAnchor`를 조립한다.
-- `InteractAction`은 `UPlayerInteractionComponent::TryInteract()`로 전달한다.
+- `InteractAction` E의 Started/Completed/Canceled를 primary begin/end intent로 전달한다. 기존 instant target은 Started에서 한 번 실행하고 hold target은 release까지 유지한다.
+- `SecondaryInteractAction` F의 Started를 secondary intent로 전달한다.
+- `DropCarryAction` G의 Started를 camera view와 함께 equipment drop intent로 전달한다.
+- Character는 towel, stain, mop, basket과 key drop 가능 여부를 직접 판정하지 않는다.
 
 ### AFirstPersonController
 
@@ -106,9 +110,11 @@ Source/BathhouseSim/Private/Character/
 
 ### Interact
 
-1. `InteractAction` started
-2. Character가 `UPlayerInteractionComponent::TryInteract()`를 호출한다.
-3. Interaction component가 focus target을 재조회하고 target API를 실행한다.
+1. `InteractAction` E Started에서 primary begin을 전달한다.
+2. instant target은 기존 primary execute를 한 번 호출한다.
+3. hold target은 E Completed/Canceled까지 동일 focus와 조건을 재검증한다.
+4. `SecondaryInteractAction` F Started는 secondary execute를 한 번 호출한다.
+5. `DropCarryAction` G Started는 carry domain에 held equipment release를 요청한다.
 
 ## Dependencies
 
@@ -148,6 +154,8 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - `AFirstPersonCharacter::JumpAction`
 - `AFirstPersonCharacter::SprintAction`
 - `AFirstPersonCharacter::InteractAction`
+- `AFirstPersonCharacter::SecondaryInteractAction`
+- `AFirstPersonCharacter::DropCarryAction`
 - `AFirstPersonCharacter::MoveSpeedScale`
 - `AFirstPersonCharacter::LookSpeedScale`
 - `AFirstPersonCharacter::bSprintToggle`
@@ -158,6 +166,8 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 
 - Character는 입력 라우팅과 pawn 조작만 담당하고, sprint의 실제 상태/속도는 MovementComponent가 소유한다.
 - Character는 component composition과 input routing만 담당하고 focus/key transaction을 직접 소유하지 않는다.
+- E/F/G는 intent mapping이며 concrete Cleaning/Towel 상태를 Character에 추가하지 않는다.
+- serialized `HeldKeyAnchor` 이름은 기존 Blueprint 호환성을 위해 유지하되 key/mop/basket의 공용 held anchor로 사용한다. 이번 target에서 rename하지 않는다.
 - Controller는 mapping context 등록/해제 외 책임을 갖지 않는다.
 - Sprint 시작 조건은 전방 가속과 지상 상태를 요구한다.
 - 현재 카메라는 capsule 기준 고정 offset을 사용한다. skeletal mesh socket 기반 카메라나 weapon/hand mesh는 별도 시스템이 생길 때 설계한다.
@@ -172,5 +182,7 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - `bSprintToggle=false` hold 방식에서는 `SprintAction` completed 이벤트가 반드시 발생해야 sprint가 종료된다.
 - Controller 종료/교체 시 `DefaultMappingContext`가 제거되는지 확인한다.
 - InteractAction이 Started 한 번마다 한 번만 실행되는지 확인한다.
+- E hold target이 Completed/Canceled를 받으며 기존 instant interaction이 release 때 재실행되지 않는지 확인한다.
+- F와 G가 각각 한 번만 routing되고 key에 G drop이 적용되지 않는지 확인한다.
 - pawn 종료/교체 시 interaction focus와 held key attachment가 정리되는지 확인한다.
 - Blueprint native parent rename이 필요한 경우 Core Redirect 필요 여부를 먼저 검토한다.

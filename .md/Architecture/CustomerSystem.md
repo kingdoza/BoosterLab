@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath snap, montage playback component와 native montage Task까지 Source에 구현되었고 asset 연결은 Unreal 단계 target이다.
+이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath snap/montage Source는 구현되었고 clean towel 획득·사용·반납, shortage fallback과 satisfaction은 다음 구현 target이다.
 
 ## Source Scope
 
@@ -40,8 +40,10 @@ Source/BathhouseSim/Private/Tests/
 - check-in 60초 timeout과 미응대 퇴장
 - 번호 시설, shower, random bath loop, checkout과 정상 퇴장
 - 완료·timeout·기술 실패의 대칭 cleanup
+- clean towel token 획득·사용·반납과 shortage fallback
+- customer session satisfaction와 towel cleanup
 
-Customer는 facility slot, key actor lifecycle, player carry, wallet과 UI 상태를 소유하지 않는다.
+Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, player carry, wallet과 UI 상태를 소유하지 않는다.
 
 ## State And Execution Owners
 
@@ -57,6 +59,8 @@ Customer는 facility slot, key actor lifecycle, player carry, wallet과 UI 상�
 | key state | `ABathhouseKeyActor` |
 | money | `UPlayerWalletComponent` |
 | timed activity 실행 | native Customer StateTree Task |
+| customer-held towel token과 satisfaction | `UCustomerSessionComponent` |
+| towel count, overflow와 transfer | Towel System |
 
 ## `UCustomerRoutineDefinition`
 
@@ -70,6 +74,8 @@ Customer는 facility slot, key actor lifecycle, player carry, wallet과 UI 상�
 - drying, towel return, dress, wear shoes 시간
 - facility retry 간격과 navigation 최대 재시도
 - `UsageFee = 10000`
+- towel availability wait limit
+- towel unavailable satisfaction penalty
 
 값은 Editor에서 조정하지만 runtime 도중 시설이나 Widget이 변경하지 않는다. 향후 성격·만족도 같은 인과요인은 별도 modifier로 추가하며 현재는 고정 bath stay 값을 그대로 사용한다.
 
@@ -78,11 +84,13 @@ Customer는 facility slot, key actor lifecycle, player carry, wallet과 UI 상�
 - assigned `ABathhouseKeyActor`와 `KeyNumber`
 - current counter lane/queue handle
 - current facility slot reservation
-- current Bath action-point snap 여부와 예약 당시 approach/action transform
+- current Bath action-point snap 여부와 예약 당시 발바닥 기준 approach/action transform
 - last used bath actor
 - bath stay end time와 expiry timer
 - current logical activity와 service interaction gate
 - cash claimed, departure reason와 cleanup guard
+- optional `FTowelUseHandle`, towel-use stage와 towel cleanup guard
+- current satisfaction value
 - check-in wait와 checkout offer의 non-interruptible queue-service guard
 
 Session은 domain runtime state owner이며 StateTree transition graph를 복제하지 않는다. StateTree Task가 session API를 통해 transaction을 수행한다.
@@ -103,6 +111,7 @@ Blueprint event:
 - `OnActivityStarted(ActivityType)`
 - `OnActivityFinished(ActivityType)`
 - `OnCustomerPresentationStateChanged(PresentationState)`
+- `OnCustomerSatisfactionChanged(NewValue, Delta)`  # towel shortage presentation target
 
 `UCustomerMontagePlaybackComponent`는 AnimInstance, 현재 montage, monotonic playback token과 종료 결과를 소유한다. StateTree Task는 token으로 자신이 시작한 montage만 조회·중단한다. AnimNotify, Motion Warping, prop animation과 신발·의상 전환은 이번 target에 포함하지 않는다.
 
@@ -128,12 +137,14 @@ StateTree asset이 소유하는 것:
 - state hierarchy와 transition
 - native Task/Condition 배치와 binding
 - key received, timeout, facility available, bath expired, cash claimed event 전이
+- towel available과 towel wait expired event 전이
 - Bath approach 이동, action snap, montage 실행과 approach 복귀 순서
 
 Native C++이 소유하는 것:
 
 - Task/Condition 구현
 - session transaction과 cleanup
+- cached Bath 발바닥 transform에 scaled capsule half height를 한 번 더하는 actor/capsule-center 변환
 - queue/facility/key/wallet API 호출
 - gameplay event 발행
 - montage 후보 검증, 단일 선택과 실제 playback 종료 판정
@@ -153,6 +164,7 @@ Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 �
 - bath stay timer 시작과 random bath loop
 - checkout key 배치와 cash actor 생성·claim 대기
 - normal/timeout/technical cleanup
+- clean towel acquire/wait/fallback, mark-used와 used return Task
 
 조건은 session과 owner API를 읽기만 하고 상태를 바꾸지 않는다.
 
@@ -167,20 +179,22 @@ Queue removal은 session membership와 wait/service guard를 먼저 지운 뒤 c
 5. Timeout이면 check-in lane을 떠나 exit로 이동한 뒤 소멸한다.
 6. 성공하면 같은 번호 shoe locker slot에서 store-shoes timed activity를 수행한다.
 7. 같은 번호 clothes locker slot에서 undress timed activity를 수행한다.
-8. Shower slot에서 pre-shower timed activity를 수행한다.
-9. Pre-shower 완료 순간 고정 60초 bath stay timer를 시작한다.
-10. Available bath 중 random slot을 예약하고 NavMesh 위 approach point까지 이동한다.
-11. 이동을 정지하고 action point로 snap한 뒤 입욕을 시작한다.
-12. 탕마다 `10~20초` random dwell 동안 EnterState에서 선택한 montage 하나만 반복하고 시간이 남으면 다른 available bath를 선택한다.
-13. 다른 bath가 있으면 직전 bath를 제외하며, 선택 후보가 점유되면 다른 빈 bath를 재선택한다.
-14. 모든 bath가 점유 중이면 reservation 없이 availability event를 기다린다.
-15. dwell 완료 또는 60초 만료 시 montage를 중단하고 approach point로 복귀한 뒤 slot을 release한다.
-16. Shower slot에서 main-shower activity를 수행한다.
-17. Drying spot, towel basket, clothes locker, shoe locker 순서로 activity를 수행한다.
-18. Checkout lane에 enqueue하고 front service point로 이동한다.
-19. Available counter return slot에 실제 key actor를 world object로 배치한다.
-20. Cash payment actor를 제시하고 player claim을 기다린다.
-21. Cash claim 성공 즉시 checkout lane을 떠나 exit로 이동하고 소멸한다.
+8. `TowelShelf` slot에서 clean towel 한 장 획득을 시도한다.
+9. 없으면 authorable limit 동안 availability를 기다리고 만료 시 towel 없이 진행하며 satisfaction을 감소시킨다.
+10. Shower slot에서 pre-shower timed activity를 수행한다.
+11. Pre-shower 완료 순간 고정 60초 bath stay timer를 시작한다.
+12. Available bath 중 random slot을 예약하고 NavMesh 위 approach point까지 이동한다.
+13. 이동을 정지하고 발바닥 action point를 capsule-center actor transform으로 변환해 snap한 뒤 입욕을 시작한다.
+14. 탕마다 `10~20초` random dwell 동안 EnterState에서 선택한 montage 하나만 반복하고 시간이 남으면 다른 available bath를 선택한다.
+15. 다른 bath가 있으면 직전 bath를 제외하며 모든 bath가 점유 중이면 reservation 없이 availability event를 기다린다.
+16. dwell 완료 또는 60초 만료 시 montage를 중단하고 approach point로 복귀한 뒤 slot을 release한다.
+17. Shower slot에서 main-shower activity를 수행한다.
+18. towel handle이 있으면 Drying에서 Used로 mark하고 기존 `TowelBasket` facility의 used bin에 반환한다.
+19. used bin full이면 bin 주변 valid floor의 individual used towel로 commit하고, 즉시 spawn 불가면 PendingSpill ledger로 이전한다.
+20. towel handle이 없으면 towel-dependent drying/return을 건너뛴다.
+21. clothes locker와 shoe locker에서 dress/wear-shoes activity를 수행한다.
+22. Checkout lane에 enqueue하고 key 배치, cash claim을 처리한다.
+23. Cash claim 성공 즉시 checkout lane을 떠나 exit로 이동하고 소멸한다.
 
 Player의 key pickup/rack 반환은 customer 퇴장 조건이 아니다.
 
@@ -192,17 +206,26 @@ Player의 key pickup/rack 반환은 customer 퇴장 조건이 아니다.
 - key 번호는 player가 선택한 번호이며 customer가 미리 배정받지 않는다.
 - key receive와 timeout이 같은 frame에 경쟁하면 game thread에서 먼저 commit한 terminal event만 유효하다.
 
+## Customer Towel Transaction
+
+- clean towel 획득은 stack count 감소와 session `FTowelUseHandle` 생성이 한 transaction이다.
+- handle은 token owner, original stack, used 여부와 terminal cleanup guard를 가진다.
+- clean shortage wait 만료는 gameplay fallback이며 technical abort가 아니다.
+- fallback은 towel-dependent 상태를 건너뛰고 authorable satisfaction penalty를 한 번 적용한다.
+- used bin capacity는 clean acquire를 막지 않는다. full return은 individual floor overflow 또는 PendingSpill로 보존한다.
+- session interruption 전 사용하지 않은 token은 original stack, 사용한 token은 bin/overflow/recovery ledger로 한 번만 이전한다.
+
 ## Activity And Montage Contract
 
 animation을 사용하는 논리 행동은 다음 순서를 사용한다.
 
 1. slot reserve
-2. navigation target으로 이동하고 Bath면 action point로 snap
+2. navigation target으로 이동하고 Bath면 발바닥 action point에 capsule 높이를 한 번 적용해 snap
 3. `BeginActivity`와 `OnActivityStarted`
 4. StateTree montage Task가 유효 후보를 필터링하고 EnterState에서 정확히 하나 선택
 5. one-shot은 실제 montage 정상 종료, duration-loop는 같은 선택 montage의 지정 시간 반복을 완료 기준으로 사용
 6. logical completion commit과 `OnActivityFinished`
-7. Bath면 approach point로 복귀
+7. Bath면 발바닥 approach point에 같은 capsule 높이 변환을 적용해 복귀
 8. slot release
 
 후보가 하나면 random 호출 없이 그 montage를 사용하고 후보가 없거나 재생할 수 없으면 Task가 실패한다. Loop Task는 실행 중 후보를 다시 선택하지 않는다. StateTree interruption은 token owner의 montage만 blend-out하고 session cleanup을 실행한다. animation이 없는 상태는 기존 timer-only activity를 사용할 수 있다.
@@ -216,6 +239,7 @@ Navigation이 설정된 횟수만큼 반복 실패하면 gameplay 분기가 아�
 - current slot release
 - queue entry 제거
 - assigned key를 원래 hook으로 복구
+- towel handle을 used stage에 따라 clean stack 또는 used bin/overflow/recovery ledger로 정리
 - cash actor가 있으면 제거하되 이미 지급된 money는 되돌리지 않음
 - 오류 기록 후 exit 이동 시도와 소멸
 
@@ -230,6 +254,7 @@ Check-in 외 gameplay timeout은 두지 않는다.
 - Customer -> Facility
 - Customer -> Interaction
 - Customer -> Economy
+- Customer -> Towel
 - Customer -> UE 5.8 GameplayStateTree/AI/Navigation
 - Customer montage playback -> Engine Animation/AnimInstance
 - Customer는 UI concrete class에 의존하지 않는다.
@@ -247,3 +272,6 @@ Check-in 외 gameplay timeout은 두지 않는다.
 - montage가 없는 timer-only 상태의 기존 logical loop가 유지되는지 확인한다.
 - 신발·의상 mesh, visibility, AnimNotify와 appearance state가 이번 범위에 추가되지 않았는지 확인한다.
 - `CustomerSession`이 외부 C++에서 직접 접근되지 않고 Blueprint/StateTree 읽기 binding과 public getter가 유지되는지 확인한다.
+- clean towel shortage가 authorable wait 뒤 routine을 계속하고 satisfaction penalty를 한 번만 적용하는지 확인한다.
+- used bin full이 customer를 막지 않고 individual overflow/PendingSpill로 token을 보존하는지 확인한다.
+- customer StateTree exit/EndPlay에서 towel token owner가 중복되거나 사라지지 않는지 확인한다.

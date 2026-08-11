@@ -100,7 +100,9 @@ private:
 	void ClearCurrentFacilityTransformCache();
 	bool SnapToCurrentFacilityActionPoint();
 	bool ReturnToCurrentFacilityApproachPoint();
-	bool IsActionTransformClear(const class ACharacter& Character) const;
+	bool IsActionTransformClear(
+		const class ACharacter& Character,
+		const FTransform& CharacterActionTransform) const;
 	void RestoreSavedMovementMode(class ACharacter& Character);
 	void SendCustomerEvent(const FGameplayTag& EventTag) const;
 	bool ShouldForwardQueueChangedEvent(EBathhouseCounterLane ChangedLane) const;

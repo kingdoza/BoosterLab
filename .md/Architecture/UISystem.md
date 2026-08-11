@@ -4,7 +4,7 @@
 
 UI System은 BathhouseSim의 native C++ Widget과 Widget Blueprint 사이의 공통 책임 경계를 정의한다.
 
-현재 native UI Source에는 첫 interaction prompt 구현이 존재하며 다음 경로를 사용한다.
+현재 native UI Source에는 primary interaction prompt 구현이 존재한다. Cleaning/Towel target은 secondary action과 hold progress를 같은 native widget에 확장한다.
 
 ```text
 Source/BathhouseSim/Public/UI/
@@ -14,7 +14,7 @@ Source/BathhouseSim/Private/UI/
 Current classes:
 
 - `ABathhouseHUD`: local prompt 생성·제거와 possessed pawn context 연결
-- `UInteractionPromptWidget`: query/result delegate lifecycle, prompt data cache, transient failure timer와 필수 `BindWidget` 표시 갱신
+- `UInteractionPromptWidget`: primary/secondary query/result lifecycle, hold progress, transient failure timer와 필수 `BindWidget` 표시 갱신
 
 `Content/`의 Widget Blueprint와 UI asset은 serialized project data다. 명시적인 Editor 작업 없이 수정하거나 resave하지 않는다.
 
@@ -26,6 +26,7 @@ Current classes:
 - 표시 데이터 변환과 Blueprint 표현 계약 정의
 - root, slot, row, operation과 domain owner 사이의 책임 분리
 - interaction prompt의 local lifecycle과 표현 계약
+- primary E, secondary F와 hold progress의 분리 표시
 
 UI는 gameplay domain 상태를 소유하거나 domain mutation 규칙을 다시 구현하지 않는다. UI는 사용자 의도를 전달하고 결과를 표현하며, 실제 상태 변경은 해당 domain의 상태 owner가 수행한다.
 
@@ -101,23 +102,30 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 - `UInteractionPromptWidget`은 query delegate를 구독·해제하고 현재 prompt data를 cache한다.
 - widget은 C++ 전용 interaction attempt result delegate도 `FDelegateHandle`로 구독하며 component 교체, null context와 destruct에서 대칭 해제한다.
 - native construct 뒤 initial query가 empty여도 bound widget 상태를 정확히 한 번 적용하며, unpossession 또는 null context 주입 시 즉시 hidden/empty presentation으로 지운다.
-- native widget은 표시 여부, 실행 가능 여부, 대상명, 행동명과 실패 이유를 직접 bound widget에 적용한다.
-- 필수 계약은 `PromptRoot: UWidget`, `TargetNameText: UTextBlock`, `ActionNameText: UTextBlock`, `FailureReasonText: UTextBlock`이다.
+- native widget은 표시 여부, 대상명, primary/secondary 실행 가능 여부·행동명·실패 이유와 hold progress를 직접 bound widget에 적용한다.
+- 기존 필수 계약 `PromptRoot`, `TargetNameText`, `ActionNameText`, `FailureReasonText`는 유지하며 `ActionNameText`/`FailureReasonText`를 primary E row로 사용한다.
+- target 확장 필수 계약은 `SecondaryActionNameText: UTextBlock`, `SecondaryFailureReasonText: UTextBlock`, `InteractionProgressBar: UProgressBar`다.
+- primary/secondary input label은 각각 E/F presentation 값이며 domain action name에 hard-code하지 않는다.
 - query 실패 이유는 query가 유지되는 동안 지속 표시하고, 실행 실패와 대상 없음 결과는 기본 1.5초 동안 transient failure로 우선 표시한다.
 - `FailureDisplayDurationSeconds`는 `EditDefaultsOnly`, 최소 0.1초인 presentation authoring 값이다.
 - transient failure는 실패 result마다 timer를 재시작하며 성공 result, query 변경, context 해제, timer 만료와 widget destruct에서 지운다.
-- query가 없어도 transient failure가 있으면 root를 표시하고 target/action text는 비운다. root enabled 상태는 transient failure가 아니라 `query.bVisible && query.bCanInteract`만 따른다.
-- `PromptRoot`의 visibility/enabled 상태, 세 TextBlock의 text, effective failure 우선순위와 timer는 C++이 갱신한다.
+- query가 없어도 transient failure가 있으면 root를 표시하고 target/action text는 비운다. root enabled 상태는 transient failure가 아니라 현재 visible primary/secondary 중 하나라도 실행 가능한지를 따른다.
+- `PromptRoot`와 기존 primary bindings의 visibility/enabled/text, effective failure 우선순위와 timer는 C++이 갱신한다.
+- secondary row visibility/enabled/text, hold progress visibility/percent와 intent별 transient failure도 C++이 갱신한다.
 - Widget Blueprint는 정확한 `BindWidget` 이름의 hierarchy, crosshair 주변 layout, style와 선택적 animation만 담당하며 Event Graph 없이도 정상 동작해야 한다.
 - `OnInteractionPromptChanged`는 native 표시 적용 뒤 호환성과 선택적 표현 반응을 위해 호출하는 hook이며 prompt 정확성이 이 event 구현에 의존하지 않는다.
+- 기존 `OnInteractionPromptChanged` signature는 primary 호환 hook으로 유지하고 secondary/progress용 새 표현 hook을 추가한다. 기존 reflected event signature를 변경하지 않는다.
+- G equipment drop 실패는 target query와 별개인 transient attempt reason으로 기존 failure 영역에 표시한다.
 - held key number는 HUD text가 아니라 first-person 3D key actor에 표시한다.
 - inventory, hotbar, item slot과 money HUD는 현재 범위에 포함하지 않는다.
+- towel count HUD를 별도로 만들지 않으며 basket/stack/machine world presentation과 target prompt만 사용한다.
 
 ## Blueprint/API Contracts
 
 - Blueprint가 사용해야 하는 API와 event만 `BlueprintCallable`, `BlueprintPure` 또는 `BlueprintImplementableEvent`로 노출한다.
 - C++ 내부 연결용 함수는 불필요하게 Blueprint에 노출하지 않는다.
 - `BindWidget`은 native 로직에 반드시 필요한 최소 widget에만 사용한다.
+- 신규 secondary/progress widget은 runtime 정확성에 필요하므로 `BindWidget`으로 요구하고 WBP migration 단계에서 hierarchy를 함께 갱신한다.
 - Blueprint event는 domain object 전체보다 표현에 필요한 data를 전달한다.
 - native parent, reflected type, function, property 또는 component 이름은 Content asset 계약으로 취급한다.
 - 공개 Blueprint 계약을 rename하거나 제거할 때는 asset migration, Core Redirect 필요 여부, Blueprint compile/save와 post-migration scan을 함께 계획한다.
@@ -127,6 +135,7 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 
 - UI System은 필요한 gameplay domain의 public API에 의존할 수 있다.
 - 현재 interaction prompt UI는 Interaction System에만 의존한다.
+- UI는 Cleaning/Towel concrete class를 판별하지 않고 확장된 Interaction query/result만 소비한다.
 - gameplay domain은 구체 Widget class에 의존하지 않는다. 필요하면 event, interface 또는 presentation data 경계를 사용한다.
 - `UMG`, `Slate`, `SlateCore` 같은 모듈 의존성은 실제 Source include와 사용처가 생길 때만 `BathhouseSim.Build.cs`에 추가한다.
 - UI가 다른 시스템의 상태를 복제해 별도 정본으로 만들지 않는다.
@@ -138,7 +147,8 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 - 화면을 반복해서 열고 닫거나 owner를 교체해도 delegate 중복 구독과 stale reference가 남지 않는지 확인한다.
 - drag/drop 성공, 실패와 cancel 뒤 preview와 active operation이 복구되는지 확인한다.
 - 같은 표시 상태에서 Blueprint event나 rebuild가 불필요하게 반복되지 않는지 확인한다.
-- 네 필수 `BindWidget`의 이름과 타입이 `WBP_InteractionPrompt`에서 정확히 일치하는지 확인한다.
+- 기존 네 `BindWidget`과 신규 세 `BindWidget`의 이름과 타입이 `WBP_InteractionPrompt`에서 정확히 일치하는지 확인한다.
+- 신규 secondary 두 TextBlock과 ProgressBar의 이름/타입이 일치하고 E/F row가 독립적으로 표시되는지 확인한다.
 - `WBP_InteractionPrompt` Event Graph가 visibility, text, 실패 표시 또는 실행 가능 판단을 다시 구현하지 않는지 확인한다.
 - 실패 result 연속 수신 시 1.5초 timer가 재시작되고 query 변경·성공·context 해제·destruct에서 stale failure가 남지 않는지 확인한다.
 - transient execution failure가 query failure보다 우선하며 timer 만료 뒤 현재 query failure로 복귀하는지 확인한다.
@@ -146,3 +156,4 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 - layout, style, animation과 asset 연결이 C++으로 불필요하게 이동하지 않았는지 확인한다.
 - pawn 교체와 HUD 종료에서 query/result delegate가 정확히 한 번 해제되는지 확인한다.
 - focus, held key와 target 상태 변화에 따라 prompt가 즉시 갱신되는지 확인한다.
+- hold cancel/completion, towel capacity/state, machine state와 individual overflow towel에 따라 primary/secondary failure가 즉시 갱신되는지 확인한다.

@@ -23,6 +23,19 @@
 
 #define LOCTEXT_NAMESPACE "CustomerSessionComponent"
 
+namespace
+{
+FTransform MakeCharacterTransformAtFacilityPoint(
+	const FTransform& FacilityPointTransform,
+	const UCapsuleComponent& Capsule)
+{
+	FTransform CharacterTransform = FacilityPointTransform;
+	CharacterTransform.AddToTranslation(
+		FVector::UpVector * Capsule.GetScaledCapsuleHalfHeight());
+	return CharacterTransform;
+}
+}
+
 UCustomerSessionComponent::UCustomerSessionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -373,12 +386,16 @@ bool UCustomerSessionComponent::SnapToCurrentFacilityActionPoint()
 	}
 	ACharacter* Character = Cast<ACharacter>(GetOwner());
 	UCharacterMovementComponent* Movement = Character ? Character->GetCharacterMovement() : nullptr;
-	if (!CurrentFacilitySlot || !bHasCachedFacilityTransforms || !Character || !Movement)
+	UCapsuleComponent* Capsule = Character ? Character->GetCapsuleComponent() : nullptr;
+	if (!CurrentFacilitySlot || !bHasCachedFacilityTransforms || !Character || !Movement || !Capsule)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Bathhouse customer %s cannot snap without a cached facility and character movement."), *GetNameSafe(GetOwner()));
 		return false;
 	}
-	if (!IsActionTransformClear(*Character))
+	const FTransform CharacterActionTransform = MakeCharacterTransformAtFacilityPoint(
+		CachedFacilityActionTransform,
+		*Capsule);
+	if (!IsActionTransformClear(*Character, CharacterActionTransform))
 	{
 		UE_LOG(LogTemp, Error, TEXT("Bathhouse customer %s action-point capsule is blocked; snap was rejected."), *GetNameSafe(GetOwner()));
 		return false;
@@ -396,8 +413,8 @@ bool UCustomerSessionComponent::SnapToCurrentFacilityActionPoint()
 
 	const FTransform PreviousTransform = Character->GetActorTransform();
 	if (!Character->SetActorLocationAndRotation(
-		CachedFacilityActionTransform.GetLocation(),
-		CachedFacilityActionTransform.Rotator(),
+		CharacterActionTransform.GetLocation(),
+		CharacterActionTransform.Rotator(),
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics))
@@ -417,13 +434,17 @@ bool UCustomerSessionComponent::ReturnToCurrentFacilityApproachPoint()
 		return true;
 	}
 	ACharacter* Character = Cast<ACharacter>(GetOwner());
-	if (!bHasCachedFacilityTransforms || !Character)
+	UCapsuleComponent* Capsule = Character ? Character->GetCapsuleComponent() : nullptr;
+	if (!bHasCachedFacilityTransforms || !Character || !Capsule)
 	{
 		return false;
 	}
+	const FTransform CharacterApproachTransform = MakeCharacterTransformAtFacilityPoint(
+		CachedFacilityApproachTransform,
+		*Capsule);
 	const bool bMoved = Character->SetActorLocationAndRotation(
-		CachedFacilityApproachTransform.GetLocation(),
-		CachedFacilityApproachTransform.Rotator(),
+		CharacterApproachTransform.GetLocation(),
+		CharacterApproachTransform.Rotator(),
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
@@ -435,7 +456,9 @@ bool UCustomerSessionComponent::ReturnToCurrentFacilityApproachPoint()
 	return bMoved;
 }
 
-bool UCustomerSessionComponent::IsActionTransformClear(const ACharacter& Character) const
+bool UCustomerSessionComponent::IsActionTransformClear(
+	const ACharacter& Character,
+	const FTransform& CharacterActionTransform) const
 {
 	const UWorld* World = Character.GetWorld();
 	const UCapsuleComponent* Capsule = Character.GetCapsuleComponent();
@@ -448,8 +471,8 @@ bool UCustomerSessionComponent::IsActionTransformClear(const ACharacter& Charact
 		Capsule->GetScaledCapsuleHalfHeight());
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CustomerFacilityActionSnap), false, &Character);
 	return !World->OverlapBlockingTestByProfile(
-		CachedFacilityActionTransform.GetLocation(),
-		CachedFacilityActionTransform.GetRotation(),
+		CharacterActionTransform.GetLocation(),
+		CharacterActionTransform.GetRotation(),
 		Capsule->GetCollisionProfileName(),
 		CapsuleShape,
 		QueryParams);

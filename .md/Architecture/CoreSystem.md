@@ -76,16 +76,20 @@ Core System은 고정된 native class inventory를 유지하지 않는다. 구�
 
 - `CharacterSystem.md`: `Source/BathhouseSim/Public/Character`, `Source/BathhouseSim/Private/Character`
 - `CameraSystem.md`: `Source/BathhouseSim/Public/Camera`, `Source/BathhouseSim/Private/Camera`
-- `InteractionSystem.md`: player trace와 physical key carry 경계
+- `InteractionSystem.md`: player trace, primary/secondary intent와 single physical carry 경계
 - `FacilitySystem.md`: facility slot과 counter queue 경계
 - `EconomySystem.md`: wallet과 cash claim 경계
 - `CustomerSystem.md`: StateTree routine과 customer session 경계
 - `UISystem.md`: native Widget/Widget Blueprint 경계
+- `CleaningSystem.md`: water stain spawn과 wet mop cleaning 경계
+- `TowelSystem.md`: towel inventory, atomic transfer와 processing 경계
 - `CoreSystem.md`: Source 루트, 모듈/문서/redirect 공통 규칙
 
 `Source/BathhouseSim/Private/Tests`는 system이 아니라 focused native automation test 경로다.
 
 새 Source 하위 디렉터리를 추가하면 같은 이름의 `*System.md`를 추가하고 책임, 핵심 클래스, runtime flow, 의존성, Blueprint/API 계약, 수동 검토 지점을 문서화한다.
+
+Cleaning/Towel target은 현재 runtime module dependency 안에서 구현한다. 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
 
 ## Manual Review Points
 

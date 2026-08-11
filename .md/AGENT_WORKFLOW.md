@@ -94,3 +94,24 @@
 - 단계별 허용 경로와 금지 경로를 지킨다.
 - 변경 파일, 검증 결과, 미검증 항목을 최종 보고에 남긴다.
 - 문서 변경 후 diff, 링크, 결과물 소유권과 문서 줄 수를 확인한다.
+
+## UE 5.8 Build Policy
+
+BathhouseSim의 C++ build, compile 검증과 UnrealBuildTool 실행은 항상 다음 진입점을 사용한다.
+
+```powershell
+& 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat' `
+  BathhouseSimEditor Win64 Development `
+  -Project='C:\UnrealProjects\BathhouseSim\BathhouseSim.uproject' `
+  -WaitMutex `
+  -NoHotReloadFromIDE
+```
+
+`Build.bat`이 UE 5.8에 포함된 .NET 10 runtime을 선택하게 한다. 다음 진입점은 사용하지 않는다.
+
+Codex shell에서는 UBT 자식 프로세스와 Engine/Uba 경로 접근을 위해 위 `Build.bat` prefix를 승인받아 **첫 시도부터 sandbox 밖에서** 실행한다. sandbox 안에서 probe나 test 목적으로 먼저 실행하지 않는다. 승인 실행이 불가능하면 build를 시도하지 않고 차단 사유를 보고한다.
+
+- system `dotnet` 또는 `dotnet build`
+- MSBuild 직접 실행
+- `UnrealBuildTool.exe` 직접 실행
+- `UnrealBuildTool.dll` 직접 실행

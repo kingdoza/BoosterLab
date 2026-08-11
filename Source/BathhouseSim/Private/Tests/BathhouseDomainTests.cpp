@@ -4,6 +4,7 @@
 
 #include "Animation/AnimMontage.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Facility/BathhouseCounterActor.h"
 #include "Facility/BathhouseFacilityActor.h"
 #include "Facility/BathhouseFacilitySlotComponent.h"
@@ -156,6 +157,13 @@ bool FBathhouseCustomerBathSnapTest::RunTest(const FString& Parameters)
 		FTransform Approach;
 		FTransform Action;
 	};
+	const auto MakeCharacterTransformAtFacilityPoint = [Customer](const FTransform& FacilityPointTransform)
+	{
+		FTransform CharacterTransform = FacilityPointTransform;
+		CharacterTransform.AddToTranslation(
+			FVector::UpVector * Customer->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		return CharacterTransform;
+	};
 	const auto ReserveFacility = [&](const FTransform& ReservationTransform)
 	{
 		Slot->SetWorldTransform(ReservationTransform);
@@ -166,7 +174,11 @@ bool FBathhouseCustomerBathSnapTest::RunTest(const FString& Parameters)
 		const FFacilitySnapshot Snapshot{
 			Session->CachedFacilityApproachTransform,
 			Session->CachedFacilityActionTransform};
-		Customer->SetActorTransform(Snapshot.Approach, false, nullptr, ETeleportType::TeleportPhysics);
+		Customer->SetActorTransform(
+			MakeCharacterTransformAtFacilityPoint(Snapshot.Approach),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
 		Customer->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 		return Snapshot;
 	};
@@ -208,8 +220,10 @@ bool FBathhouseCustomerBathSnapTest::RunTest(const FString& Parameters)
 		ActionTarget.Equals(FirstSnapshot.Action));
 	TestTrue(TEXT("The customer snaps from approach to the cached action point"),
 		Session->SnapCurrentFacility(ECustomerFacilitySnapTarget::ActionPoint));
-	TestTrue(TEXT("Action snap applies the reservation-time action location and rotation"),
-		Customer->GetActorTransform().Equals(FirstSnapshot.Action));
+	TestTrue(TEXT("Action snap places the character feet at the reservation-time action point"),
+		Customer->GetActorTransform().Equals(MakeCharacterTransformAtFacilityPoint(FirstSnapshot.Action)));
+	TestTrue(TEXT("Action snap preserves the authored facility point as the character feet location"),
+		Customer->GetCharacterMovement()->GetActorFeetLocation().Equals(FirstSnapshot.Action.GetLocation()));
 	TestEqual(TEXT("Action snap disables character movement"),
 		Customer->GetCharacterMovement()->MovementMode, MOVE_None);
 	const FRotator SnappedRotation = Customer->GetActorRotation();
@@ -217,8 +231,10 @@ bool FBathhouseCustomerBathSnapTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Begin use does not replace the cached action rotation with the live slot rotation"),
 		Customer->GetActorRotation().Equals(SnappedRotation));
 	Session->ReleaseCurrentFacility();
-	TestTrue(TEXT("Release returns the customer to the original cached approach before clearing the slot"),
-		Customer->GetActorTransform().Equals(FirstSnapshot.Approach));
+	TestTrue(TEXT("Release returns the customer feet to the original cached approach before clearing the slot"),
+		Customer->GetActorTransform().Equals(MakeCharacterTransformAtFacilityPoint(FirstSnapshot.Approach)));
+	TestTrue(TEXT("Approach return preserves the authored facility point as the character feet location"),
+		Customer->GetCharacterMovement()->GetActorFeetLocation().Equals(FirstSnapshot.Approach.GetLocation()));
 	TestEqual(TEXT("Approach return restores walking movement"),
 		Customer->GetCharacterMovement()->MovementMode, MOVE_Walking);
 	TestTrue(TEXT("Normal cleanup releases the slot"), Slot->IsAvailable());
@@ -236,7 +252,8 @@ bool FBathhouseCustomerBathSnapTest::RunTest(const FString& Parameters)
 	BlockingBox->SetBoxExtent(FVector(20.0f));
 	BlockingBox->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 	BlockingBox->RegisterComponent();
-	BlockingBox->SetWorldLocation(BlockedSnapshot.Action.GetLocation());
+	BlockingBox->SetWorldLocation(
+		MakeCharacterTransformAtFacilityPoint(BlockedSnapshot.Action).GetLocation());
 	BlockingBox->UpdateOverlaps();
 	const FTransform BeforeBlockedSnap = Customer->GetActorTransform();
 	AddExpectedError(TEXT("action-point capsule is blocked"), EAutomationExpectedErrorFlags::Contains, 1);
@@ -313,8 +330,8 @@ bool FBathhouseCustomerBathSnapTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Technical-abort setup begins Bath use"), Session->BeginUseCurrentFacility());
 	AddExpectedError(TEXT("technical abort: automation cleanup"), EAutomationExpectedErrorFlags::Contains, 1);
 	Session->TechnicalAbort(TEXT("automation cleanup"));
-	TestTrue(TEXT("Technical abort returns to the original cached approach transform"),
-		Customer->GetActorTransform().Equals(AbortSnapshot.Approach));
+	TestTrue(TEXT("Technical abort returns the customer feet to the original cached approach transform"),
+		Customer->GetActorTransform().Equals(MakeCharacterTransformAtFacilityPoint(AbortSnapshot.Approach)));
 	TestEqual(TEXT("Technical abort restores walking movement"),
 		Customer->GetCharacterMovement()->MovementMode, MOVE_Walking);
 	TestTrue(TEXT("Technical abort releases the facility slot"), Slot->IsAvailable());
