@@ -10,6 +10,7 @@ class UPlayerCarryComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 class UTowelInventoryComponent;
+class UTowelStackVisualComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTowelBasketHeldPresentationChanged, bool, bIsHeld);
 
@@ -49,6 +50,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel")
 	TObjectPtr<UTowelInventoryComponent> Inventory;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel|Presentation")
+	TObjectPtr<UTowelStackVisualComponent> TowelPresentationVisual;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel|Carry", meta = (ClampMin = "0.0"))
 	float ThrowImpulseStrength = 400.0f;

@@ -3,6 +3,7 @@
 #include "Interaction/PlayerCarryComponent.h"
 #include "Towel/TowelBasketActor.h"
 #include "Towel/TowelInventoryComponent.h"
+#include "Towel/Presentation/TowelStackVisualComponent.h"
 #include "Towel/TowelTransferSubsystem.h"
 
 #define LOCTEXT_NAMESPACE "CleanTowelStackActor"
@@ -12,6 +13,20 @@ ACleanTowelStackActor::ACleanTowelStackActor()
 	FacilityType = EBathhouseFacilityType::TowelShelf;
 	Inventory = CreateDefaultSubobject<UTowelInventoryComponent>(TEXT("TowelInventory"));
 	Inventory->ConfigureDefaults(ETowelState::Clean, 20, 30);
+	TowelPresentationVisual = CreateDefaultSubobject<UTowelStackVisualComponent>(TEXT("TowelPresentationVisual"));
+	TowelPresentationVisual->SetupAttachment(GetRootComponent());
+}
+
+void ACleanTowelStackActor::BeginPlay()
+{
+	Super::BeginPlay();
+	TowelPresentationVisual->BindInventorySource(Inventory);
+}
+
+void ACleanTowelStackActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	TowelPresentationVisual->UnbindInventorySource();
+	Super::EndPlay(EndPlayReason);
 }
 
 FPlayerInteractionQuery ACleanTowelStackActor::QueryInteraction(const FPlayerInteractionContext& Context) const

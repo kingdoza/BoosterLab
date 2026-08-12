@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-clean stack부터 customer 사용, used bin/바닥 overflow, player basket, washer와 dryer를 거쳐 clean stack으로 돌아오는 수건 순환 Source와 기본 Blueprint class는 구현되었다. Stack/Pile runtime 연결과 미연결 Slot presentation component는 [TowelPresentationSystem.md](TowelPresentationSystem.md)의 다음 구현 target이다.
+clean stack부터 customer 사용, used bin/바닥 overflow, player basket, washer와 dryer를 거쳐 clean stack으로 돌아오는 수건 순환 Source와 기본 Blueprint class는 구현되었다. Stack/Pile runtime 연결과 gameplay actor에 연결하지 않은 Slot presentation component도 [TowelPresentationSystem.md](TowelPresentationSystem.md)에 따라 Source 구현되었으며 profile/layout Editor authoring이 남아 있다.
 
 ## Source Scope
 
@@ -19,7 +19,7 @@ Source/BathhouseSim/Public/Towel/
   TowelProcessingMachineActor.h
   TowelTransferPortComponent.h
   TowelMachineControlComponent.h
-  Presentation/                    # target
+  Presentation/
     TowelVisualTypes.h
     TowelVisualMeshProfile.h
     TowelQuantityVisualComponent.h
@@ -42,7 +42,7 @@ Source/BathhouseSim/Private/Tests/
 - clean stack, used bin, carried basket와 individual overflow towel
 - washer/dryer state, timer와 towel state conversion
 - customer towel-use token과 overflow recovery 지원
-- authoritative count와 분리된 Blueprint presentation target
+- authoritative count와 분리된 native presentation 및 Blueprint authoring 경계
 
 Towel은 player input mapping, customer StateTree hierarchy, facility reservation과 UI 상태를 소유하지 않는다.
 
@@ -78,7 +78,7 @@ Towel은 player input mapping, customer StateTree hierarchy, facility reservatio
 | machine state/end time/conversion | `ATowelProcessingMachineActor` |
 | basket physical lifecycle | `ATowelBasketActor` + `UPlayerCarryComponent` |
 | customer-held towel handle | `UCustomerSessionComponent` |
-| visual count convergence | `UTowelQuantityVisualComponent` target |
+| visual count convergence | `UTowelQuantityVisualComponent` |
 
 ## Inventory And Atomic Transfer
 
@@ -234,7 +234,7 @@ Customer interruption:
 
 `UTowelInventoryComponent::OnInventoryChanged`는 previous/current snapshot과 transaction id를 제공한다. 각 snapshot에 state, count, capacity와 revision이 포함된다.
 
-Stack/Pile/Slot의 native mesh selection, ISM layout, count animation, revision convergence와 연결 범위는 [TowelPresentationSystem.md](TowelPresentationSystem.md)를 따른다. Blueprint는 pivot/bounds/profile과 machine animation/sound만 authoring하며 authoritative count를 변경하지 않는다.
+Stack/Pile/Slot의 native mesh selection, ISM layout, count animation, revision convergence와 연결 범위는 [TowelPresentationSystem.md](TowelPresentationSystem.md)를 따른다. 연결 actor의 collision-free reflected default-subobject 계약명은 공통 `TowelPresentationVisual`이다. Blueprint는 pivot/bounds/profile과 machine animation/sound만 authoring하며 authoritative count를 변경하지 않는다.
 
 Machine 표현 event:
 

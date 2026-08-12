@@ -6,6 +6,7 @@
 #include "Towel/TowelBasketActor.h"
 #include "Towel/TowelCirculationSubsystem.h"
 #include "Towel/TowelInventoryComponent.h"
+#include "Towel/Presentation/TowelStackVisualComponent.h"
 #include "Towel/TowelTransferSubsystem.h"
 #include "Towel/WorldUsedTowelActor.h"
 
@@ -16,6 +17,20 @@ AUsedTowelBinActor::AUsedTowelBinActor()
 	FacilityType = EBathhouseFacilityType::TowelBasket;
 	Inventory = CreateDefaultSubobject<UTowelInventoryComponent>(TEXT("TowelInventory"));
 	Inventory->ConfigureDefaults(ETowelState::None, 0, 20);
+	TowelPresentationVisual = CreateDefaultSubobject<UTowelStackVisualComponent>(TEXT("TowelPresentationVisual"));
+	TowelPresentationVisual->SetupAttachment(GetRootComponent());
+}
+
+void AUsedTowelBinActor::BeginPlay()
+{
+	Super::BeginPlay();
+	TowelPresentationVisual->BindInventorySource(Inventory);
+}
+
+void AUsedTowelBinActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	TowelPresentationVisual->UnbindInventorySource();
+	Super::EndPlay(EndPlayReason);
 }
 
 FPlayerInteractionQuery AUsedTowelBinActor::QueryInteraction(const FPlayerInteractionContext& Context) const

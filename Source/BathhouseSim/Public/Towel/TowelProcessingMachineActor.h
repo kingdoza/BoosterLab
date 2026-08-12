@@ -8,6 +8,7 @@
 class USceneComponent;
 class UTowelInventoryComponent;
 class UTowelMachineControlComponent;
+class UTowelPileVisualComponent;
 class UTowelTransferPortComponent;
 class UTowelTransferSubsystem;
 
@@ -72,6 +73,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel Machine")
 	TObjectPtr<UTowelMachineControlComponent> MachineControl;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel Machine|Presentation")
+	TObjectPtr<UTowelPileVisualComponent> TowelPresentationVisual;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel Machine")
 	ETowelMachineKind MachineKind = ETowelMachineKind::Washer;

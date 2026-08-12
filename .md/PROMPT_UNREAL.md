@@ -1,79 +1,120 @@
-# Unreal Prompt — Unified Physical Carry Drop And Wall Sweep Verification
+# Unreal Prompt — Towel Presentation Authoring After Contract Rework
 
 ## Status
 
-**Asset 변경 불필요, 검증만 필요.**
+**C++ collision 재작업과 read-only Blueprint compile 완료, profile/layout Content authoring과 PIE 검증 필요.**
 
-이번 C++ 재작업은 Blueprint, `.uasset`, input mapping, layout 또는 presentation 계약을 변경하지 않는다. target-side start-penetration MTD를 보수적으로 거부하도록 native sweep만 수정했다. 기존 authored asset을 resave하지 말고 공통 드랍과 wall sweep을 PIE에서 검증한다.
-
-검증 대상:
-
-- `/Game/Bathhouse/Blueprints/Cleaning/BP_WetMop` — parent `AWetMopActor`
-- `/Game/Bathhouse/Blueprints/Towel/BP_TowelBasket` — parent `ATowelBasketActor`
-- `/Game/FirstPersonCharacter/BP_FirstPersonCharacter` — parent `AFirstPersonCharacter`
-- G가 이미 연결된 `/Game/Input/IMC_FirstPerson`와 `/Game/Input/Actions/IA_DropCarry`
-- wet mop/towel basket이 배치된 현재 테스트 map
+모든 새 inherited native presentation component의 exact 이름은 `TowelPresentationVisual`이다. Stack actor에서는 `UTowelStackVisualComponent`, washer/dryer에서는 `UTowelPileVisualComponent` 타입이다.
 
 ## Native Preflight
 
 1. 모든 BathhouseSim Editor와 Live Coding을 닫는다.
 2. UE 5.8 `Build.bat`으로 `BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE`를 빌드한다.
-3. Editor를 새로 열어 native class/property load warning이 없는지 확인한다.
-4. C++ 빌드는 2026-08-12 KST에 성공했고 `BathhouseSim.*` automation은 16 success, 0 fail이었다.
-5. hot reload class, missing native parent/property가 보이면 asset을 저장하지 말고 Editor를 닫아 정식 빌드부터 다시 수행한다.
+3. Editor를 새로 열고 `LogBlueprint: Error`, duplicate property, missing native property/default subobject가 없는지 확인한다.
+4. C++ 단계 증거는 build 성공, target Blueprint compile 0 error/0 warning, focused 1 success, 전체 17 success/0 fail이다.
+5. native load/compiler 오류가 보이면 asset을 저장하지 말고 Editor를 닫아 코드 리뷰 단계로 돌린다.
 
-## Read-Only Asset Contract Check
+## Native Contract
 
-두 carryable Blueprint의 inherited `WorldMesh`가 다음 계약을 이미 만족하는지 확인만 한다.
+| Blueprint | Parent | Inherited component | Concrete type |
+|---|---|---|---|
+| `/Game/Bathhouse/Blueprints/Towel/BP_CleanTowelStack` | `ACleanTowelStackActor` | `TowelPresentationVisual` | Stack |
+| `/Game/Bathhouse/Blueprints/Towel/BP_UsedTowelBin` | `AUsedTowelBinActor` | `TowelPresentationVisual` | Stack |
+| `/Game/Bathhouse/Blueprints/Towel/BP_TowelBasket` | `ATowelBasketActor` | `TowelPresentationVisual` | Stack |
+| `/Game/Bathhouse/Blueprints/Towel/BP_Washer` | `ATowelProcessingMachineActor` | `TowelPresentationVisual` | Pile |
+| `/Game/Bathhouse/Blueprints/Towel/BP_Dryer` | `ATowelProcessingMachineActor` | `TowelPresentationVisual` | Pile |
 
-- `WorldMesh`가 actor root다.
-- mesh asset이 지정되어 bounds의 X/Y/Z extent가 모두 0보다 크다.
-- world 상태에서 collision/physics가 가능한 body setup을 가진다.
-- Visibility sweep에서 벽으로 사용할 geometry가 `ECC_Visibility`를 block한다.
-- 기존 `ThrowSpawnDistance`와 `ThrowImpulseStrength` 값을 변경하지 않는다.
+기존 Blueprint symbol `StackVisual`, `BinVisual`, `MachineVisual`은 native 계약명이 아니다. 임의 rename하지 않는다.
 
-`UPlayerCarryComponent`의 inherited native default는 다음과 같다.
+## Create Mesh Profile Data Assets
 
-- `DropSweepChannel = ECC_Visibility`
-- `DropSweepClearance = 2.0`
+`UTowelVisualMeshProfile` Data Asset을 `/Game/Bathhouse/Data/Towel/`에 만든다.
 
-이번 단계에서는 이 값을 Blueprint에서 override하지 않는다. 기존 asset이 계약을 만족하지 않으면 임의 수정·저장하지 말고 정확한 asset 경로, component/property와 현재 값을 결과에 기록해 코드/설계 단계로 반환한다.
+| Asset | State entries |
+|---|---|
+| `DA_TowelVisual_Shelf` | Clean |
+| `DA_TowelVisual_UsedBin` | Used |
+| `DA_TowelVisual_Basket` | Used, Wet, Clean |
+| `DA_TowelVisual_Washer` | Used, Wet |
+| `DA_TowelVisual_Dryer` | Wet, Clean |
 
-## Blueprint Prohibitions
+- `None`/duplicate state와 null mesh를 넣지 않는다.
+- 같은 mesh 중복은 가중치이므로 의도한 경우에만 사용한다.
+- Content Browser Data Validation에서 다섯 profile 모두 error/warning 0을 확인한다.
 
-- Event Graph에 detach, actor 위치 계산/이동, collision 전환, physics 활성화 또는 impulse를 추가하지 않는다.
-- line trace나 shape sweep, wall offset 또는 start-penetration 보정을 Blueprint로 중복 구현하지 않는다.
-- G input mapping, `ThrowSpawnDistance`, `ThrowImpulseStrength`, 물리 재질과 collision profile을 변경하지 않는다.
-- pickup/recovery/fell-out-of-world, key free drop, towel/cleaning domain state를 변경하지 않는다.
-- unrelated asset을 compile/save/resave하지 않는다.
+## Configure Stack Blueprints
 
-공통 물리 실행은 `UPlayerCarryComponent`가 소유하고 mop/basket Blueprint는 기존 presentation만 담당한다.
+각 inherited `TowelPresentationVisual`에 profile, `BaseLocalOffset`, towel 두께에 맞는 `ZSpacing`, `RandomSeed`, `CountStepInterval`, `bAnimateInventoryChanges`를 설정한다.
 
-## PIE Verification
+| Blueprint | MeshProfile | Attachment contract |
+|---|---|---|
+| `BP_CleanTowelStack` | `DA_TowelVisual_Shelf` | native actor root |
+| `BP_UsedTowelBin` | `DA_TowelVisual_UsedBin` | native actor root |
+| `BP_TowelBasket` | `DA_TowelVisual_Basket` | native `WorldMesh` |
 
-1. 빈 공간에서 towel basket을 G로 드랍하면 기존 목표 거리와 세기로 전방 이동한다.
-2. 빈 공간에서 wet mop을 G로 드랍하면 기존 목표 거리와 세기로 전방 이동한다.
-3. 가까운 수직 벽을 향하면 물체 전체 bounds가 벽 앞에 남는다.
-4. 물체 actor origin뿐 아니라 mesh 전체가 벽 내부 또는 벽 너머로 이동하지 않는다.
-5. 비스듬한 벽에서도 관통하지 않는다.
-6. 벽 모서리에서 심각한 관통, 튕김 폭발 또는 반대편 배치가 없다.
-7. player capsule은 sweep 장애물로 취급되지 않아 정상 빈 공간 드랍을 막지 않는다.
-8. held 물체가 얇은 벽과 처음부터 겹치거나 목표점 쪽 MTD가 계산돼도 벽 반대편으로 배치되지 않는다. player-side 안전 후보가 없으면 실패하고 같은 물체를 계속 들며 world collision/physics와 held presentation도 바뀌지 않는다.
-9. 8번 실패 직후 빈 공간을 향해 G를 누르면 정상 드랍된다.
-10. 드랍한 mop/basket을 다시 주울 수 있고 다음 드랍도 정상이다.
-11. mop과 basket의 결과 및 실패 동작이 같은 공통 규칙을 따른다.
-12. key를 든 상태에서 G는 기존 실패 결과를 내고 key를 계속 든다.
+`BP_CleanTowelStack`의 기존 Blueprint `StackVisual` StaticMeshComponent는 native 계약과 다른 레거시 표현이다. 새 native profile/layout을 설정해 동등한 외형을 확인한 뒤 중복 표현이면 이 Editor 단계에서만 삭제하고 Compile한다. 삭제 전 mesh/material/relative transform을 기록하며, 다른 Blueprint의 `BinVisual`/`MachineVisual`은 삭제하지 않는다.
 
-각 항목에서 최소한 actor 종류, view 방향, 벽 형태, 성공/실패, 최종 held 상태와 눈에 보이는 관통 여부를 기록한다. 가능하면 3~9번은 같은 벽과 동일 player 위치에서 두 장비를 각각 반복한다.
+## Configure Washer And Dryer
 
-## Completion
+각 inherited `TowelPresentationVisual`에 다음을 설정한다.
 
-이번 작업은 검증 전용이므로 asset Compile/Save나 map 저장을 수행하지 않는다. PIE 종료 후 다음을 보고한다.
+| Blueprint | MeshProfile | Required states |
+|---|---|---|
+| `BP_Washer` | `DA_TowelVisual_Washer` | Used -> Wet |
+| `BP_Dryer` | `DA_TowelVisual_Dryer` | Wet -> Clean |
 
-- 확인한 asset 경로와 parent/root primitive 계약
-- 12개 PIE 항목별 pass/fail
-- Output Log의 ensure/error/warning
-- 기존 Content dirty 상태에 새 변경이 추가되지 않았는지 여부
-- 실패 시 재현 위치, actor, view 방향, 벽 형태와 held/physics/presentation 상태
+정확한 reflected property 이름:
 
-Editor 작업으로 asset 변경이 필요하다고 판단되면 먼저 중단하고 변경 이유와 최소 대상 목록을 코드/설계 단계에 반환한다.
+- relative transform 또는 `BaseLocalOffset`
+- `PileHalfExtent`
+- `ItemsPerLayer`
+- `LayerSpacing`
+- `MaxZJitter`
+- constrained rotation min/max
+- `RandomSeed`, `CountStepInterval`, `bAnimateInventoryChanges`
+
+machine kind/timer/transfer port/control/delegate는 수정하지 않는다. drum animation 포함 여부는 기존 Blueprint presentation hierarchy의 attachment로만 조정한다.
+
+## Slot Boundary
+
+- `UTowelSlotVisualComponent`를 gameplay actor에 추가하지 않는다.
+- drying-rack actor/Blueprint, inventory, transfer, timer와 interaction을 만들지 않는다.
+- existing `BP_DryingSpot`을 수정하지 않는다.
+
+## Compile And Save
+
+1. profile 다섯 개를 Data Validation한다.
+2. target Blueprint 다섯 개를 개별 Compile한다.
+3. compiler/load 오류가 0인 경우에만 의도한 asset을 저장한다.
+4. Editor 재시작 후 inherited `TowelPresentationVisual`, profile reference와 layout 값이 유지되는지 확인한다.
+5. 의도하지 않은 dirty asset은 저장하지 않는다.
+
+예상 Content 변경은 profile Data Asset 5개와 target Blueprint 5개다. `BP_CleanTowelStack.StackVisual`을 실제로 제거했다면 completion report에 명시한다.
+
+## PIE Acceptance
+
+1. 다섯 actor의 초기 inventory 수량이 즉시 표시된다.
+2. E/F transfer 후 visible count가 최신 inventory count로 수렴한다.
+3. 기존 layer는 unrelated revision에서 mesh/transform이 바뀌지 않는다.
+4. basket Used/Wet/Clean과 washer Used->Wet, dryer Wet->Clean state swap이 count/transform을 보존한다.
+5. Pile은 drum bounds 안의 아래 layer부터 채워지고 같은 seed에서 재현된다.
+6. instance가 collision/overlap/navigation/interaction trace에 참여하지 않는다.
+7. basket carry/drop, machine process와 used-bin overflow가 기존과 동일하다.
+8. `BP_CleanTowelStack`에 레거시 mesh와 native instance의 중복 표시가 없다.
+9. PIE 종료/재시작 뒤 중복 instance, timer 또는 delegate 반응이 없다.
+
+## Forbidden Blueprint Logic
+
+- inventory count/state 재계산
+- Event Graph ISM 생성/삭제
+- native delegate bind lifecycle 대체
+- machine/transfer gameplay 변경
+
+## Completion Report
+
+- 생성/수정/저장한 exact asset 경로
+- profile state별 mesh와 component layout 최종값
+- `BP_CleanTowelStack.StackVisual` 보존/삭제 결정과 이관 값
+- Data Validation/Blueprint compile/재로드 결과
+- PIE acceptance pass/fail과 실패 재현 절차
+- 의도하지 않은 dirty asset 유무

@@ -1,8 +1,8 @@
 # Towel Presentation System
 
-## Target Status
+## Implementation Status
 
-이 문서는 기존 Towel inventory snapshot을 Static Mesh Instance로 표현하는 Stack/Pile/Slot 공통 기능의 확정 구현 target을 정의한다. 현재 Towel circulation, washer/dryer와 Blueprint actor는 존재하지만 이 native quantity presentation 계층은 아직 구현되지 않았다.
+기존 Towel inventory snapshot을 Static Mesh Instance로 표현하는 Stack/Pile/Slot 공통 Source 계층은 구현되었다. 기존 actor의 Stack/Pile runtime bind와 Slot component/API/validation/Editor preview가 포함되며 profile/layout Content authoring과 PIE 시각 검증은 Editor 후속 단계다.
 
 이번 연결 범위:
 
@@ -12,7 +12,7 @@
 
 수건 건조대 Actor, inventory, interaction, processing과 Content asset은 이번 범위 밖이다.
 
-## Source Target
+## Source Scope
 
 ```text
 Source/BathhouseSim/Public/Towel/Presentation/
@@ -139,9 +139,9 @@ index transform은 component local 기준 `BaseLocalOffset + FVector::UpVector *
 
 Native default subobject 연결:
 
-- `ACleanTowelStackActor::StackVisual`
-- `AUsedTowelBinActor::StackVisual`
-- `ATowelBasketActor::StackVisual`
+- `ACleanTowelStackActor::TowelPresentationVisual`
+- `AUsedTowelBinActor::TowelPresentationVisual`
+- `ATowelBasketActor::TowelPresentationVisual`
 
 각 Actor가 BeginPlay에 자기 `Inventory`를 명시적으로 bind하고 EndPlay에 unbind한다. owner/component search로 암묵 연결하지 않는다. Used bin 내부 instance는 표현 전용이고 overflow `AWorldUsedTowelActor`와 무관하다.
 
@@ -158,7 +158,7 @@ Native default subobject 연결:
 
 index는 `LayerIndex = Index / ItemsPerLayer`를 사용한다. X/Y는 authored extent 안 random, Z는 base + layer spacing + bounded jitter로 계산하고 extent 밖으로 clamp한다. 적은 count가 공중에 뜨지 않게 아래 layer부터 생성한다.
 
-기존 `ATowelProcessingMachineActor`에 `PileVisual` native default subobject 하나만 추가한다. `BP_Washer`와 `BP_Dryer`가 이를 상속하고 각각 drum 안 pivot/bounds와 profile을 authoring한다. existing `Inventory`에 bind하므로 process completion의 Used->Wet 또는 Wet->Clean commit도 같은 revision event로 표현된다.
+기존 `ATowelProcessingMachineActor`에 `TowelPresentationVisual` Pile native default subobject 하나만 추가한다. `BP_Washer`와 `BP_Dryer`가 이를 상속하고 각각 drum 안 pivot/bounds와 profile을 authoring한다. existing `Inventory`에 bind하므로 process completion의 Used->Wet 또는 Wet->Clean commit도 같은 revision event로 표현된다.
 
 기존 machine timer, transfer port, control, state delegate와 Blueprint process animation은 변경하지 않는다. Pile instance를 drum 회전에 포함할지는 Blueprint attachment/presentation으로 결정한다.
 
@@ -187,7 +187,7 @@ count N은 valid slot의 앞 N개를 표시하고 감소는 마지막 visible sl
 
 ## Blueprint/API Contracts
 
-기존 actor에 추가되는 `StackVisual`/`PileVisual`은 `VisibleAnywhere`, `BlueprintReadOnly` default subobject다. 기존 reflected component/property/event를 rename하거나 삭제하지 않는다.
+기존 actor에 추가되는 Stack/Pile typed `TowelPresentationVisual`은 `VisibleAnywhere`, `BlueprintReadOnly` default subobject다. 이 collision-free 이름은 다섯 target Blueprint의 기존 serialized symbol을 읽기 전용 검사해 확정했으며 기존 reflected component/property/event를 rename하거나 삭제하지 않는다.
 
 Editor authoring:
 

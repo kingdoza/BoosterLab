@@ -7,6 +7,7 @@
 
 class AWorldUsedTowelActor;
 class UTowelInventoryComponent;
+class UTowelStackVisualComponent;
 
 UCLASS(Blueprintable)
 class BATHHOUSESIM_API AUsedTowelBinActor : public ABathhouseFacilityActor, public IPlayerInteractable
@@ -15,6 +16,8 @@ class BATHHOUSESIM_API AUsedTowelBinActor : public ABathhouseFacilityActor, publ
 
 public:
 	AUsedTowelBinActor();
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual FPlayerInteractionQuery QueryInteraction(const FPlayerInteractionContext& Context) const override;
 	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
 	virtual FPlayerInteractionResult ExecuteSecondaryInteraction(const FPlayerInteractionContext& Context) override;
@@ -27,6 +30,9 @@ public:
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel")
 	TObjectPtr<UTowelInventoryComponent> Inventory;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel|Presentation")
+	TObjectPtr<UTowelStackVisualComponent> TowelPresentationVisual;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel|Overflow", meta = (ClampMin = "0.0"))
 	float OverflowMinRadius = 80.0f;

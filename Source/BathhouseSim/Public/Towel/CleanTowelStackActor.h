@@ -6,6 +6,7 @@
 #include "CleanTowelStackActor.generated.h"
 
 class UTowelInventoryComponent;
+class UTowelStackVisualComponent;
 
 UCLASS(Blueprintable)
 class BATHHOUSESIM_API ACleanTowelStackActor : public ABathhouseFacilityActor, public IPlayerInteractable
@@ -14,6 +15,8 @@ class BATHHOUSESIM_API ACleanTowelStackActor : public ABathhouseFacilityActor, p
 
 public:
 	ACleanTowelStackActor();
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual FPlayerInteractionQuery QueryInteraction(const FPlayerInteractionContext& Context) const override;
 	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
 	virtual FPlayerInteractionResult ExecuteSecondaryInteraction(const FPlayerInteractionContext& Context) override;
@@ -24,6 +27,9 @@ public:
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel")
 	TObjectPtr<UTowelInventoryComponent> Inventory;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel|Presentation")
+	TObjectPtr<UTowelStackVisualComponent> TowelPresentationVisual;
 
 private:
 	FPlayerInteractionResult TransferFromHeldBasket(

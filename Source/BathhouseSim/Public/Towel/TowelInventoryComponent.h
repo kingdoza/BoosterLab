@@ -47,6 +47,7 @@ private:
 	friend class AWorldUsedTowelActor;
 	friend class FBathhouseTowelTransferTest;
 	friend class FBathhouseCustomerTowelTest;
+	friend class FBathhouseTowelPresentationTest;
 
 	void ConfigureDefaults(ETowelState InState, int32 InCount, int32 InCapacity);
 	bool TryBeginTransaction();

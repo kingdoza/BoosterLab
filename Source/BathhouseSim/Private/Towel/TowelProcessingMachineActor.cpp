@@ -6,6 +6,7 @@
 #include "Towel/TowelBasketActor.h"
 #include "Towel/TowelInventoryComponent.h"
 #include "Towel/TowelMachineControlComponent.h"
+#include "Towel/Presentation/TowelPileVisualComponent.h"
 #include "Towel/TowelTransferPortComponent.h"
 
 #define LOCTEXT_NAMESPACE "TowelProcessingMachineActor"
@@ -22,17 +23,21 @@ ATowelProcessingMachineActor::ATowelProcessingMachineActor()
 	TransferPort->SetupAttachment(SceneRoot);
 	MachineControl = CreateDefaultSubobject<UTowelMachineControlComponent>(TEXT("MachineControl"));
 	MachineControl->SetupAttachment(SceneRoot);
+	TowelPresentationVisual = CreateDefaultSubobject<UTowelPileVisualComponent>(TEXT("TowelPresentationVisual"));
+	TowelPresentationVisual->SetupAttachment(SceneRoot);
 }
 
 void ATowelProcessingMachineActor::BeginPlay()
 {
 	Super::BeginPlay();
 	Inventory->OnInventoryChanged.AddDynamic(this, &ATowelProcessingMachineActor::HandleInventoryChanged);
+	TowelPresentationVisual->BindInventorySource(Inventory);
 }
 
 void ATowelProcessingMachineActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(ProcessingTimerHandle);
+	TowelPresentationVisual->UnbindInventorySource();
 	Inventory->OnInventoryChanged.RemoveDynamic(this, &ATowelProcessingMachineActor::HandleInventoryChanged);
 	Inventory->SetExternalMutationBlocked(false);
 	OnMachineStateChanged.Clear();

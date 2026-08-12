@@ -3,7 +3,7 @@
 ## 문서 기준
 
 - 기준일: 2026-08-12(KST) Towel Stack/Pile/Slot presentation 확정 설계 기준
-- 상태: Cleaning/Towel gameplay와 기본 Blueprint 구현 완료, Stack/Pile runtime 연결과 미연결 Slot component 구현 대기
+- 상태: Cleaning/Towel gameplay와 기본 Blueprint 구현 완료, Stack/Pile runtime 연결과 미연결 Slot component Source 구현 완료, Editor authoring 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -160,4 +160,4 @@ Source/BathhouseSim/
 - `ST_CustomerRoutine`, Data Asset, Blueprint facility/key/customer/cash/UI와 Level 배치는 C++ 코드 리뷰 승인 후 Unreal 단계 target이다.
 - 현재 Source는 customer-owned montage playback component, Bath action/approach snap과 두 native montage StateTree Task까지 구현한다. AnimNotify, Motion Warping, 신발·의상 전환은 포함하지 않는다.
 - Cleaning/Towel Source, secondary/drop input, native prompt 확장과 customer towel StateTree Task/Condition은 구현되었다. InputAction/IMC, WBP hierarchy, Blueprint actor, facility 배치와 `ST_CustomerRoutine` asset 연결은 Unreal 후속 단계다.
-- Towel Stack/Pile/Slot native presentation은 다음 구현 target이다. 기존 `BP_Washer`/`BP_Dryer`를 확장하며 신규 machine이나 drying-rack gameplay actor를 만들지 않는다.
+- Towel Stack/Pile/Slot native presentation은 collision-free `TowelPresentationVisual` reflected 계약으로 구현되었다. 기존 `BP_Washer`/`BP_Dryer`의 inherited Pile authoring과 profile 지정은 Editor 후속 단계이며 신규 machine이나 drying-rack gameplay actor는 만들지 않는다.

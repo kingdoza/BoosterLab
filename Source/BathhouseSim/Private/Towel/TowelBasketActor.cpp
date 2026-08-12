@@ -5,6 +5,7 @@
 #include "Interaction/PlayerCarryComponent.h"
 #include "Towel/TowelCirculationSubsystem.h"
 #include "Towel/TowelInventoryComponent.h"
+#include "Towel/Presentation/TowelStackVisualComponent.h"
 
 #define LOCTEXT_NAMESPACE "TowelBasketActor"
 
@@ -16,6 +17,8 @@ ATowelBasketActor::ATowelBasketActor()
 	WorldMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
 	Inventory = CreateDefaultSubobject<UTowelInventoryComponent>(TEXT("TowelInventory"));
 	Inventory->ConfigureDefaults(ETowelState::None, 0, 10);
+	TowelPresentationVisual = CreateDefaultSubobject<UTowelStackVisualComponent>(TEXT("TowelPresentationVisual"));
+	TowelPresentationVisual->SetupAttachment(WorldMesh);
 }
 
 void ATowelBasketActor::BeginPlay()
@@ -23,10 +26,12 @@ void ATowelBasketActor::BeginPlay()
 	Super::BeginPlay();
 	InitialTransform = GetActorTransform();
 	LastSafeTransform = InitialTransform;
+	TowelPresentationVisual->BindInventorySource(Inventory);
 }
 
 void ATowelBasketActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	TowelPresentationVisual->UnbindInventorySource();
 	if (Carrier)
 	{
 		Carrier->NotifyHeldActorEnding(this);

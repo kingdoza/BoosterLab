@@ -1,115 +1,119 @@
-# Code Review Prompt — Unified Physical Carry Drop And Wall Sweep
+# Code Review Prompt — Towel Presentation Blueprint Contract Rework
 
 ## Review Objective
 
-UE 5.8 C++에서 wet mop/towel basket의 중복 물리 드랍 실행을 `UPlayerCarryComponent`로 통합하고, 실제 물체 크기 기반 wall sweep과 실패 트랜잭션 보존을 추가한 변경을 Editor 검증 전에 리뷰한다.
-
-이번 제출은 첫 코드 리뷰에서 확인된 target-side start-penetration MTD와 Interaction 정본의 G world-drop 범위 모순을 수정하고, delegate 재진입 회귀를 추가한 재검토본이다.
+UE 5.8 Towel presentation 구현의 기존 `BP_CleanTowelStack.StackVisual` 이름 충돌을 해결한 재작업을 Editor authoring 전에 리뷰한다. presentation behavior와 gameplay authority는 유지하고 새 reflected/default-subobject 계약명과 Blueprint/compiler 검증만 바로잡았다.
 
 기준 문서:
 
+- `.md/AGENT_WORKFLOW.md`
+- `.md/AGENT_REVIEW.md`
 - `.md/0_ARCHITECTURE.md`
-- `.md/Architecture/InteractionSystem.md`
-- `.md/Architecture/CleaningSystem.md`
 - `.md/Architecture/TowelSystem.md`
-- 사용자 제공 `Unreal Prompt — Unified Physical Carry Drop And Wall Sweep`
+- `.md/Architecture/TowelPresentationSystem.md`
+- `.md/Architecture/CoreSystem.md`
+- `.md/PROMPT_IMPLEMENTATION.md`
+- `.md/PROMPT_IMPLEMENTATION_R.md`
 
-이 리뷰에서는 Source와 문서를 검사하되 Content, Config와 `.uproject`를 수정하지 않는다.
+## Original Failure
 
-## Acceptance Criteria
+이전 전체 automation은 17 success를 보고했지만 같은 startup 로그에 다음 Blueprint compiler error가 2건 있었다.
 
-- G 입력과 `UPlayerInteractionComponent`의 intent/result 흐름은 유지된다.
-- `UPlayerCarryComponent`만 detach, 위치 적용, collision/physics 활성화와 impulse를 실행한다.
-- `IPhysicalCarryable`은 root primitive, 기존 drop distance/impulse와 commit 완료 알림을 제공한다.
-- mop/basket 완료 알림은 carrier, last safe transform과 presentation만 정리한다.
-- primitive 월드 AABB, identity rotation, 기본 `ECC_Visibility`로 held bounds 중심부터 기존 목표점까지 sweep한다.
-- actor origin/bounds center 차이를 보정하고 blocking hit의 `Hit.Location`에서 clearance를 확보한다.
-- start penetration MTD가 투척 목표 쪽으로 진행하면 반대편 벽 통과 후보로 간주해 실패하고, 나머지 후보만 같은 shape/channel overlap으로 재검증한다.
-- 안전 공간 없음, 위치 적용 실패 또는 physics 활성화 실패가 반쪽 release를 남기지 않는다.
-- key의 G free drop 거부와 held identity가 유지된다.
-- 기존 `ThrowSpawnDistance`와 `ThrowImpulseStrength` 값은 바뀌지 않는다.
+```text
+BP_CleanTowelStack: Tried to create a property StackVisual ...
+but another object (/Script/BathhouseSim.CleanTowelStackActor:StackVisual) already exists there.
+```
+
+기존 Blueprint SCS가 `StackVisual`/`StackVisual_GEN_VARIABLE`을 직렬화했고 새 native parent도 같은 이름을 선언해 skeleton/generated class property 생성이 충돌했다.
+
+## Implemented Correction
+
+네 actor의 새 native member와 default-subobject 이름을 공통 `TowelPresentationVisual`로 교체했다.
+
+| Actor | Component type | Final reflected/default-subobject name |
+|---|---|---|
+| `ACleanTowelStackActor` | `UTowelStackVisualComponent` | `TowelPresentationVisual` |
+| `AUsedTowelBinActor` | `UTowelStackVisualComponent` | `TowelPresentationVisual` |
+| `ATowelBasketActor` | `UTowelStackVisualComponent` | `TowelPresentationVisual` |
+| `ATowelProcessingMachineActor` | `UTowelPileVisualComponent` | `TowelPresentationVisual` |
+
+- 각 actor는 exactly one native presentation component를 소유한다.
+- BeginPlay에는 자기 `Inventory`만 bind하고 EndPlay에는 unbind한다.
+- profile/revision/count animation/ISM/Stack/Pile/Slot behavior는 변경하지 않았다.
+- exact default-subobject name automation assertion도 최종 이름으로 변경했다.
+
+## Read-Only Asset Symbol Inspection
+
+다섯 target `.uasset`의 serialized strings를 저장 없이 검사했다.
+
+| Asset | Existing relevant symbols | `TowelPresentationVisual` collision |
+|---|---|---|
+| `BP_CleanTowelStack` | `StackVisual`, `StackVisual_GEN_VARIABLE` | 없음 |
+| `BP_UsedTowelBin` | `BinVisual`, `BinVisual_GEN_VARIABLE` | 없음 |
+| `BP_TowelBasket` | 별도 custom visual symbol 없음 | 없음 |
+| `BP_Washer` | `MachineVisual`, `MachineVisual_GEN_VARIABLE` | 없음 |
+| `BP_Dryer` | `MachineVisual`, `MachineVisual_GEN_VARIABLE` | 없음 |
 
 ## Changed Files
 
-- `Source/BathhouseSim/Public/Interaction/PhysicalCarryable.h`
-- `Source/BathhouseSim/Public/Interaction/PlayerCarryComponent.h`
-- `Source/BathhouseSim/Private/Interaction/PlayerCarryComponent.cpp`
-- `Source/BathhouseSim/Public/Interaction/BathhouseKeyActor.h`
-- `Source/BathhouseSim/Private/Interaction/BathhouseKeyActor.cpp`
-- `Source/BathhouseSim/Public/Cleaning/WetMopActor.h`
-- `Source/BathhouseSim/Private/Cleaning/WetMopActor.cpp`
+Source contract/test:
+
+- `Source/BathhouseSim/Public/Towel/CleanTowelStackActor.h`
+- `Source/BathhouseSim/Private/Towel/CleanTowelStackActor.cpp`
+- `Source/BathhouseSim/Public/Towel/UsedTowelBinActor.h`
+- `Source/BathhouseSim/Private/Towel/UsedTowelBinActor.cpp`
 - `Source/BathhouseSim/Public/Towel/TowelBasketActor.h`
 - `Source/BathhouseSim/Private/Towel/TowelBasketActor.cpp`
-- `Source/BathhouseSim/Private/Tests/BathhouseCleaningTowelTestProbe.h`
-- `Source/BathhouseSim/Private/Tests/BathhouseCleaningTowelTestProbe.cpp`
-- `Source/BathhouseSim/Private/Tests/CleaningTowelAutomationTests.cpp`
-- `.md/Architecture/InteractionSystem.md`
+- `Source/BathhouseSim/Public/Towel/TowelProcessingMachineActor.h`
+- `Source/BathhouseSim/Private/Towel/TowelProcessingMachineActor.cpp`
+- `Source/BathhouseSim/Private/Tests/TowelPresentationAutomationTests.cpp`
 
-정기 인계 결과물은 이 파일과 `.md/PROMPT_UNREAL.md`다. `.md/0_ARCHITECTURE.md`의 시스템 경계는 현재 구조와 충돌하지 않아 이번 작업으로 수정하지 않았다.
+Canonical/handoff:
 
-## Contract And Implementation Summary
+- `.md/0_ARCHITECTURE.md`
+- `.md/Architecture/TowelSystem.md`
+- `.md/Architecture/TowelPresentationSystem.md`
+- `.md/PROMPT_REVIEW.md`
+- `.md/PROMPT_UNREAL.md`
 
-`IPhysicalCarryable::HandleReleasedBy`를 제거하고 다음 계약으로 분리했다.
+## Blueprint/API/Core Redirect
 
-- `GetPhysicalCarryPrimitive()`
-- `GetThrowSpawnDistance()`
-- `GetThrowImpulseStrength()`
-- `NotifyPhysicalDropCommitted()`
+- 기존 reflected gameplay API와 Blueprint SCS component를 rename/delete하지 않았다.
+- 폐기한 `StackVisual`/`PileVisual` native 이름은 Editor authoring을 통과하거나 Content에 저장된 계약이 아니므로 Core Redirect를 추가하지 않았다.
+- redirect로 기존 live `BP_CleanTowelStack.StackVisual`을 흡수하면 잘못된 migration이 되므로 직접 collision-free 이름을 사용한다.
+- `Config/`, `.uproject`, `BathhouseSim.Build.cs`는 변경하지 않았다.
+- `Content/`는 수정하거나 resave하지 않았다.
 
-non-droppable key는 default primitive/parameter 계약을 사용하고 `CanFreeDrop`에서 기존처럼 거부된다. free-droppable mop/basket은 `WorldMesh` root와 기존 parameter를 반환한다.
+## Verification Evidence
 
-공통 호출 흐름:
+- UE 5.8 `BathhouseSimEditor Win64 Development` 정식 빌드 성공: 9 actions, compile/link/UHT error 0.
+- allow-list `CompileAllBlueprints` read-only pass가 다섯 target asset을 각각 load/compile했다.
+- Blueprint compile 결과: 0 errors, 0 warnings, 0 failed loads.
+- compile 로그의 `LogBlueprint: Error`, `Internal Compiler Error`, `another object`, missing native parent/property/default subobject: 0건.
+- focused `BathhouseSim.Towel.Presentation.StackPileSlotAndLifecycle`: 1 success, 0 fail, exit code 0.
+- full `BathhouseSim`: 17 success, 0 fail, exit code 0.
+- focused/full startup 로그의 동일 compiler 금지 진단: 각각 0건.
+- 다섯 target asset의 실행 전/후 SHA-256 일치; Content 저장 없음.
 
-`G → Character → PlayerInteractionComponent → PlayerCarryComponent → validate → box sweep/overlap → detach/place/physics/impulse → carryable notify → ClearHeldObject`
+## Review Focus
 
-commit 전에는 held reference를 지우지 않는다. start penetration의 depenetration delta가 throw direction으로 전진하면 안전한 player-side 후보가 아니므로 mutation 없이 실패한다. commit 중 presentation delegate가 재진입해도 중복 release하지 않도록 guard를 두었고, 위치/physics 실패 시 이전 actor transform, collision, relative transform과 held anchor attachment를 복원한다.
+1. 네 UPROPERTY 이름과 `CreateDefaultSubobject` 이름이 모두 exact `TowelPresentationVisual`인가?
+2. 기존 `StackVisual`, `BinVisual`, `MachineVisual` Blueprint symbol을 native code가 침범하지 않는가?
+3. actor별 Stack/Pile concrete type과 attachment, bind/unbind lifecycle이 재작업 전과 같은가?
+4. 테스트가 component type 탐색뿐 아니라 exact default-subobject 이름을 검증하는가?
+5. Core Redirect 없음과 Content 무변경 판단이 asset inspection 결과에 부합하는가?
+6. `.md/PROMPT_UNREAL.md`가 exact `TowelPresentationVisual`과 실제 pile property `MaxZJitter`를 사용하는가?
+7. test count와 별도로 Blueprint/startup compiler 로그 scan이 증거에 포함됐는가?
 
-## Sweep Review Focus
+## Out Of Scope
 
-- `Primitive.Bounds.BoxExtent`가 유효하고 세 축 모두 0보다 큰지 확인한다.
-- `SweepStart=Primitive.Bounds.Origin`, `SweepEnd=DesiredActorLocation+BoundsOffset`인지 확인한다.
-- 월드 AABB에 `FQuat::Identity`를 사용하고 owner/object만 ignore하는지 확인한다.
-- 일반 blocking hit 후보가 `Hit.Location - direction * clearance`이고 segment 밖으로 나가지 않는지 확인한다.
-- start penetration의 `Dot(DepenetrationDelta, ThrowDirection) > 0` 경로가 overlap-free인 얇은 벽 반대편 후보도 승인하지 않는지 확인한다.
-- 후방·측면 start-penetration 후보가 segment clamp와 동일 shape/channel overlap 검사를 우회하지 않는지 확인한다.
-- 실패 전에 attachment, carrier, physics와 presentation mutation이 없는지 확인한다.
-- notify callback과 held delegate 재진입 중 object/carrier 불일치가 생기지 않는지 확인한다.
+- inventory/transfer/machine authority 또는 presentation algorithm 변경
+- drying-rack gameplay/asset
+- 이번 코드 재작업 중 Blueprint 삭제, rename 또는 resave
+- 신규 module/config/redirect
 
-## Compatibility And Scope Review
+## Review Output
 
-- `TryReleaseHeldEquipment`, key commit/query/delegate와 G result intent는 유지된다.
-- reflected rename/delete, Core Redirect와 Build.cs 변경은 없다.
-- 새 reflected authoring 값은 `DropSweepChannel`, `DropSweepClearance`뿐이며 Blueprint 연결은 요구하지 않는다.
-- pickup, recovery, fell-out-of-world, input mapping, towel/cleaning domain 규칙은 변경하지 않았다.
-- 선형/각속도 초기화, character velocity inheritance, pawn collision grace와 물리 재질은 의도적으로 기존 동작을 유지한다.
-- 이번 작업에서 Content/.uasset을 수정하거나 저장하지 않았다. 작업 트리의 기존 Content 변경은 별도 Editor 작업 소유다.
-
-## Class Growth
-
-- `UPlayerCarryComponent`: header 62→83줄, cpp 160→369줄. generic held ownership에 공통 physical drop transaction과 private sweep helper가 응집되었다.
-- `AWetMopActor`: header 61→60줄, cpp 156→151줄.
-- `ATowelBasketActor`: header 69→68줄, cpp 166→161줄.
-
-구체 장비는 감소했고 공통 owner가 성장했다. `.md/Architecture/CoreSystem.md`에는 agent 문서가 참조하는 구체 Class Growth Policy가 아직 없으므로 임의 threshold는 적용하지 않았다. 리뷰에서는 sweep 계산을 별도 component로 분리할 정도의 독립 lifecycle/state가 실제로 필요한지보다 현재 carry transaction 응집도가 적절한지 우선 판단한다.
-
-재작업은 production class/property를 추가하지 않았다. `UBathhousePhysicalDropReentryProbe`는 automation 전용 delegate observer이며 production lifecycle/state를 소유하지 않는다. `CleaningTowelAutomationTests.cpp`는 958줄로 크지만 승인된 기존 domain 통합 테스트 파일이며 이번 변경은 동일 physical-carry fixture의 회귀 범위만 확장한다.
-
-## Verification Results — 2026-08-12 KST
-
-- UE 5.8 `Build.bat BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE`: 성공.
-- `Automation RunTests BathhouseSim`: 16 success, 0 fail, exit code 0.
-- focused `BathhouseSim.Interaction.PhysicalCarryDropSweepAndTransaction`: 1 success, 0 fail, exit code 0.
-- 신규 coverage는 얇은 벽 fixture가 `bStartPenetrating`과 target-side MTD를 실제로 생성함을 먼저 단언하고, 반대편 commit 거부와 held object/attachment/physics/transform/concrete carrier 보존을 확인한다.
-- 기존 큰 start blocker, 정상 벽 직전 배치, physics/forward impulse, 빈 공간 재시도와 mop/basket 공통 경로가 계속 성공한다.
-- release presentation delegate의 중첩 drop attempt는 실패 이유와 함께 거부되고, outer commit은 presentation 방송 한 번, held clear와 physics commit 한 번으로 끝난다.
-- 기존 `BathhouseSim.Cleaning.CarryHoldZoneAndRegistry`: 성공. key G 거부와 held identity 보존 포함.
-- `git diff --check`: 오류 없음. 기존 working-copy LF→CRLF 경고만 존재.
-- focused search: `HandleReleasedBy` 0건, concrete mop/basket의 `AddImpulse`와 drop `SetActorLocation` 0건, 공통 실행은 `PlayerCarryComponent` 한 곳.
-
-## Not Yet Verified
-
-- 실제 authored mesh/collision을 사용하는 PIE 12개 시나리오
-- 비스듬한 벽과 벽 모서리에서의 시각적 관통/physics 안정성
-- player capsule ignore와 실제 camera/held-anchor offset 조합
-
-이 항목은 `.md/PROMPT_UNREAL.md`의 검증 전용 절차로 인계한다.
+- finding은 severity와 exact file/line 근거로 작성한다.
+- 문제가 없으면 코드 단계 승인 후 `.md/PROMPT_UNREAL.md`를 Editor 단계로 인계한다.
+- Source 문제가 있으면 `.md/PROMPT_IMPLEMENTATION_R.md`에 최소 재작업 범위와 compiler-log 회귀 검증을 작성한다.
