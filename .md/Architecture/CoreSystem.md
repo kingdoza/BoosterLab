@@ -83,6 +83,7 @@ Core System은 고정된 native class inventory를 유지하지 않는다. 구�
 - `UISystem.md`: native Widget/Widget Blueprint 경계
 - `CleaningSystem.md`: water stain spawn과 wet mop cleaning 경계
 - `TowelSystem.md`: towel inventory, atomic transfer와 processing 경계
+- `TowelPresentationSystem.md`: Towel 하위 Stack/Pile/Slot world presentation 경계
 - `CoreSystem.md`: Source 루트, 모듈/문서/redirect 공통 규칙
 
 `Source/BathhouseSim/Private/Tests`는 system이 아니라 focused native automation test 경로다.

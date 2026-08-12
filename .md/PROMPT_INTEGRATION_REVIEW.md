@@ -1,152 +1,165 @@
-# Bath Approach Snap And Customer Montage — Unreal Integration Review
+# Cleaning And Towel Circulation — Unreal Integration Review
 
 ## 작업 상태
 
-- 상태: 부분 완료 — 사용자 에디터 작업 대기
+- 상태: 부분 완료 — 사용자 Editor 작업 대기
 - 기준 작업서: `.md/PROMPT_UNREAL.md`
 - 후속 사용자 작업: `.md/USER_UNREAL.md`
 - UE 버전: 5.8.1
-- 완료로 보고하지 않는 이유: Skeleton Slot 등록, Bath Montage section 이름, AnimBP Slot 선택, StateTree Task/Binding/Transition은 현재 Unreal MCP의 등록 도구로 편집할 수 없다.
+- 완료로 보고하지 않는 이유:
+  - `WBP_InteractionPrompt`에 필수 `BindWidget` 세 개를 추가해야 한다.
+  - `ST_CustomerRoutine` towel flow는 등록된 Unreal MCP 도구로 편집할 수 없다.
+  - 신규 World Partition 액터는 메모리에 배치됐지만 MCP `save_actor` 결함 때문에 사용자 `Ctrl+S`가 필요하다.
+  - WBP 컴파일 실패로 PIE 진입이 중단돼 인수 시나리오를 아직 실행하지 못했다.
 
-## Native Preflight
+## Native Preflight와 생성자 크래시 수정
 
-- 실행 중이던 Editor를 종료하고 UE 5.8 공식 `Build.bat`로 `BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE`를 빌드했다.
-- 번들 .NET SDK 10.0을 사용했고 결과는 `Succeeded`, 타깃은 최신 상태였다.
-- 새 Editor 프로세스로 프로젝트를 열었다. Hot Reload와 stale DLL은 사용하지 않았다.
-- 다음 네이티브 타입을 새 프로세스에서 확인했다.
-  - `/Script/BathhouseSim.CustomerMontagePlaybackComponent`
-  - `/Script/BathhouseSim.CustomerFacilitySnapTask`
-  - `/Script/BathhouseSim.CustomerBeginActivityTask`
-  - `/Script/BathhouseSim.CustomerFinishActivityTask`
-  - `/Script/BathhouseSim.PlayCustomerMontageOnceTask`
-  - `/Script/BathhouseSim.PlaySelectedMontageLoopForDurationTask`
-- 누락된 native type/property 오류는 없었다.
+- 실행 중이던 Editor를 정상 종료한 뒤 UE 5.8 공식 빌드 경로로 `BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE`를 전체 링크 빌드했다.
+- 첫 새 Editor 시작에서 `UTowelTransferPortComponent` 생성 중 `NewObject with empty name can't be used to create default subobjects` fatal을 확인했다.
+- 원인은 UObject 생성자에서 `SetBoxExtent`/`SetSphereRadius`를 호출해 BodySetup 갱신과 `NewObject`가 발생한 것이었다.
+- 생성자 전용 초기화 API로 다음 네 파일을 수정했다.
+  - `TowelTransferPortComponent.cpp`: `SetBoxExtent` → `InitBoxExtent`
+  - `TowelMachineControlComponent.cpp`: `SetBoxExtent` → `InitBoxExtent`
+  - `StainSpawnZoneActor.cpp`: `SetBoxExtent` → `InitBoxExtent`
+  - `WaterStainActor.cpp`: `SetSphereRadius` → `InitSphereRadius`
+- CrashReportClient가 DLL/PDB를 잠근 첫 재빌드 시도를 정상 종료 후 다시 빌드했다.
+- 최종 전체 링크 빌드는 `Succeeded`, 5.05초였고 새 Editor에서 Unreal MCP가 재연결됐다. Hot Reload는 사용하지 않았다.
 
-## Customer Blueprint와 실제 Animation 자산
+## E/F/G Input
 
-- `/Game/Bathhouse/Blueprints/Customer/BP_BathhouseCustomer`
-  - native parent 계약을 유지했다.
-  - 상속 컴포넌트 `CustomerSession`, `CustomerMontagePlayback`을 확인했다.
-  - `CustomerMontagePlayback.PrimaryComponentTick.bCanEverTick=false`다.
-  - Blueprint Event Graph, montage delegate, timer 로직을 추가하지 않았다.
-  - warnings-as-errors 컴파일에 성공했다.
-- 실제 고객 Anim Class는 `/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed.ABP_Unarmed_C`다.
-- 고객 Skeletal Mesh는 `/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple`이다.
-- Skeleton은 `/Game/Characters/Mannequins/Meshes/SK_Mannequin`이다.
-- `ABP_Unarmed` AnimGraph의 현재 경로는 `Main States -> Slot(DefaultSlot) -> Control Rig -> Output Pose`다.
-- Slot 배치는 이미 올바르지만 Skeleton에 `CustomerAction`이 없어서 Slot 이름은 아직 `DefaultSlot`이다.
-- 현재 상태의 `ABP_Unarmed`은 warnings-as-errors 컴파일에 성공했다.
+- 생성:
+  - `/Game/Input/Actions/IA_SecondaryInteract`
+  - `/Game/Input/Actions/IA_DropCarry`
+- 두 InputAction 모두 Boolean/Digital이며 asset Trigger/Modifier는 비어 있다.
+- `/Game/Input/IMC_FirstPerson` 최종 mapping:
+  - E → `IA_Interact`
+  - F → `IA_SecondaryInteract`
+  - G → `IA_DropCarry`
+- `/Game/FirstPersonCharacter/BP_FirstPersonCharacter` 기본값:
+  - `InteractAction=IA_Interact`
+  - `SecondaryInteractAction=IA_SecondaryInteract`
+  - `DropCarryAction=IA_DropCarry`
+- `/Game/FirstPerson/Blueprints/BP_FirstPersonController`의 `DefaultMappingContext`는 기존 `IMC_FirstPerson`을 유지한다.
+- Player Blueprint는 warnings-as-errors 컴파일에 성공했고 관련 Input assets와 함께 저장됐다.
 
-## Bath Slot Authoring
+## Interaction Prompt Widget
 
-- 수정 에셋:
-  - `/Game/Bathhouse/Blueprints/Facility/BP_Bath`
-  - `/Game/Maps/DefaultMap`
-- 배치 Bath 인스턴스: `Bathhouse_Bath`, World `(1750, 0, 0)`
-- 고객 Capsule: Radius 25, Half Height 88
-- Bath placeholder mesh: `/Engine/BasicShapes/Cube`, 상대 위치 `(0,0,50)`, 상대 스케일 `(1.5,1.8,0.45)`, BlockAllDynamic
-- Bath top World Z는 72.5다.
-- Action Capsule 바닥은 Bath top에서 2cm 위이고, Approach Capsule 바닥은 지면에서 2cm 위다.
+- HUD: `/Game/Bathhouse/Blueprints/Game/BP_BathhouseHUD`
+- 실제 Prompt WBP: `/Game/Bathhouse/UI/WBP_InteractionPrompt`
+- native parent: `/Script/BathhouseSim.InteractionPromptWidget`
+- 기존 필수 이름 `PromptRoot`, `TargetNameText`, `ActionNameText`, `FailureReasonText`는 존재한다.
+- 현재 누락:
+  - `SecondaryActionNameText` (`TextBlock`)
+  - `SecondaryFailureReasonText` (`TextBlock`)
+  - `InteractionProgressBar` (`ProgressBar`)
+- 등록된 MCP에 Widget hierarchy 편집 도구가 없어 `.md/USER_UNREAL.md`에 정확한 UI 절차를 기록했다.
+- PIE 시작 시 `Blueprint failed to compile: WBP_InteractionPrompt`가 발생했고 PostPIEStarted가 오지 않아 MCP StartPIE 대기가 반환되지 않았다.
 
-| Slot | Action Local | Action World | ApproachOffset | Approach World | Facing |
-|---|---:|---:|---:|---:|---:|
-| A | `(0,-60,162.5)` | `(1750,-60,162.5)` | `(150,0,-72.5)` | `(1900,-60,90)` | Yaw 180 |
-| B | `(0,0,162.5)` | `(1750,0,162.5)` | `(150,0,-72.5)` | `(1900,0,90)` | Yaw 180 |
-| C | `(0,60,162.5)` | `(1750,60,162.5)` | `(150,0,-72.5)` | `(1900,60,90)` | Yaw 180 |
+## Cleaning Blueprints
 
-- Action은 Bath footprint 위의 비-Nav 목표다.
-- Approach는 Bath 바깥 지면의 고객 중심 높이다.
-- 세 Action 간격 60cm는 고객 Capsule 지름 50cm보다 크다.
-- `BP_Bath`는 warnings-as-errors 컴파일에 성공했고 `DefaultMap`과 함께 저장했다.
-- Editor 재시작 후 Blueprint 기본값과 배치 인스턴스 값이 모두 유지됨을 다시 읽어 확인했다.
+생성 경로는 `/Game/Bathhouse/Blueprints/Cleaning/`이다.
 
-## 생성한 Montage
+- `BP_CleaningDirector` → `ACleaningDirectorActor`
+  - Spawn Interval 15초, total limit 8, attempts 12
+  - `StainClass=BP_WaterStain`, spacing 100, Pawn clearance 80
+- `BP_StainSpawnZone` → `AStainSpawnZoneActor`
+  - 기본 BathFloor, weight 1, per-zone limit 4
+  - Visibility floor trace, distance 300, max slope 10도
+  - required component tag 없음, zone 밖 fallback 없음
+- `BP_WaterStain` → `AWaterStainActor`
+  - `StainVisual` Plane, NoCollision, presentation-only
+  - native `InteractionCollision` 유지, removal duration 2초
+- `BP_WetMop` → `AWetMopActor`
+  - `WorldMesh` Cube placeholder와 `MopHeadVisual` presentation component
+  - throw impulse 450, throw distance 70
+  - 배치 actor scale과 head absolute scale을 이용해 지면에 맞춘 mop 형태 유지
 
-### AM_Customer_Action_Once
+네 Blueprint는 warnings-as-errors 컴파일과 저장에 성공했다. Blueprint에 cleaning count/progress mutation은 추가하지 않았다.
 
-- 경로: `/Game/Bathhouse/Animations/Customer/AM_Customer_Action_Once`
-- 생성 원본: `/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Fire_Montage`
-- Skeleton: `/Game/Characters/Mannequins/Meshes/SK_Mannequin`
-- AnimSequence: `/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Land`
-- 기술 검증 구간: 0.666667초
-- Root Motion 없음, AnimNotify 없음
-- Slot track field: `CustomerAction`
-- Asset loop 꺼짐, Auto Blend Out 켜짐, 자연 종료 가능
+## Towel Blueprints
 
-### AM_Customer_Bath_Loop
+생성 경로는 `/Game/Bathhouse/Blueprints/Towel/`이다.
 
-- 경로: `/Game/Bathhouse/Animations/Customer/AM_Customer_Bath_Loop`
-- 생성 원본: `/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Fire_Montage`
-- Skeleton: `/Game/Characters/Mannequins/Meshes/SK_Mannequin`
-- AnimSequence: `/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle`
-- 기술 검증 구간: 0.666667초
-- Root Motion 없음, AnimNotify 없음
-- Slot track field: `CustomerAction`
-- Asset loop 꺼짐
+- `BP_TowelBasket` → `ATowelBasketActor`
+  - Cube placeholder, native physics/interaction collision 유지
+  - throw impulse 400, throw distance 70
+- `BP_CleanTowelStack` → `ACleanTowelStackActor`
+  - `StackVisual`, `FacilitySlot`
+  - `FacilityType=TowelShelf`, Clean 20/30
+  - slot location `(-75,0,0)`, approach offset `(-100,0,0)`
+- `BP_UsedTowelBin` → `AUsedTowelBinActor`
+  - `BinVisual`, `FacilitySlot`, `FacilityType=TowelBasket`
+  - overflow radius 80..180, floor trace 250, attempts 8, spacing 50, Pawn clearance 60
+  - `WorldUsedTowelClass=BP_WorldUsedTowel`
+- `BP_WorldUsedTowel` → `AWorldUsedTowelActor`
+  - Engine Plane placeholder로 한 장의 얇은 world presentation 유지
+- `BP_Washer`, `BP_Dryer` → `ATowelProcessingMachineActor`
+  - MachineKind 각각 Washer/Dryer, processing duration 10초
+  - inherited TransferPort `(35,0,60)`, extent 30
+  - inherited MachineControl `(35,0,125)`, extent 20
+  - 두 visibility trace volume은 공간적으로 분리됨
 
-두 Montage는 저장 후 Editor를 재시작해 AnimSequence, Skeleton, Slot, 길이와 비루프 설정이 유지됨을 확인했다.
+여섯 Blueprint는 warnings-as-errors 컴파일과 저장에 성공했다. Blueprint에 count/state/token mutation은 추가하지 않았다.
 
-## 현재 미완료 Editor 연결
+## Customer Data Asset
 
-- `/Game/Characters/Mannequins/Meshes/SK_Mannequin`
-  - `DefaultGroup.CustomerAction` Slot 등록 필요
-- `/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed`
-  - 기존 `DefaultSlot` 노드를 `DefaultGroup.CustomerAction`으로 선택 필요
-- `/Game/Bathhouse/Animations/Customer/AM_Customer_Action_Once`
-  - Skeleton Slot 등록 뒤 `DefaultGroup.CustomerAction` 표시 확인 필요
-- `/Game/Bathhouse/Animations/Customer/AM_Customer_Bath_Loop`
-  - Skeleton Slot 등록 뒤 `DefaultGroup.CustomerAction` 표시 확인 필요
-  - 현재 `Default` section을 `BathLoop`로 이름 변경 필요
-- `/Game/Bathhouse/AI/ST_CustomerRoutine`
-  - 기존 Schema, Context Actor, AI Controller는 정상이며 재시작 뒤 컴파일 성공했다.
-  - 현재 asset 문자열/등록 task 검사에서 새 Snap/Begin/Finish/one-shot/duration-loop Task가 존재하지 않는다.
-  - Bath shared cleanup과 one-shot Drying 기술 검증 경로가 필요하다.
-  - 기존 상위 `Delay(Run Forever)` workaround는 보존해야 한다.
+- 대상: `/Game/Bathhouse/Data/DA_CustomerRoutine_Default`
+- `TowelAvailabilityWaitSeconds=10`
+- `TowelUnavailableSatisfactionPenalty=10`
+- 값 설정과 저장을 확인했다.
 
-정확한 UI 절차와 값은 `.md/USER_UNREAL.md`에 기록했다.
+## DefaultMap 배치
 
-## Compile, Save, Restart 검증
+메모리상 현재 배치는 다음과 같다.
 
-- 변경 에셋은 모두 명시 경로로만 저장했다. 전체 dirty asset 일괄 저장은 사용하지 않았다.
-- 첫 세션에서 `BP_BathhouseCustomer`, `BP_Bath`, `ABP_Unarmed` 컴파일에 성공했다.
-- `ST_CustomerRoutine`은 현재 그래프로 컴파일 성공했다.
-- `BP_Bath`, `DefaultMap`, 두 Montage를 저장했다.
-- Editor를 종료하고 새 UE 5.8 프로세스로 다시 열었다.
-- 새 프로세스에서 일곱 대상 에셋을 모두 load했고 dirty asset은 없었다.
-- `BP_BathhouseCustomer`, `BP_Bath`, `ABP_Unarmed`을 warnings-as-errors로 다시 컴파일했다.
-- `ST_CustomerRoutine` 재로드 로그: `Compile StateTree ... succeeded`.
-- Map Check: 0 Error, 0 Warning.
+| 라벨 | 위치 | 비고 |
+|---|---:|---|
+| CleaningDirector | `(0,700,0)` | 1개 |
+| DressingCleaningZone | `(1000,-700,0)` | DressingFloor, extent `(400,200,100)` |
+| BathCleaningZone | `(2050,-300,0)` | BathFloor, extent `(150,250,100)` |
+| WetMop | `(750,750,43)` | scale `(0.08,0.08,0.8)` |
+| TowelBasketCart | `(1150,750,10)` | scale `(0.4,0.3,0.2)` |
+| CleanTowelStack | `(1250,120,0)` | customer approach가 NavMesh 내부 |
+| UsedTowelBin | `(1150,420,0)` | 기존 generic TowelBasket 인스턴스 대체 |
+| Washer | `(1500,750,0)` | customer facility 아님 |
+| Dryer | `(1850,750,0)` | customer facility 아님 |
 
-## PIE 스모크
+- 모든 후보 위치에서 World Visibility trace가 바닥 Z=0에 적중했다.
+- zone XY는 시설물 아래를 피해 빈 바닥으로 제한했다.
+- 기존 `/Game/Bathhouse/Blueprints/Facility/BP_TowelBasket`의 배치 인스턴스만 제거했고 에셋은 보존했다.
+- 액터 라벨에 `Bathhouse_` 접두사를 사용하지 않았다.
+- Map package 저장만으로 신규 World Partition external actor package가 생성되지 않았고, `SceneTools.save_actor`는 `Asset does not exist: /Game/__ExternalActors__/...`로 실패했다.
+- 따라서 에디터 종료/재로드 전에 사용자가 현재 레벨에서 `Ctrl+S`를 해야 한다.
 
-- 재시작 후 PIE를 25초 이상 실행했다.
-- `BP_BathhouseCustomer` 4개와 AI Controller 4개가 생성됐다.
-- 세 queue 고객 위치는 대략 `(242.6,-74.3,90.15)`, `(341.6,-74.0,90.15)`, `(451.7,-76.0,90.15)`로 확인돼 기존 생성/AI 루틴이 실행 중이었다.
-- 프로젝트 StateTree 초기화 오류, Blueprint 오류, Bath snap 오류, montage 오류는 관찰되지 않았다.
-- 새 StateTree Task가 아직 연결되지 않았으므로 이 스모크는 Bath snap/montage 기능 성공을 의미하지 않는다.
+## StateTree
 
-## 로그 분류
+- native Task 로드 대상:
+  - `Acquire Or Wait For Clean Towel`
+  - `Mark Customer Towel Used`
+  - `Return Customer Towel`
+- native Condition에 `HasTowel`, `TowelWaitExpired`가 존재한다.
+- 등록된 Unreal MCP에는 StateTree graph 편집 도구가 없어 asset을 변경하지 않았다.
+- `.md/USER_UNREAL.md`에 기존 facility 예약/이동 패턴을 복제하는 정확한 구조와 Binding을 기록했다.
 
-- 프로젝트 compile/map 오류: 없음
-- StateTree 현 그래프 compile 오류: 없음
-- 비차단 엔진 환경 로그:
-  - aqProf, VTune, WinPix, Wintab 선택 DLL 미탑재
-  - NVIDIA 610 미만 드라이버에서 TSR 16-bit VALU 비활성화
-  - 엔진 `UnifiedErrorTest` 자체 테스트 로그
-  - MCP session reinitialize 및 JSON schema 미지원 delegate/property 경고
-  - StateTree editor menu 중복 등록 경고
-- Montage `sequenceLength` 직접 설정 시도 경고는 최종 asset 값을 0.666667초로 일치시킨 뒤 저장했고 재시작 검증을 통과했다.
+## Compile, Save, Restart와 PIE
 
-## 아직 수행하지 않은 PIE 인수 시나리오
+- 새 Input/Blueprint/Data assets는 개별 compile/save했다.
+- 최종 수정한 Cleaning/Towel Blueprint도 다시 warnings-as-errors compile 후 저장했다.
+- `WBP_InteractionPrompt`의 필수 BindWidget 누락 때문에 PIE 시작 전 Blueprint compile 단계에서 중단됐다.
+- 현재 신규 map actors가 아직 외부 패키지로 저장되지 않았으므로 Editor 재시작은 수행하지 않았다.
+- 따라서 E/F/G, stain hold, machine transfer, customer towel 정상/품절/overflow/interruption PIE 시나리오는 아직 통과로 판정하지 않는다.
 
-- Approach 이동 후 정확한 Action snap과 이동 모드 disable/restore
-- blocked Action 충돌 실패와 비이동 진단
-- 자연 duration 종료와 Finish -> Approach -> Release 순서
-- `BathStayExpired`의 Montage Exit -> Finish -> Approach -> Release 순서
-- technical abort cleanup
-- MontageCandidates null/zero/many와 Enter당 단일 선택
-- one-shot 자연 종료, 외부 중단, stale token
-- 기존 `Timed Customer Activity` 회귀
-- 두 고객의 서로 다른 Bath Slot 동시 사용과 exclusivity
+## 사용자 작업 후 재개할 검증
 
-위 항목은 `.md/USER_UNREAL.md` 완료 후에만 검증할 수 있다.
+1. WBP compile 및 E/F row/hold bar 동작
+2. DefaultMap external actors 재로드 유지
+3. ST_CustomerRoutine compile, towel facility reservation/release
+4. mop 없이 stain 실패, mop hold progress/cancel/complete
+5. G drop과 key 거부, 자동 swap 없음
+6. stain spawn floor/spacing/limit
+7. basket/stack/bin/machine E one/F max와 direction/full/processing gate
+8. washer Used→Wet, dryer Wet→Clean, output drain 뒤 Waiting/None 복귀
+9. customer towel 정상 획득·사용·반납
+10. 품절 timeout과 session당 단일 satisfaction penalty
+11. full bin overflow/PendingSpill
+12. return 전 interruption과 technical abort token terminalization

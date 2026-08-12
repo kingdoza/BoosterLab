@@ -45,7 +45,10 @@ protected:
 	void LookInput(const FInputActionValue& Value);
 	void SprintStartInput();
 	void SprintReleaseInput();
-	void InteractInput();
+	void InteractStartInput();
+	void InteractEndInput();
+	void SecondaryInteractInput();
+	void DropCarryInput();
 
 	UFUNCTION(BlueprintCallable, Category = "Input")
 	void DoMove(float Right, float Forward);
@@ -92,6 +95,12 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> InteractAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> SecondaryInteractAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> DropCarryAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
 	float MoveSpeedScale = 1.0f;

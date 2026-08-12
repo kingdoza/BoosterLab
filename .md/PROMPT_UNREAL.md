@@ -1,160 +1,79 @@
-# Unreal Prompt — Bath Approach Snap And Customer Montage Tasks
+# Unreal Prompt — Unified Physical Carry Drop And Wall Sweep Verification
 
-## Status And Scope
+## Status
 
-Editor work is required after C++ code review approval. Use UE 5.8 only.
+**Asset 변경 불필요, 검증만 필요.**
 
-Modify only the assets needed for Bath approach/action authoring, customer montage playback and `ST_CustomerRoutine` wiring. Do not add shoe/clothing mesh, visibility, skin-weight, AnimNotify, prop, Motion Warping, UI, input, Interaction or Economy work.
+이번 C++ 재작업은 Blueprint, `.uasset`, input mapping, layout 또는 presentation 계약을 변경하지 않는다. target-side start-penetration MTD를 보수적으로 거부하도록 native sweep만 수정했다. 기존 authored asset을 resave하지 말고 공통 드랍과 wall sweep을 PIE에서 검증한다.
+
+검증 대상:
+
+- `/Game/Bathhouse/Blueprints/Cleaning/BP_WetMop` — parent `AWetMopActor`
+- `/Game/Bathhouse/Blueprints/Towel/BP_TowelBasket` — parent `ATowelBasketActor`
+- `/Game/FirstPersonCharacter/BP_FirstPersonCharacter` — parent `AFirstPersonCharacter`
+- G가 이미 연결된 `/Game/Input/IMC_FirstPerson`와 `/Game/Input/Actions/IA_DropCarry`
+- wet mop/towel basket이 배치된 현재 테스트 map
 
 ## Native Preflight
 
-1. Close every BathhouseSim Editor instance.
-2. Build `BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE` with UE 5.8.1 and launch fresh.
-3. Confirm no missing native type/property errors for:
-   - `UCustomerMontagePlaybackComponent`
-   - `CustomerMontagePlayback`
-   - `FCustomerFacilitySnapTask`
-   - `FCustomerBeginActivityTask`
-   - `FCustomerFinishActivityTask`
-   - `FPlayCustomerMontageOnceTask`
-   - `FPlaySelectedMontageLoopForDurationTask`
-4. Do not use hot reload or a stale DLL for asset work.
+1. 모든 BathhouseSim Editor와 Live Coding을 닫는다.
+2. UE 5.8 `Build.bat`으로 `BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE`를 빌드한다.
+3. Editor를 새로 열어 native class/property load warning이 없는지 확인한다.
+4. C++ 빌드는 2026-08-12 KST에 성공했고 `BathhouseSim.*` automation은 16 success, 0 fail이었다.
+5. hot reload class, missing native parent/property가 보이면 asset을 저장하지 말고 Editor를 닫아 정식 빌드부터 다시 수행한다.
 
-## Existing Assets
+## Read-Only Asset Contract Check
 
-- `/Game/Bathhouse/Blueprints/Customer/BP_BathhouseCustomer`
-- `/Game/Bathhouse/Blueprints/Facility/BP_Bath`
-- `/Game/Bathhouse/AI/ST_CustomerRoutine`
-- `/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed` only if this is still the customer mesh Anim Class; otherwise report the actual AnimBP path before editing it.
-- `/Game/Maps/DefaultMap`
+두 carryable Blueprint의 inherited `WorldMesh`가 다음 계약을 이미 만족하는지 확인만 한다.
 
-Create customer Montage assets under `/Game/Bathhouse/Animations/Customer/`. Reuse compatible existing assets only after recording their source path and skeleton. Do not retarget, replace the customer skeleton or invent appearance-state logic in this task.
+- `WorldMesh`가 actor root다.
+- mesh asset이 지정되어 bounds의 X/Y/Z extent가 모두 0보다 크다.
+- world 상태에서 collision/physics가 가능한 body setup을 가진다.
+- Visibility sweep에서 벽으로 사용할 geometry가 `ECC_Visibility`를 block한다.
+- 기존 `ThrowSpawnDistance`와 `ThrowImpulseStrength` 값을 변경하지 않는다.
 
-## Customer Blueprint
+`UPlayerCarryComponent`의 inherited native default는 다음과 같다.
 
-- Open `BP_BathhouseCustomer`; native parent remains `ABathhouseCustomerCharacter`.
-- Confirm inherited `CustomerSession` remains readable for StateTree binding.
-- Confirm inherited `CustomerMontagePlayback` exists, is read-only and uses native defaults; add no Blueprint logic to it.
-- Confirm the inherited skeletal mesh has a valid Anim Class and record the exact AnimBP path.
-- Compile/save without adding montage delegates or playback Event Graph logic.
+- `DropSweepChannel = ECC_Visibility`
+- `DropSweepClearance = 2.0`
 
-## Bath Slot Authoring
+이번 단계에서는 이 값을 Blueprint에서 override하지 않는다. 기존 asset이 계약을 만족하지 않으면 임의 수정·저장하지 말고 정확한 asset 경로, component/property와 현재 값을 결과에 기록해 코드/설계 단계로 반환한다.
 
-- Open `BP_Bath` and every placed Bath instance used by `DefaultMap`.
-- For each `UBathhouseFacilitySlotComponent`:
-  - component transform plus `FacingRotation` is the exact in-bath character-feet `ActionPoint`.
-  - `ApproachOffset` produces the character-feet `ApproachPoint` on reachable NavMesh outside the bath.
-  - do not author either point at capsule-center height. Native Session code adds the customer's scaled capsule half height when it resolves the actual actor transform.
-  - leave enough blocking-collision clearance for the full customer capsule at the resolved action transform.
-- For the current DefaultMap Bath blockout, use these relative values after resetting any placed-instance override:
+## Blueprint Prohibitions
 
-| Slot | action-feet relative location | `ApproachOffset` | `FacingRotation` |
-|---|---:|---:|---:|
-| A | `(0, -60, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
-| B | `(0, 0, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
-| C | `(0, 60, 74.5)` | `(150, 0, -72.5)` | `(0, 180, 0)` |
+- Event Graph에 detach, actor 위치 계산/이동, collision 전환, physics 활성화 또는 impulse를 추가하지 않는다.
+- line trace나 shape sweep, wall offset 또는 start-penetration 보정을 Blueprint로 중복 구현하지 않는다.
+- G input mapping, `ThrowSpawnDistance`, `ThrowImpulseStrength`, 물리 재질과 collision profile을 변경하지 않는다.
+- pickup/recovery/fell-out-of-world, key free drop, towel/cleaning domain state를 변경하지 않는다.
+- unrelated asset을 compile/save/resave하지 않는다.
 
-- With the placed Bath actor at `(1750, 0, 0)`, the authored action-feet world Z is `74.5` and approach-feet world Z is `2.0`.
-- With the current capsule half height `88`, native runtime actor-center Z becomes `162.5` at action and `90.0` at approach.
-- Do not extend NavMesh into the bath and do not project the action point onto navigation.
-- Visualize/check both transforms, then save `BP_Bath` and `DefaultMap`.
-
-## AnimBP And Montage Assets
-
-- In the actual customer AnimBP, route the locomotion/base pose through one Slot node named `DefaultGroup.CustomerAction`.
-- Preserve the existing locomotion graph; the Slot overlays montage playback and contains no gameplay/domain mutation.
-- Create at least one compatible technical-validation one-shot Montage and one Bath loop Montage under:
-  - `/Game/Bathhouse/Animations/Customer/AM_Customer_Action_Once`
-  - `/Game/Bathhouse/Animations/Customer/AM_Customer_Bath_Loop`
-- Both Montages use slot `DefaultGroup.CustomerAction`.
-- `AM_Customer_Bath_Loop` must contain a valid section named `BathLoop`; do not author the asset section as an infinite loop. The native Task links `BathLoop -> BathLoop` at runtime.
-- The one-shot Montage must reach a natural montage end. Do not use a timer or AnimNotify as its completion signal.
-- Additional candidate Montages are optional, but every candidate must use the same compatible skeleton and Slot contract.
-
-## StateTree Context And Bindings
-
-Open `/Game/Bathhouse/AI/ST_CustomerRoutine`:
-
-- Context Actor remains `ABathhouseCustomerCharacter`/`BP_BathhouseCustomer`.
-- Bind every Session input from `Context Actor.CustomerSession`.
-- Bind montage Task `Customer` from the context Actor itself.
-- Keep existing queue, facility, key, cash and navigation logic unchanged except the activity sequences below.
-- Do not rename or delete existing `Timed Customer Activity`; retain it for animation-free/timer-only states.
-
-## Animated Activity Sequence
-
-For an activity that uses a one-shot montage, author this order inside its existing facility parent:
-
-1. existing approach target and built-in `Move To`
-2. `Begin Customer Activity`
-   - bind Session
-   - set the matching Activity
-3. `Play Customer Montage Once`
-   - bind Customer
-   - assign valid MontageCandidates
-   - author PlayRate, optional StartSection, BlendInTime and BlendOutTime
-4. `Finish Customer Activity` with the same Session and Activity
-5. leave the facility parent so its native Exit releases the slot
-
-Do not add a duration wait around the one-shot Task. Normal montage end is the only success signal.
-
-## Bath Sequence
-
-Inside the existing `Hold Customer Facility(Bath)` parent, author:
-
-1. `Get Customer Facility Target` with `bUseApproachPoint=true`
-2. built-in `Move To` bound to Destination
-3. existing successful navigation-result recording
-4. `Snap Customer Facility Point(Target=ActionPoint)`
-5. `Begin Customer Activity(Activity=BathDwell)`
-6. `Play Selected Montage Loop For Duration`
-   - Customer bound from context Actor
-   - MontageCandidates include `AM_Customer_Bath_Loop` and any approved compatible variants
-   - `LoopSection=BathLoop`
-   - bind `Duration` from the preceding Begin Task `ResolvedDuration`
-7. shared Bath cleanup state:
-   - `Finish Customer Activity(Activity=BathDwell)`
-   - `Snap Customer Facility Point(Target=ApproachPoint)`
-8. only after cleanup, leave the Bath facility parent; its native Exit releases the slot
-
-Both natural loop-duration completion and `Customer.Event.BathStayExpired` must transition to the same cleanup state while still inside the Bath facility parent. Exiting the montage state first lets its native Exit stop only its owned token. Do not transition directly from the action point to the next Bath or MainShower state.
-
-The facility parent Exit is fallback cleanup for interruption/technical abort; do not duplicate release logic in Blueprint or StateTree Tasks.
-
-## Compile And Save
-
-Compile/save:
-
-- actual customer AnimBP
-- every new Montage
-- `BP_BathhouseCustomer`
-- `BP_Bath`
-- `ST_CustomerRoutine`
-- `DefaultMap`
-
-Restart the Editor, reload all listed assets and compile `ST_CustomerRoutine` again. Record any missing context/output binding or invalid montage section by exact asset path.
+공통 물리 실행은 `UPlayerCarryComponent`가 소유하고 mop/basket Blueprint는 기존 presentation만 담당한다.
 
 ## PIE Verification
 
-1. Confirm a customer walks with its feet on the NavMesh approach point, stops, then snaps with its feet exactly on the action point.
-2. Confirm movement remains disabled while inside the Bath and is restored at approach before the next `Move To`.
-3. Block an action point with collision; snap must fail without moving the customer and must log the diagnostic.
-4. Let Bath dwell finish naturally; the selected montage stays unchanged, stops at duration, activity finishes, customer returns to approach and only then releases the slot.
-5. Trigger `BathStayExpired` during the loop; montage Exit, activity finish, approach snap and parent release occur in that order before MainShower movement.
-6. Interrupt the Bath state and force technical abort; no montage, disabled movement or occupied slot remains.
-7. Use one valid loop candidate among null entries; it plays. Use zero valid candidates; the Task fails with the expected error. Use several valid candidates over repeated customers and confirm one selection per EnterState with no mid-loop shuffle.
-8. Run the one-shot Task; natural montage end succeeds, while external interruption fails and cleanup cannot stop a newer montage.
-9. Run an animation-free state through existing `Timed Customer Activity` and confirm its previous timer behavior still works.
-10. Test at least two customers using different Baths and verify exclusivity, approach return and subsequent navigation.
+1. 빈 공간에서 towel basket을 G로 드랍하면 기존 목표 거리와 세기로 전방 이동한다.
+2. 빈 공간에서 wet mop을 G로 드랍하면 기존 목표 거리와 세기로 전방 이동한다.
+3. 가까운 수직 벽을 향하면 물체 전체 bounds가 벽 앞에 남는다.
+4. 물체 actor origin뿐 아니라 mesh 전체가 벽 내부 또는 벽 너머로 이동하지 않는다.
+5. 비스듬한 벽에서도 관통하지 않는다.
+6. 벽 모서리에서 심각한 관통, 튕김 폭발 또는 반대편 배치가 없다.
+7. player capsule은 sweep 장애물로 취급되지 않아 정상 빈 공간 드랍을 막지 않는다.
+8. held 물체가 얇은 벽과 처음부터 겹치거나 목표점 쪽 MTD가 계산돼도 벽 반대편으로 배치되지 않는다. player-side 안전 후보가 없으면 실패하고 같은 물체를 계속 들며 world collision/physics와 held presentation도 바뀌지 않는다.
+9. 8번 실패 직후 빈 공간을 향해 G를 누르면 정상 드랍된다.
+10. 드랍한 mop/basket을 다시 주울 수 있고 다음 드랍도 정상이다.
+11. mop과 basket의 결과 및 실패 동작이 같은 공통 규칙을 따른다.
+12. key를 든 상태에서 G는 기존 실패 결과를 내고 key를 계속 든다.
 
-## Forbidden Editor Work
+각 항목에서 최소한 actor 종류, view 방향, 벽 형태, 성공/실패, 최종 held 상태와 눈에 보이는 관통 여부를 기록한다. 가능하면 3~9번은 같은 벽과 동일 player 위치에서 두 장비를 각각 반복한다.
 
-- no shoe/clothing or modular mesh components
-- no visibility, skin-weight, AnimNotify or appearance state
-- no Blueprint montage delegate/timer completion logic
-- no Blueprint movement, snap, facility release or session mutation
-- no NavMesh extension/projection to the Bath action point
-- no Motion Warping, root-motion alignment or prop/socket work
-- no native/reflected rename
+## Completion
 
-Record asset changes, compile/save results, PIE observations and relevant warnings in `.md/PROMPT_INTEGRATION_REVIEW.md`.
+이번 작업은 검증 전용이므로 asset Compile/Save나 map 저장을 수행하지 않는다. PIE 종료 후 다음을 보고한다.
+
+- 확인한 asset 경로와 parent/root primitive 계약
+- 12개 PIE 항목별 pass/fail
+- Output Log의 ensure/error/warning
+- 기존 Content dirty 상태에 새 변경이 추가되지 않았는지 여부
+- 실패 시 재현 위치, actor, view 방향, 벽 형태와 held/physics/presentation 상태
+
+Editor 작업으로 asset 변경이 필요하다고 판단되면 먼저 중단하고 변경 이유와 최소 대상 목록을 코드/설계 단계에 반환한다.

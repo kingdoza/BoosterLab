@@ -19,6 +19,10 @@
 #include "Interaction/BathhouseKeyHookActor.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Towel/CleanTowelStackActor.h"
+#include "Towel/TowelCirculationSubsystem.h"
+#include "Towel/TowelInventoryComponent.h"
+#include "Towel/UsedTowelBinActor.h"
 #include "TimerManager.h"
 
 #define LOCTEXT_NAMESPACE "CustomerSessionComponent"
@@ -47,7 +51,9 @@ void UCustomerSessionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 	{
 		World->GetTimerManager().ClearTimer(CheckInTimeoutHandle);
 		World->GetTimerManager().ClearTimer(BathStayTimerHandle);
+		World->GetTimerManager().ClearTimer(TowelWaitTimerHandle);
 	}
+	CleanupTowelHandle();
 	StopWaitingForFacility();
 	ReleaseCurrentFacility();
 	LeaveQueue();
@@ -56,6 +62,7 @@ void UCustomerSessionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 		Counter->OnQueueChangedNative.Remove(QueueChangedHandle);
 		QueueChangedHandle.Reset();
 	}
+	OnSatisfactionChanged.Clear();
 
 	if (!bFinished)
 	{
@@ -81,6 +88,9 @@ void UCustomerSessionComponent::InitializeSession(
 	}
 	RoutineDefinition = InRoutineDefinition;
 	Counter = InCounter;
+	Satisfaction = 100.0f;
+	bTowelWaitExpired = false;
+	bTowelShortagePenaltyCommitted = false;
 	if (Counter)
 	{
 		QueueChangedHandle = Counter->OnQueueChangedNative.AddUObject(this, &UCustomerSessionComponent::HandleQueueChanged);
@@ -306,6 +316,16 @@ bool UCustomerSessionComponent::SnapCurrentFacility(const ECustomerFacilitySnapT
 
 void UCustomerSessionComponent::ReleaseCurrentFacility()
 {
+	if (TowelUseHandle.HasToken()
+		&& TowelUseHandle.bUsed
+		&& Cast<AUsedTowelBinActor>(CurrentFacilityActor))
+	{
+		CleanupTowelHandle();
+	}
+	if (bWaitingForCleanTowel || TowelWaitStack)
+	{
+		CancelWaitingForCleanTowel();
+	}
 	if (bSnappedToFacilityActionPoint && !ReturnToCurrentFacilityApproachPoint())
 	{
 		UE_LOG(
@@ -519,6 +539,121 @@ void UCustomerSessionComponent::StopWaitingForFacility()
 	FacilityAvailabilityHandle.Reset();
 }
 
+bool UCustomerSessionComponent::TryAcquireCleanTowelFromCurrentFacility()
+{
+	if (TowelUseHandle.HasToken())
+	{
+		return true;
+	}
+	ACleanTowelStackActor* Stack = Cast<ACleanTowelStackActor>(CurrentFacilityActor);
+	UTowelCirculationSubsystem* Circulation = GetWorld()
+		? GetWorld()->GetSubsystem<UTowelCirculationSubsystem>()
+		: nullptr;
+	if (!Stack || !Circulation || !Circulation->TryAcquireCleanTowel(Stack, TowelUseHandle))
+	{
+		return false;
+	}
+	CancelWaitingForCleanTowel();
+	bTowelWaitExpired = false;
+	return true;
+}
+
+bool UCustomerSessionComponent::BeginWaitingForCleanTowel()
+{
+	if (TowelUseHandle.HasToken())
+	{
+		return true;
+	}
+	if (bWaitingForCleanTowel)
+	{
+		return true;
+	}
+	ACleanTowelStackActor* Stack = Cast<ACleanTowelStackActor>(CurrentFacilityActor);
+	if (!Stack || !Stack->GetInventory() || !RoutineDefinition || !GetWorld())
+	{
+		return false;
+	}
+
+	bWaitingForCleanTowel = true;
+	bTowelWaitExpired = false;
+	TowelWaitStack = Stack;
+	Stack->GetInventory()->OnInventoryChanged.AddDynamic(
+		this,
+		&UCustomerSessionComponent::HandleCleanTowelInventoryChanged);
+	GetWorld()->GetTimerManager().SetTimer(
+		TowelWaitTimerHandle,
+		this,
+		&UCustomerSessionComponent::HandleTowelWaitExpired,
+		FMath::Max(RoutineDefinition->TowelAvailabilityWaitSeconds, 0.01f),
+		false);
+	return true;
+}
+
+void UCustomerSessionComponent::CancelWaitingForCleanTowel()
+{
+	if (TowelWaitStack && TowelWaitStack->GetInventory())
+	{
+		TowelWaitStack->GetInventory()->OnInventoryChanged.RemoveDynamic(
+			this,
+			&UCustomerSessionComponent::HandleCleanTowelInventoryChanged);
+	}
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(TowelWaitTimerHandle);
+	}
+	bWaitingForCleanTowel = false;
+	TowelWaitStack = nullptr;
+}
+
+bool UCustomerSessionComponent::MarkTowelUsed()
+{
+	if (!TowelUseHandle.HasToken() || TowelUseHandle.bUsed)
+	{
+		return true;
+	}
+	UTowelCirculationSubsystem* Circulation = GetWorld()
+		? GetWorld()->GetSubsystem<UTowelCirculationSubsystem>()
+		: nullptr;
+	return Circulation && Circulation->MarkHandleUsed(TowelUseHandle);
+}
+
+bool UCustomerSessionComponent::ReturnTowelToCurrentFacility()
+{
+	if (!TowelUseHandle.HasToken())
+	{
+		return true;
+	}
+	AUsedTowelBinActor* Bin = Cast<AUsedTowelBinActor>(CurrentFacilityActor);
+	UTowelCirculationSubsystem* Circulation = GetWorld()
+		? GetWorld()->GetSubsystem<UTowelCirculationSubsystem>()
+		: nullptr;
+	if (!Bin || !Circulation || !Circulation->TryReturnUsedTowel(Bin, TowelUseHandle))
+	{
+		return false;
+	}
+	TowelUseHandle = FTowelUseHandle();
+	return true;
+}
+
+void UCustomerSessionComponent::CleanupTowelHandle()
+{
+	CancelWaitingForCleanTowel();
+	if (!TowelUseHandle.HasToken())
+	{
+		return;
+	}
+	if (UTowelCirculationSubsystem* Circulation = GetWorld()
+		? GetWorld()->GetSubsystem<UTowelCirculationSubsystem>()
+		: nullptr)
+	{
+		Circulation->CleanupHandle(TowelUseHandle, Cast<AUsedTowelBinActor>(CurrentFacilityActor));
+	}
+	if (TowelUseHandle.bTerminal)
+	{
+		TowelUseHandle = FTowelUseHandle();
+	}
+}
+
 float UCustomerSessionComponent::BeginActivity(const EBathhouseCustomerActivity Activity)
 {
 	if (!RoutineDefinition || CurrentActivity != EBathhouseCustomerActivity::None || !BeginUseCurrentFacility())
@@ -710,7 +845,9 @@ void UCustomerSessionComponent::FinishSession(const EBathhouseCustomerDepartureR
 	{
 		World->GetTimerManager().ClearTimer(CheckInTimeoutHandle);
 		World->GetTimerManager().ClearTimer(BathStayTimerHandle);
+		World->GetTimerManager().ClearTimer(TowelWaitTimerHandle);
 	}
+	CleanupTowelHandle();
 	StopWaitingForFacility();
 	ReleaseCurrentFacility();
 	LeaveQueue();
@@ -746,7 +883,9 @@ void UCustomerSessionComponent::TechnicalAbort(const FString& ErrorMessage)
 	{
 		World->GetTimerManager().ClearTimer(CheckInTimeoutHandle);
 		World->GetTimerManager().ClearTimer(BathStayTimerHandle);
+		World->GetTimerManager().ClearTimer(TowelWaitTimerHandle);
 	}
+	CleanupTowelHandle();
 	StopWaitingForFacility();
 	ReleaseCurrentFacility();
 	LeaveQueue();
@@ -803,6 +942,47 @@ void UCustomerSessionComponent::HandleBathStayExpired()
 	}
 	bBathStayExpired = true;
 	SendCustomerEvent(TAG_Customer_Event_BathStayExpired);
+}
+
+void UCustomerSessionComponent::HandleTowelWaitExpired()
+{
+	if (!bWaitingForCleanTowel || TowelUseHandle.HasToken())
+	{
+		return;
+	}
+	CancelWaitingForCleanTowel();
+	bTowelWaitExpired = true;
+	if (!bTowelShortagePenaltyCommitted)
+	{
+		bTowelShortagePenaltyCommitted = true;
+		const float PreviousSatisfaction = Satisfaction;
+		const float Penalty = RoutineDefinition
+			? FMath::Max(0.0f, RoutineDefinition->TowelUnavailableSatisfactionPenalty)
+			: 0.0f;
+		Satisfaction = FMath::Max(0.0f, Satisfaction - Penalty);
+		if (!FMath::IsNearlyEqual(PreviousSatisfaction, Satisfaction))
+		{
+			OnSatisfactionChanged.Broadcast(PreviousSatisfaction, Satisfaction);
+			if (ABathhouseCustomerCharacter* Customer = Cast<ABathhouseCustomerCharacter>(GetOwner()))
+			{
+				Customer->NotifySatisfactionChanged(PreviousSatisfaction, Satisfaction);
+			}
+		}
+	}
+	SendCustomerEvent(TAG_Customer_Event_TowelWaitExpired);
+}
+
+void UCustomerSessionComponent::HandleCleanTowelInventoryChanged(
+	const FTowelInventorySnapshot& Previous,
+	const FTowelInventorySnapshot& Current,
+	const int64 TransactionId)
+{
+	(void)Previous;
+	(void)TransactionId;
+	if (bWaitingForCleanTowel && Current.State == ETowelState::Clean && Current.Count > 0)
+	{
+		SendCustomerEvent(TAG_Customer_Event_TowelAvailable);
+	}
 }
 
 void UCustomerSessionComponent::HandleFacilityAvailabilityChanged(const EBathhouseFacilityType FacilityType)

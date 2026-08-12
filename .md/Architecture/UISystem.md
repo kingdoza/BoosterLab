@@ -4,7 +4,7 @@
 
 UI System은 BathhouseSim의 native C++ Widget과 Widget Blueprint 사이의 공통 책임 경계를 정의한다.
 
-현재 native UI Source에는 primary interaction prompt 구현이 존재한다. Cleaning/Towel target은 secondary action과 hold progress를 같은 native widget에 확장한다.
+native UI Source는 primary/secondary action, 의도별 실패와 hold progress를 같은 interaction prompt widget에서 처리한다. 신규 필수 BindWidget hierarchy 연결은 Unreal 후속 단계다.
 
 ```text
 Source/BathhouseSim/Public/UI/
@@ -95,7 +95,7 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 - runtime 위치 계산이나 viewport clamp처럼 상태에 의존하는 계산은 C++ 책임으로 둘 수 있고, 실제 hierarchy와 시각 반응은 Blueprint가 담당한다.
 - row 내부 widget 이름과 구체 UMG hierarchy는 필요하지 않은 한 C++ `BindWidget` 계약으로 강제하지 않는다.
 
-## Interaction Prompt Target
+## Interaction Prompt
 
 - `ABathhouseHUD`는 local player에서 `UInteractionPromptWidget`을 생성해 viewport에 추가한다.
 - HUD는 possessed pawn의 `UPlayerInteractionComponent`를 resolve해 widget에 주입하고 pawn 교체 시 재연결한다.

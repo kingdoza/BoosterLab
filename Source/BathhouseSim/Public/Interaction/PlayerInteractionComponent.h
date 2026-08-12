@@ -33,6 +33,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	FPlayerInteractionResult TryInteract();
 
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	FPlayerInteractionResult BeginPrimaryInteraction();
+
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	void EndPrimaryInteraction();
+
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	FPlayerInteractionResult TrySecondaryInteract();
+
+	FPlayerInteractionResult TryDropCarry(const FVector& ViewOrigin, const FVector& ViewDirection);
+
+	UFUNCTION(BlueprintPure, Category = "Interaction")
+	bool IsPrimaryHoldActive() const { return ActiveHoldTarget != nullptr; }
+
 	void RefreshInteractionQuery();
 	void ClearInteractionQuery();
 
@@ -50,9 +64,16 @@ protected:
 
 private:
 	friend class FBathhouseInteractionAttemptResultTest;
+	friend class FBathhouseCleaningInteractionTest;
 
 	bool BuildInteraction(FPlayerInteractionContext& OutContext, IPlayerInteractable*& OutInteractable, UObject*& OutTargetObject) const;
 	FPlayerInteractionResult FinishInteractionAttempt(const FPlayerInteractionResult& Result);
+	void TickActiveHold(float DeltaTime);
+	void CancelActiveHold(
+		bool bBroadcastFailure,
+		const FText& FailureReason,
+		bool bRefreshQuery = true);
+	void ClearActiveHoldState();
 	void CommitQuery(UObject* TargetObject, const FPlayerInteractionQuery& NewQuery);
 
 	UPROPERTY(Transient)
@@ -66,4 +87,13 @@ private:
 
 	UPROPERTY(Transient)
 	FPlayerInteractionQuery CurrentQuery;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UObject> ActiveHoldTarget = nullptr;
+
+	UPROPERTY(Transient)
+	FPlayerInteractionContext ActiveHoldContext;
+
+	float ActiveHoldProgress = 0.0f;
+	bool bPrimaryInputHeld = false;
 };

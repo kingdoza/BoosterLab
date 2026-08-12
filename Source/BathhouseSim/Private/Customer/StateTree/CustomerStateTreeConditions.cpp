@@ -29,6 +29,12 @@ bool FCustomerSessionStateCondition::TestCondition(FStateTreeExecutionContext& C
 		case ECustomerSessionCondition::CashClaimed:
 			bResult = Data.Session->IsCashClaimed();
 			break;
+		case ECustomerSessionCondition::HasTowel:
+			bResult = Data.Session->HasTowelHandle();
+			break;
+		case ECustomerSessionCondition::TowelWaitExpired:
+			bResult = Data.Session->IsTowelWaitExpired();
+			break;
 		case ECustomerSessionCondition::TechnicalAbort:
 			bResult = Data.Session->IsTechnicalAbort();
 			break;

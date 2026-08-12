@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-1인칭 이동, sprint, camera, Interaction/Carry 조립과 primary Interact 입력은 현재 Source에 구현되어 있다. secondary interaction과 droppable equipment release 입력은 확정 구현 target이다.
+1인칭 이동, sprint, camera, Interaction/Carry 조립과 E primary, F secondary, G equipment release 입력 routing은 현재 Source에 구현되어 있다. InputAction/IMC asset 연결은 Unreal 후속 단계다.
 
 ## Responsibilities
 

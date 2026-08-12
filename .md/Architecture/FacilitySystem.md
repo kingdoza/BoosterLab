@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 facility slot, 번호 시설과 분리된 counter queue 및 Towel target의 customer navigation 위치 경계를 정의한다.
+이 문서는 현재 구현된 facility slot, 번호 시설과 분리된 counter queue 및 Towel customer navigation 위치 경계를 정의한다.
 
 ## Source Scope
 
@@ -46,7 +46,7 @@ Facility는 towel 수량/overflow/machine, customer phase, key actor state, play
 - `DryingSpot`
 - `TowelBasket`
 - `Exit`
-- `TowelShelf`  # target, 기존 ordinal 보존을 위해 enum 끝에 추가
+- `TowelShelf`  # 기존 ordinal 보존을 위해 enum 끝에 추가
 
 `ShoeLocker`와 `ClothesLocker`는 `FacilityNumber`가 필수다. 나머지는 `INDEX_NONE`을 사용한다.
 

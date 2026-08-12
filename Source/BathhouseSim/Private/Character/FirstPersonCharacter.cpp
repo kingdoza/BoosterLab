@@ -89,7 +89,27 @@ void AFirstPersonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 
 	if (InteractAction)
 	{
-		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AFirstPersonCharacter::InteractInput);
+		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AFirstPersonCharacter::InteractStartInput);
+		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &AFirstPersonCharacter::InteractEndInput);
+		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled, this, &AFirstPersonCharacter::InteractEndInput);
+	}
+
+	if (SecondaryInteractAction)
+	{
+		EnhancedInputComponent->BindAction(
+			SecondaryInteractAction,
+			ETriggerEvent::Started,
+			this,
+			&AFirstPersonCharacter::SecondaryInteractInput);
+	}
+
+	if (DropCarryAction)
+	{
+		EnhancedInputComponent->BindAction(
+			DropCarryAction,
+			ETriggerEvent::Started,
+			this,
+			&AFirstPersonCharacter::DropCarryInput);
 	}
 }
 
@@ -131,11 +151,37 @@ void AFirstPersonCharacter::SprintReleaseInput()
 	FirstPersonMovement->StopSprinting();
 }
 
-void AFirstPersonCharacter::InteractInput()
+void AFirstPersonCharacter::InteractStartInput()
 {
 	if (PlayerInteraction)
 	{
-		PlayerInteraction->TryInteract();
+		PlayerInteraction->BeginPrimaryInteraction();
+	}
+}
+
+void AFirstPersonCharacter::InteractEndInput()
+{
+	if (PlayerInteraction)
+	{
+		PlayerInteraction->EndPrimaryInteraction();
+	}
+}
+
+void AFirstPersonCharacter::SecondaryInteractInput()
+{
+	if (PlayerInteraction)
+	{
+		PlayerInteraction->TrySecondaryInteract();
+	}
+}
+
+void AFirstPersonCharacter::DropCarryInput()
+{
+	if (PlayerInteraction && FirstPersonCamera)
+	{
+		PlayerInteraction->TryDropCarry(
+			FirstPersonCamera->GetComponentLocation(),
+			FirstPersonCamera->GetForwardVector());
 	}
 }
 

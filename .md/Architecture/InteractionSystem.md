@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 primary interaction/key carry와 Cleaning/Towel target의 primary/secondary/hold intent 및 단일 physical carry 확장을 정의한다.
+이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다.
 
 ## Source Scope
 
@@ -10,7 +10,7 @@
 Source/BathhouseSim/Public/Interaction/
   InteractionTypes.h
   PlayerInteractable.h
-  PhysicalCarryable.h                 # target
+  PhysicalCarryable.h
   PlayerInteractionComponent.h
   PlayerCarryComponent.h
   BathhouseKeyActor.h
@@ -24,6 +24,7 @@ Source/BathhouseSim/Private/Interaction/
 
 Source/BathhouseSim/Private/Tests/
   BathhouseDomainTests.cpp  # single-key carry와 interaction attempt result coverage
+  CleaningTowelAutomationTests.cpp  # mop/basket carry, hold cleaning과 key G rejection coverage
 ```
 
 ## Responsibilities
@@ -76,10 +77,16 @@ Interaction은 cleaning progress, towel count/machine, customer routine, facilit
 - inventory array, stack, slot, selected hotbar와 item swap을 만들지 않는다.
 - 빈손일 때만 key/mop/basket을 받을 수 있고 자동 swap하지 않는다.
 - key는 대응하는 `ABathhouseKeyHookActor` 또는 승인된 customer/counter transaction으로만 release한다.
-- 바닥 drop과 임시 선반 보관은 현재 범위 밖이다.
+- key의 임의 바닥 drop과 모든 carryable의 임시 선반 보관은 현재 범위 밖이다. mop/basket의 G world drop은 아래 공통 계약으로 처리한다.
 - held key를 camera 하위 `HeldKeyAnchor`에 부착하고 world collision을 끈다.
 - 기존 serialized `HeldKeyAnchor`를 공용 held anchor로 사용하며 rename하지 않는다.
-- G release는 `IPhysicalCarryable`이 허용한 mop/basket만 detach, collision/physics 복구와 camera-forward impulse를 적용한다. key는 실패한다.
+- G release는 `IPhysicalCarryable`이 허용한 mop/basket만 처리하며 key는 held 상태를 유지하고 실패한다.
+- free drop 전에 carryable root primitive의 월드 AABB로 held 위치부터 기존 목표 위치까지 box sweep을 수행한다.
+- 기본 sweep channel은 `ECC_Visibility`이고 carry owner와 대상 actor를 무시한다. actor 원점과 bounds 중심 차이는 `BoundsOffset`으로 보정한다.
+- blocking hit는 shape 중심인 `Hit.Location`과 clearance로 player 쪽 안전 위치를 계산한다. start penetration에서 투척 목표 쪽으로 진행하는 MTD는 벽 통과 후보이므로 거부하고, 나머지 후보만 segment 제한 후 동일 shape/channel overlap으로 재검증한다.
+- 안전 위치 계산이 실패하면 attachment, `HeldObject`, `Carrier`, collision/physics와 presentation을 바꾸지 않는다.
+- 안전 위치가 정해진 뒤 detach, 위치 적용, collision/physics 활성화, 장비별 impulse와 held reference 해제를 한 commit 경로에서 수행한다.
+- 위치 적용 또는 physics 활성화 실패 시 이전 transform, collision과 held anchor 부착을 복원한다.
 - carrier EndPlay에서 key는 기존 hook recovery, equipment는 last safe/initial transform recovery를 사용한다.
 
 Cash는 carry 대상이 아니며 Economy System의 즉시 획득 interaction으로 처리한다.
@@ -91,8 +98,11 @@ Cash는 carry 대상이 아니며 Economy System의 즉시 획득 interaction으
 - display name과 pickup query
 - held presentation begin/end
 - free world drop 허용 여부
-- throw/drop parameters와 safe recovery
+- root physical primitive, 장비별 drop distance/impulse와 safe recovery
+- 공통 물리 commit 이후 `Carrier`, last safe transform과 held presentation만 정리하는 완료 알림
 - carried actor EndPlay cleanup
+
+free drop을 허용하는 구현의 physical primitive는 actor root여야 한다. Detach, actor 위치 변경, physics 활성화와 impulse 적용은 `UPlayerCarryComponent`만 수행하며 concrete carryable은 이 동작을 반복하지 않는다.
 
 Key는 기존 state transaction을 계속 정본으로 사용하며 G free drop을 거부한다. Wet mop과 towel basket은 world pickup과 G drop을 허용한다.
 
@@ -167,6 +177,8 @@ Editor authoring 값:
 - `AFirstPersonCharacter::DropCarryAction`
 - trace 거리와 collision channel
 - `HeldKeyAnchor` transform
+- `UPlayerCarryComponent`의 `DropSweepChannel`, `DropSweepClearance`
+- wet mop/towel basket의 기존 `ThrowSpawnDistance`, `ThrowImpulseStrength`
 - key actor mesh/number presentation
 - key hook의 번호와 key actor 연결
 
@@ -192,3 +204,6 @@ Editor authoring 값:
 - key가 복제·소실되거나 허용되지 않은 번호 hook에 반환되지 않는지 확인한다.
 - player/customer 비정상 종료 시 key가 원래 hook으로 복구되는지 확인한다.
 - key number가 HUD text가 아니라 first-person 3D key에 표시되는지 확인한다.
+- mop/basket drop이 같은 carry component commit 경로를 사용하고 concrete actor가 직접 위치·physics·impulse를 적용하지 않는지 확인한다.
+- 벽, 비스듬한 면과 모서리에서 swept AABB가 벽 내부나 너머에 배치되지 않는지 확인한다.
+- start penetration 또는 안전 공간 없음 실패가 held attachment, carrier와 presentation을 보존하고 빈 방향 재시도를 허용하는지 확인한다.

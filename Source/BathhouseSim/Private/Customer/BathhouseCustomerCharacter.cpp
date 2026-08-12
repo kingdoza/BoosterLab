@@ -67,6 +67,13 @@ void ABathhouseCustomerCharacter::NotifyPresentationState(const EBathhouseCustom
 	OnCustomerPresentationStateChanged(PresentationState);
 }
 
+void ABathhouseCustomerCharacter::NotifySatisfactionChanged(
+	const float PreviousSatisfaction,
+	const float NewSatisfaction)
+{
+	OnCustomerSatisfactionChanged(PreviousSatisfaction, NewSatisfaction);
+}
+
 void ABathhouseCustomerCharacter::NotifyCustomerFinished(const EBathhouseCustomerDepartureReason Reason)
 {
 	if (bFinishBroadcast)

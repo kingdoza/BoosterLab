@@ -1,5 +1,6 @@
 #include "UI/InteractionPromptWidget.h"
 
+#include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Components/Widget.h"
 #include "Engine/World.h"
@@ -12,7 +13,7 @@ void UInteractionPromptWidget::SetInteractionComponent(UPlayerInteractionCompone
 		return;
 	}
 	UnbindInteraction();
-	ClearTransientFailure(false);
+	ClearAllTransientFailures(false);
 	InteractionComponent = InInteractionComponent;
 	BindInteraction();
 	if (IsConstructed() && !InteractionComponent)
@@ -36,14 +37,14 @@ void UInteractionPromptWidget::NativeDestruct()
 {
 	UnbindInteraction();
 	InteractionComponent = nullptr;
-	ClearTransientFailure(false);
+	ClearAllTransientFailures(false);
 	PresentQuery(FPlayerInteractionQuery(), true);
 	Super::NativeDestruct();
 }
 
 void UInteractionPromptWidget::HandleInteractionQueryChanged(const FPlayerInteractionQuery& Query)
 {
-	ClearTransientFailure(false);
+	ClearAllTransientFailures(false);
 	PresentQuery(Query, true);
 }
 
@@ -51,27 +52,37 @@ void UInteractionPromptWidget::HandleInteractionAttemptFinished(const FPlayerInt
 {
 	if (Result.bSucceeded || Result.FailureReason.IsEmpty())
 	{
-		ClearTransientFailure(true);
+		ClearTransientFailure(Result.Intent, true);
 		return;
 	}
 
-	ClearTransientFailure(false);
-	TransientFailureReason = Result.FailureReason;
+	ClearTransientFailure(Result.Intent, false);
+	const bool bSecondary = Result.Intent == EPlayerInteractionIntent::Secondary;
+	FText& FailureReason = bSecondary ? SecondaryTransientFailureReason : PrimaryTransientFailureReason;
+	FTimerHandle& TimerHandle = bSecondary ? SecondaryFailureTimerHandle : PrimaryFailureTimerHandle;
+	FailureReason = Result.FailureReason;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
-			FailureTimerHandle,
+			TimerHandle,
 			this,
-			&UInteractionPromptWidget::HandleTransientFailureExpired,
+			bSecondary
+				? &UInteractionPromptWidget::HandleSecondaryTransientFailureExpired
+				: &UInteractionPromptWidget::HandlePrimaryTransientFailureExpired,
 			FMath::Max(0.1f, FailureDisplayDurationSeconds),
 			false);
 	}
 	ApplyCurrentPresentation();
 }
 
-void UInteractionPromptWidget::HandleTransientFailureExpired()
+void UInteractionPromptWidget::HandlePrimaryTransientFailureExpired()
 {
-	ClearTransientFailure(true);
+	ClearTransientFailure(EPlayerInteractionIntent::Primary, true);
+}
+
+void UInteractionPromptWidget::HandleSecondaryTransientFailureExpired()
+{
+	ClearTransientFailure(EPlayerInteractionIntent::Secondary, true);
 }
 
 void UInteractionPromptWidget::BindInteraction()
@@ -119,7 +130,8 @@ void UInteractionPromptWidget::PresentQuery(const FPlayerInteractionQuery& Query
 void UInteractionPromptWidget::ApplyCurrentPresentation()
 {
 	if (!ensureMsgf(
-		PromptRoot && TargetNameText && ActionNameText && FailureReasonText,
+		PromptRoot && TargetNameText && ActionNameText && FailureReasonText
+			&& SecondaryActionNameText && SecondaryFailureReasonText && InteractionProgressBar,
 		TEXT("InteractionPromptWidget is missing one or more required BindWidget fields.")))
 	{
 		return;
@@ -127,43 +139,99 @@ void UInteractionPromptWidget::ApplyCurrentPresentation()
 
 	const FText EmptyText = FText::GetEmpty();
 	const bool bHasVisibleQuery = CachedQuery.bVisible;
-	const bool bHasTransientFailure = !TransientFailureReason.IsEmpty();
+	const bool bHasPrimaryTransientFailure = !PrimaryTransientFailureReason.IsEmpty();
+	const bool bHasSecondaryTransientFailure = !SecondaryTransientFailureReason.IsEmpty();
+	const bool bHasTransientFailure = bHasPrimaryTransientFailure || bHasSecondaryTransientFailure;
 	const bool bShowPrompt = bHasVisibleQuery || bHasTransientFailure;
-	const bool bPromptEnabled = bHasVisibleQuery && CachedQuery.bCanInteract;
+	const bool bSecondaryVisible = bHasVisibleQuery && CachedQuery.bSecondaryVisible;
+	const bool bPromptEnabled = IsPromptRootEnabled(CachedQuery);
+	const bool bPrimaryEnabled = IsLegacyPrimaryEnabled(CachedQuery);
 	const FText& TargetName = bHasVisibleQuery ? CachedQuery.TargetName : EmptyText;
 	const FText& ActionName = bHasVisibleQuery ? CachedQuery.ActionName : EmptyText;
-	const FText& EffectiveFailureReason = bHasTransientFailure
-		? TransientFailureReason
+	const FText& EffectiveFailureReason = bHasPrimaryTransientFailure
+		? PrimaryTransientFailureReason
 		: (bHasVisibleQuery ? CachedQuery.FailureReason : EmptyText);
+	const FText& SecondaryActionName = bSecondaryVisible ? CachedQuery.SecondaryActionName : EmptyText;
+	const FText& EffectiveSecondaryFailureReason = bHasSecondaryTransientFailure
+		? SecondaryTransientFailureReason
+		: (bSecondaryVisible ? CachedQuery.SecondaryFailureReason : EmptyText);
 	const bool bShowFailure = bShowPrompt && !EffectiveFailureReason.IsEmpty();
+	const bool bShowSecondaryFailure = (bSecondaryVisible || bHasSecondaryTransientFailure)
+		&& !EffectiveSecondaryFailureReason.IsEmpty();
+	const bool bShowHold = bHasVisibleQuery
+		&& CachedQuery.PrimaryActivationMode == EPlayerInteractionActivationMode::Hold;
 
 	PromptRoot->SetVisibility(bShowPrompt ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	PromptRoot->SetIsEnabled(bPromptEnabled);
 	TargetNameText->SetText(TargetName);
 	ActionNameText->SetText(ActionName);
+	ActionNameText->SetIsEnabled(bHasVisibleQuery && CachedQuery.bCanInteract);
 	FailureReasonText->SetText(bShowFailure ? EffectiveFailureReason : EmptyText);
 	FailureReasonText->SetVisibility(bShowFailure ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	SecondaryActionNameText->SetText(SecondaryActionName);
+	SecondaryActionNameText->SetIsEnabled(bSecondaryVisible && CachedQuery.bCanSecondaryInteract);
+	SecondaryActionNameText->SetVisibility(bSecondaryVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	SecondaryFailureReasonText->SetText(
+		bShowSecondaryFailure ? EffectiveSecondaryFailureReason : EmptyText);
+	SecondaryFailureReasonText->SetVisibility(
+		bShowSecondaryFailure ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	InteractionProgressBar->SetPercent(FMath::Clamp(CachedQuery.HoldProgress, 0.0f, 1.0f));
+	InteractionProgressBar->SetVisibility(bShowHold ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 
 	OnInteractionPromptChanged(
 		bShowPrompt,
-		bPromptEnabled,
+		bPrimaryEnabled,
 		TargetName,
 		ActionName,
 		EffectiveFailureReason);
+	OnInteractionPromptDetailsChanged(
+		bSecondaryVisible,
+		bSecondaryVisible && CachedQuery.bCanSecondaryInteract,
+		SecondaryActionName,
+		EffectiveSecondaryFailureReason,
+		bShowHold,
+		FMath::Clamp(CachedQuery.HoldProgress, 0.0f, 1.0f));
 }
 
-bool UInteractionPromptWidget::ClearTransientFailure(const bool bRefreshPresentation)
+bool UInteractionPromptWidget::IsPromptRootEnabled(const FPlayerInteractionQuery& Query)
 {
-	const bool bHadTransientFailure = !TransientFailureReason.IsEmpty() || FailureTimerHandle.IsValid();
+	return Query.bVisible
+		&& (Query.bCanInteract || (Query.bSecondaryVisible && Query.bCanSecondaryInteract));
+}
+
+bool UInteractionPromptWidget::IsLegacyPrimaryEnabled(const FPlayerInteractionQuery& Query)
+{
+	return Query.bVisible && Query.bCanInteract;
+}
+
+bool UInteractionPromptWidget::ClearTransientFailure(
+	const EPlayerInteractionIntent Intent,
+	const bool bRefreshPresentation)
+{
+	const bool bSecondary = Intent == EPlayerInteractionIntent::Secondary;
+	FText& FailureReason = bSecondary ? SecondaryTransientFailureReason : PrimaryTransientFailureReason;
+	FTimerHandle& TimerHandle = bSecondary ? SecondaryFailureTimerHandle : PrimaryFailureTimerHandle;
+	const bool bHadTransientFailure = !FailureReason.IsEmpty() || TimerHandle.IsValid();
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(FailureTimerHandle);
+		World->GetTimerManager().ClearTimer(TimerHandle);
 	}
-	FailureTimerHandle.Invalidate();
-	TransientFailureReason = FText::GetEmpty();
+	TimerHandle.Invalidate();
+	FailureReason = FText::GetEmpty();
 	if (bRefreshPresentation && bHadTransientFailure && bHasPresentedQuery)
 	{
 		ApplyCurrentPresentation();
 	}
 	return bHadTransientFailure;
+}
+
+bool UInteractionPromptWidget::ClearAllTransientFailures(const bool bRefreshPresentation)
+{
+	const bool bClearedPrimary = ClearTransientFailure(EPlayerInteractionIntent::Primary, false);
+	const bool bClearedSecondary = ClearTransientFailure(EPlayerInteractionIntent::Secondary, false);
+	if (bRefreshPresentation && (bClearedPrimary || bClearedSecondary) && bHasPresentedQuery)
+	{
+		ApplyCurrentPresentation();
+	}
+	return bClearedPrimary || bClearedSecondary;
 }

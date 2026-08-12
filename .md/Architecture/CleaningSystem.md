@@ -1,12 +1,12 @@
 # Cleaning System
 
-## Target Status
+## Implementation Status
 
-이 문서는 물걸레를 이용한 물 얼룩 제거와 bath/dressing floor의 무작위 얼룩 생성을 위한 확정 구현 target을 정의한다. 현재 Source와 Content에는 아직 구현되지 않았다.
+물걸레를 이용한 물 얼룩 제거와 bath/dressing floor의 무작위 얼룩 생성 Source는 구현되었다. Blueprint class, mesh/decal, level director/zone 배치는 Unreal 후속 단계다.
 
 이번 범위는 물 얼룩과 물걸레 하나만 구현한다. 다른 얼룩·청소 도구, 물통, 물걸레 세척, 내구도와 소모품은 제외한다.
 
-## Source Target
+## Source Scope
 
 ```text
 Source/BathhouseSim/Public/Cleaning/
@@ -23,6 +23,9 @@ Source/BathhouseSim/Private/Cleaning/
   StainSpawnZoneActor.cpp
   WaterStainActor.cpp
   WetMopActor.cpp
+
+Source/BathhouseSim/Private/Tests/
+  CleaningTowelAutomationTests.cpp
 ```
 
 ## Responsibilities

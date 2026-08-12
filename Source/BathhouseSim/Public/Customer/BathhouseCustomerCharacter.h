@@ -31,6 +31,7 @@ public:
 	void NotifyActivityStarted(EBathhouseCustomerActivity Activity);
 	void NotifyActivityFinished(EBathhouseCustomerActivity Activity);
 	void NotifyPresentationState(EBathhouseCustomerPresentationState PresentationState);
+	void NotifySatisfactionChanged(float PreviousSatisfaction, float NewSatisfaction);
 	void NotifyCustomerFinished(EBathhouseCustomerDepartureReason Reason);
 
 	UFUNCTION(BlueprintPure, Category = "Customer")
@@ -47,6 +48,9 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Customer|Presentation")
 	void OnCustomerPresentationStateChanged(EBathhouseCustomerPresentationState PresentationState);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Customer|Presentation")
+	void OnCustomerSatisfactionChanged(float PreviousSatisfaction, float NewSatisfaction);
 
 	UPROPERTY(BlueprintAssignable, Category = "Customer")
 	FOnBathhouseCustomerFinished OnCustomerFinished;

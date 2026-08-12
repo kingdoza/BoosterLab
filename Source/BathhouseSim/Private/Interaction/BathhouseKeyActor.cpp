@@ -74,6 +74,33 @@ FPlayerInteractionResult ABathhouseKeyActor::ExecuteInteraction(const FPlayerInt
 		: FPlayerInteractionResult::Failed(LOCTEXT("TakeFailed", "키를 가져올 수 없습니다."));
 }
 
+FText ABathhouseKeyActor::GetPhysicalCarryDisplayName() const
+{
+	return FText::Format(LOCTEXT("KeyTarget", "{0}번 키"), FText::AsNumber(KeyNumber));
+}
+
+bool ABathhouseKeyActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
+{
+	OutFailureReason = LOCTEXT("KeyTransactionRequired", "키는 키걸이 또는 카운터에서 가져와야 합니다.");
+	return false;
+}
+
+bool ABathhouseKeyActor::HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor)
+{
+	return KeyState == EBathhouseKeyState::HeldByPlayer;
+}
+
+bool ABathhouseKeyActor::CanFreeDrop(FText& OutFailureReason) const
+{
+	OutFailureReason = LOCTEXT("KeyHookOnly", "키는 원래 키걸이에만 반환할 수 있습니다.");
+	return false;
+}
+
+void ABathhouseKeyActor::RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry)
+{
+	RecoverToHook(PreviousCarry);
+}
+
 bool ABathhouseKeyActor::InitializeAtHook(ABathhouseKeyHookActor* InHook)
 {
 	if (!IsValid(InHook) || InHook->GetKeyNumber() != KeyNumber)

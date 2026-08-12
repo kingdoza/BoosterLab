@@ -1,10 +1,10 @@
 # Towel System
 
-## Target Status
+## Implementation Status
 
-이 문서는 clean stack부터 customer 사용, used bin/바닥 overflow, player basket, washer와 dryer를 거쳐 clean stack으로 돌아오는 수건 순환의 확정 구현 target을 정의한다. 현재 Source와 Content에는 아직 구현되지 않았다.
+clean stack부터 customer 사용, used bin/바닥 overflow, player basket, washer와 dryer를 거쳐 clean stack으로 돌아오는 수건 순환 Source와 기본 Blueprint class는 구현되었다. Stack/Pile runtime 연결과 미연결 Slot presentation component는 [TowelPresentationSystem.md](TowelPresentationSystem.md)의 다음 구현 target이다.
 
-## Source Target
+## Source Scope
 
 ```text
 Source/BathhouseSim/Public/Towel/
@@ -19,9 +19,20 @@ Source/BathhouseSim/Public/Towel/
   TowelProcessingMachineActor.h
   TowelTransferPortComponent.h
   TowelMachineControlComponent.h
+  Presentation/                    # target
+    TowelVisualTypes.h
+    TowelVisualMeshProfile.h
+    TowelQuantityVisualComponent.h
+    TowelStackVisualComponent.h
+    TowelPileVisualComponent.h
+    TowelSlotVisualComponent.h
 
 Source/BathhouseSim/Private/Towel/
   # matching implementation files
+
+Source/BathhouseSim/Private/Tests/
+  BathhouseCleaningTowelTestProbe.h/.cpp
+  CleaningTowelAutomationTests.cpp
 ```
 
 ## Responsibilities
@@ -67,7 +78,7 @@ Towel은 player input mapping, customer StateTree hierarchy, facility reservatio
 | machine state/end time/conversion | `ATowelProcessingMachineActor` |
 | basket physical lifecycle | `ATowelBasketActor` + `UPlayerCarryComponent` |
 | customer-held towel handle | `UCustomerSessionComponent` |
-| visual count convergence | towel Actor Blueprint presentation |
+| visual count convergence | `UTowelQuantityVisualComponent` target |
 
 ## Inventory And Atomic Transfer
 
@@ -221,9 +232,9 @@ Customer interruption:
 
 ## Blueprint Presentation Contract
 
-Inventory commit event는 previous/new state, previous/new count, capacity, revision과 transaction id를 제공한다.
+`UTowelInventoryComponent::OnInventoryChanged`는 previous/current snapshot과 transaction id를 제공한다. 각 snapshot에 state, count, capacity와 revision이 포함된다.
 
-Blueprint는 stack/bin/basket visible meshes를 한 장씩 빠르게 변화시킬 수 있지만 authoritative count를 변경하지 않는다. 새 revision 또는 presentation interruption 시 기존 animation을 취소하고 최신 snapshot count로 수렴한다. BeginPlay/reconstruction도 current snapshot에서 다시 그린다.
+Stack/Pile/Slot의 native mesh selection, ISM layout, count animation, revision convergence와 연결 범위는 [TowelPresentationSystem.md](TowelPresentationSystem.md)를 따른다. Blueprint는 pivot/bounds/profile과 machine animation/sound만 authoring하며 authoritative count를 변경하지 않는다.
 
 Machine 표현 event:
 
@@ -233,8 +244,8 @@ Machine 표현 event:
 
 Towel actor 표현 event:
 
-- `OnTowelPresentationTargetChanged`
-- basket held/world presentation event
+- `UTowelInventoryComponent::OnInventoryChanged`
+- `ATowelBasketActor::OnHeldPresentationChanged`
 
 ## Dependencies
 
@@ -251,4 +262,5 @@ Towel actor 표현 event:
 - mixed state, full capacity, processing state와 repeated input이 양쪽 endpoint를 변경하지 않는지 확인한다.
 - bulk stack presentation 중단 뒤 C++ count와 visible count가 재동기화되는지 확인한다.
 - customer interruption과 actor EndPlay에서 token이 정확히 한 owner 또는 recovery ledger에 남는지 확인한다.
+- Stack/Pile/Slot 표현 변경이 inventory transfer, machine state와 recovery ledger를 변경하지 않는지 확인한다.
 - 다른 towel state/tool durability/consumable 기능이 이번 범위에 추가되지 않았는지 확인한다.

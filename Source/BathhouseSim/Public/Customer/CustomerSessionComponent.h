@@ -6,6 +6,7 @@
 #include "Engine/EngineTypes.h"
 #include "Facility/BathhouseFacilityTypes.h"
 #include "Interaction/InteractionTypes.h"
+#include "Towel/TowelTypes.h"
 #include "CustomerSessionComponent.generated.h"
 
 class ABathhouseCashPaymentActor;
@@ -14,6 +15,15 @@ class ABathhouseFacilityActor;
 class ABathhouseKeyActor;
 class UBathhouseFacilitySlotComponent;
 class UCustomerRoutineDefinition;
+class ACleanTowelStackActor;
+class AUsedTowelBinActor;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnCustomerSatisfactionChanged,
+	float,
+	PreviousSatisfaction,
+	float,
+	NewSatisfaction);
 
 UCLASS(ClassGroup = (Customer), meta = (BlueprintSpawnableComponent))
 class BATHHOUSESIM_API UCustomerSessionComponent : public UActorComponent
@@ -44,6 +54,13 @@ public:
 	bool GetCurrentFacilityTransform(bool bApproach, FTransform& OutTransform) const;
 	void WaitForFacility(EBathhouseFacilityType FacilityType);
 	void StopWaitingForFacility();
+
+	bool TryAcquireCleanTowelFromCurrentFacility();
+	bool BeginWaitingForCleanTowel();
+	void CancelWaitingForCleanTowel();
+	bool MarkTowelUsed();
+	bool ReturnTowelToCurrentFacility();
+	void CleanupTowelHandle();
 
 	float BeginActivity(EBathhouseCustomerActivity Activity);
 	void FinishActivity(EBathhouseCustomerActivity Activity);
@@ -83,6 +100,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Customer Session")
 	EBathhouseCustomerDepartureReason GetDepartureReason() const { return DepartureReason; }
 
+	UFUNCTION(BlueprintPure, Category = "Customer Session")
+	float GetSatisfaction() const { return Satisfaction; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Customer Session")
+	FOnCustomerSatisfactionChanged OnSatisfactionChanged;
+
 	bool HasAssignedKey() const { return AssignedKey != nullptr; }
 	bool DidCheckInTimeOut() const { return bCheckInTimedOut; }
 	bool IsWaitingForCheckIn() const { return bWaitingForCheckIn; }
@@ -90,11 +113,14 @@ public:
 	bool IsSnappedToFacilityActionPoint() const { return bSnappedToFacilityActionPoint; }
 	bool IsFinished() const { return bFinished; }
 	bool IsTechnicalAbort() const { return DepartureReason == EBathhouseCustomerDepartureReason::TechnicalAbort; }
+	bool HasTowelHandle() const { return TowelUseHandle.HasToken(); }
+	bool IsTowelWaitExpired() const { return bTowelWaitExpired; }
 	EBathhouseCounterLane GetQueueLane() const { return QueueLane; }
 
 private:
 	friend class FBathhouseQueueCleanupTest;
 	friend class FBathhouseCustomerBathSnapTest;
+	friend class FBathhouseCustomerTowelTest;
 
 	void CacheCurrentFacilityTransforms();
 	void ClearCurrentFacilityTransformCache();
@@ -109,11 +135,18 @@ private:
 	void SetPresentationState(EBathhouseCustomerPresentationState NewState) const;
 	void HandleCheckInTimeout();
 	void HandleBathStayExpired();
+	void HandleTowelWaitExpired();
 	void HandleFacilityAvailabilityChanged(EBathhouseFacilityType FacilityType);
 	void HandleQueueChanged(EBathhouseCounterLane ChangedLane);
 
 	UFUNCTION()
 	void HandleCashClaimed(ABathhouseCashPaymentActor* CashActor);
+
+	UFUNCTION()
+	void HandleCleanTowelInventoryChanged(
+		const FTowelInventorySnapshot& Previous,
+		const FTowelInventorySnapshot& Current,
+		int64 TransactionId);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCustomerRoutineDefinition> RoutineDefinition = nullptr;
@@ -136,6 +169,12 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<ABathhouseCashPaymentActor> CashOffer = nullptr;
 
+	UPROPERTY(Transient)
+	TObjectPtr<ACleanTowelStackActor> TowelWaitStack = nullptr;
+
+	UPROPERTY(Transient)
+	FTowelUseHandle TowelUseHandle;
+
 	int32 KeyNumber = INDEX_NONE;
 	int32 ReturnSlotIndex = INDEX_NONE;
 	int32 NavigationFailureCount = 0;
@@ -146,6 +185,7 @@ private:
 	double BathStayEndTime = 0.0;
 	FTimerHandle CheckInTimeoutHandle;
 	FTimerHandle BathStayTimerHandle;
+	FTimerHandle TowelWaitTimerHandle;
 	FDelegateHandle FacilityAvailabilityHandle;
 	FDelegateHandle QueueChangedHandle;
 	FTransform CachedFacilityApproachTransform;
@@ -162,6 +202,10 @@ private:
 	bool bBathStayStarted = false;
 	bool bBathStayExpired = false;
 	bool bCashClaimed = false;
+	bool bWaitingForCleanTowel = false;
+	bool bTowelWaitExpired = false;
+	bool bTowelShortagePenaltyCommitted = false;
 	bool bFinished = false;
 	bool bCleanupInProgress = false;
+	float Satisfaction = 100.0f;
 };

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Interaction/PhysicalCarryable.h"
 #include "Interaction/PlayerInteractable.h"
 #include "BathhouseKeyActor.generated.h"
 
@@ -25,7 +26,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBathhouseKeyStateChanged, EBathh
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHeldKeyPresentationChanged, bool, bIsHeld);
 
 UCLASS(Blueprintable)
-class BATHHOUSESIM_API ABathhouseKeyActor : public AActor, public IPlayerInteractable
+class BATHHOUSESIM_API ABathhouseKeyActor : public AActor, public IPlayerInteractable, public IPhysicalCarryable
 {
 	GENERATED_BODY()
 
@@ -37,6 +38,12 @@ public:
 
 	virtual FPlayerInteractionQuery QueryInteraction(const FPlayerInteractionContext& Context) const override;
 	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
+	virtual EPhysicalCarryKind GetPhysicalCarryKind() const override { return EPhysicalCarryKind::Key; }
+	virtual FText GetPhysicalCarryDisplayName() const override;
+	virtual bool CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const override;
+	virtual bool HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor) override;
+	virtual bool CanFreeDrop(FText& OutFailureReason) const override;
+	virtual void RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry) override;
 
 	UFUNCTION(BlueprintPure, Category = "Bathhouse Key")
 	int32 GetKeyNumber() const { return KeyNumber; }

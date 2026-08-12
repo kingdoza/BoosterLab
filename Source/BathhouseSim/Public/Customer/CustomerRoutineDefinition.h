@@ -55,6 +55,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Retry", meta = (ClampMin = "0"))
 	int32 MaxNavigationRetries = 3;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Towel", meta = (ClampMin = "0.0"))
+	float TowelAvailabilityWaitSeconds = 10.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Towel", meta = (ClampMin = "0.0"))
+	float TowelUnavailableSatisfactionPenalty = 10.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Economy", meta = (ClampMin = "1"))
 	int32 UsageFee = 10000;
 };

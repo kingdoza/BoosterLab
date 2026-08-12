@@ -1,79 +1,98 @@
-# Implementation Rework Prompt — Bath Approach Snap And Customer Montage Tasks
+# Implementation Rework Prompt — Unified Physical Carry Drop And Wall Sweep
 
 ## Objective
 
-Fix the Bath reservation-transform snapshot violation below without authoring or resaving `Content/` assets. Preserve the approved Session/Facility/StateTree ownership split, montage playback design, existing reflected contracts and non-Bath behavior.
+Fix the start-penetration direction defect and the canonical Interaction document contradiction found in pre-Editor code review. Preserve the approved common drop ownership, existing pickup/recovery behavior, key G rejection, reflected properties and authored throw values.
 
-After the fix, regenerate `.md/PROMPT_REVIEW.md` and submit the whole C++ change for code review again. Do not proceed to Unreal asset work until the re-review is approved.
+Do not modify or resave `Content/`. After the correction, regenerate `.md/PROMPT_REVIEW.md` and `.md/PROMPT_UNREAL.md` for this task and submit the complete C++ change for review again.
 
-## P1 — Bath Navigation And Activity Rotation Re-read Live Slot Transforms
+## P1 — Start Penetration Can Accept A Far-Side Wall Candidate
 
 Files:
 
-- `Source/BathhouseSim/Private/Customer/CustomerSessionComponent.cpp`
-- `Source/BathhouseSim/Private/Tests/BathhouseDomainTests.cpp`
+- `Source/BathhouseSim/Private/Interaction/PlayerCarryComponent.cpp`
+- `Source/BathhouseSim/Private/Tests/CleaningTowelAutomationTests.cpp`
+- corresponding private declarations only if required
 
-The Session correctly snapshots the approach and action transforms when reservation commits, and snap-in/snap-out use those cached values. However, the transaction does not use the snapshot consistently:
+In `ResolvePhysicalDropLocation()`, the start-penetration candidate is calculated as:
 
-- `GetCurrentFacilityTransform()` returns `CurrentFacilitySlot->GetApproachTransform()` or `GetActionTransform()` directly. Therefore `Get Customer Facility Target(bUseApproachPoint=true)` can send a Bath customer to a live, changed approach instead of the transform captured when the reservation committed.
-- after the customer snaps to `CachedFacilityActionTransform`, `BeginUseCurrentFacility()` applies `CurrentFacilitySlot->GetActionTransform().Rotator()` again. A slot transform/facing change between reservation and activity begin can overwrite the cached action rotation while leaving the customer at the cached action location.
+```cpp
+SweepStart + Hit.Normal * (Hit.PenetrationDepth + Clearance)
+```
 
-This breaks the explicit contract that later slot authoring/runtime transform changes cannot move an active Bath transaction. It can also split one visit across a live approach, cached action location/rotation, live activity rotation and cached return approach.
+It is then projected onto `[SweepStart, SweepEnd]` and accepted when the final overlap test is clear. This does not establish that the candidate is on the player side of the blocking wall.
+
+For a normal wall in front of the player:
+
+- an MTD normal toward the player produces a point behind `SweepStart`; the segment clamp collapses it back to the still-overlapping start and rejects it;
+- an MTD normal toward `SweepEnd` can produce an overlap-free point after crossing a thin wall, and the current code accepts that far-side point.
+
+The latter violates the explicit requirement that start penetration must not force the object through or beyond the wall.
 
 Required correction:
 
-- make the reserved Bath approach/action snapshot authoritative for the whole Bath transaction;
-- ensure `Get Customer Facility Target(bUseApproachPoint=true)` receives the cached Bath approach transform and fails clearly if the required reservation snapshot is unavailable;
-- when the customer is already snapped, do not replace the cached action rotation with a fresh slot transform during `BeginUseCurrentFacility()`;
-- preserve the existing unsnapped non-Bath navigation/activity behavior and do not auto-apply the snap path to other facility types;
-- keep Facility as the transform author and Session as the reservation/snap/cleanup owner;
-- keep return-before-release behavior, failed-return leak prevention and movement-mode restoration unchanged.
+- distinguish a player-side resolution from an MTD that advances through the initial blocker;
+- never accept a start-penetration candidate merely because it is overlap-free on the target side of the wall;
+- if a player-side nonpenetrating candidate cannot be represented safely under the allowed placement constraints, fail conservatively and keep the item held;
+- continue using the same shape, channel and ignored actors for final overlap validation;
+- keep normal non-starting blocking-hit behavior based on `Hit.Location`, bounds offset and clearance unchanged;
+- preserve the no-mutation failure contract: attachment, `HeldObject`, concrete `Carrier`, collision/physics, presentation and impulse remain unchanged.
 
-Regression coverage must snapshot the original transforms, mutate the slot transform and/or facing after caching, and then prove:
+Regression coverage must include a thin-wall start-overlap where the engine MTD can point toward the throw target. Prove that the result either stays on the player side or fails while held; it must never succeed beyond the wall. Retain the existing large-blocker rejection, retry, normal wall, mop/basket and key tests.
 
-1. the Bath navigation target remains the original cached approach;
-2. action snap still applies the original cached action location and rotation;
-3. `BeginUseCurrentFacility()` does not change that cached action rotation;
-4. normal release and technical abort return to the original cached approach before releasing;
-5. the existing non-Bath path remains unsnapped and keeps its prior behavior.
+Also add focused delegate-reentry coverage for the implementation's existing `bPhysicalDropCommitInProgress` claim: a nested drop attempt from a completion/held delegate must not duplicate the physical commit or leave `HeldObject` and the concrete actor's held presentation inconsistent.
 
-Do not compare cleanup only with the slot's current live transform; retain the expected cached transform locally so the test can detect drift after the Session clears its cache.
+## P2 — Interaction Canonical Document Contradicts The Implemented G Drop
+
+File:
+
+- `.md/Architecture/InteractionSystem.md`
+
+The `UPlayerCarryComponent` section still says that floor drop is outside the current scope, while the immediately following bullets define and approve mop/basket G world drop. This leaves the canonical responsibility boundary internally contradictory.
+
+Required correction:
+
+- remove or qualify the stale statement so it cannot exclude the implemented mop/basket G physical drop;
+- keep arbitrary key floor drop and temporary shelf storage out of scope;
+- retain `UPlayerCarryComponent` as the only normal G detach/place/physics/impulse owner;
+- do not change `.md/0_ARCHITECTURE.md` unless the corrected wording exposes a real map-level conflict.
 
 ## Accepted Areas To Preserve
 
-- action overlap validation runs before movement cancellation or transform mutation;
-- action entry cancels AI movement, stops velocity, stores movement/custom mode, disables movement and teleports;
-- all release/abort/EndPlay fallbacks attempt approach return before slot release;
-- montage candidate filtering and 0/1/many random rules;
-- one-shot completion through `FOnMontageEnded` and interruption failure;
-- one selected loop montage with a self-linked section, duration completion and early-end failure;
-- playback-token ownership prevents stale Task exits from stopping newer playback;
-- `Timed Customer Activity` and existing reflected properties/types remain available;
-- montage asset state remains outside Session and RoutineDefinition.
+- `IPhysicalCarryable` provides the root primitive, existing distance/impulse and post-commit notification;
+- wet mop and towel basket do not perform normal G detach, placement, physics enable or impulse themselves;
+- world AABB extent, identity sweep rotation, `ECC_Visibility`, bounds-center offset and owner/object ignore rules;
+- regular blocking hit uses `Hit.Location`, not `ImpactPoint`;
+- placement/physics failure restores the held attachment, transform, collision and authoritative reference;
+- `ThrowSpawnDistance` and `ThrowImpulseStrength` defaults remain unchanged;
+- key remains non-droppable through G;
+- pickup, recovery, FellOutOfWorld, input mapping, towel/cleaning domain logic and Blueprint assets remain out of this rework scope.
 
-## Architecture And Scope
+## Class Responsibility And Blueprint Contract
 
-- `UCustomerSessionComponent` remains a cohesive owner of reservation, snap and return-before-release state. No ownership split is required for this correction.
-- `UCustomerMontagePlaybackComponent` remains the independent non-ticking montage lifecycle owner.
-- no Core Redirect is required for the additive reflected types in this task.
-- `.md/Architecture/CoreSystem.md` still lacks the concrete Class Growth Policy referenced by the agent rules. Report this canonical-document gap to the architecture owner; do not invent thresholds in implementation.
-- do not modify `Content/`, `Config/`, `.uproject`, `BathhouseSim.Build.cs`, UI, input, Interaction, Economy, appearance, AnimNotify or Motion Warping for this rework.
-- the worktree already contains broader project-migration and Unreal asset changes outside this review. Preserve them and report task-scoped verification separately.
+- `UPlayerCarryComponent` remains the held-object and common physical-drop transaction owner. The private sweep helper has no independent lifecycle/state, so no new component split is required for this correction.
+- `AWetMopActor` and `ATowelBasketActor` retain only concrete carrier, recovery, last-safe transform and presentation responsibilities.
+- reflected `DropSweepChannel` and `DropSweepClearance` names/types remain unchanged; no Core Redirect is required.
+- `.md/Architecture/CoreSystem.md` still does not contain the concrete Class Growth Policy referenced by the agent rules. Report that canonical gap without inventing a threshold.
+- `.md/PROMPT_UNREAL.md` remains validation-only unless the corrected C++ contract genuinely changes its PIE instructions.
 
 ## Verification
 
-With the BathhouseSim Editor closed:
+With all BathhouseSim Editor and Live Coding processes closed:
 
-- run UE 5.8 `BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE`;
-- run the complete `Automation RunTests BathhouseSim` suite and the focused Bath snapshot regression;
-- run task-scoped whitespace checks plus `git diff --check`, reporting the pre-existing `Config/DefaultEditor.ini` EOF blank line separately if it remains;
-- repeat forbidden-scope searches and confirm no montage asset reference enters Session or RoutineDefinition;
-- report the exact build/test results in regenerated `.md/PROMPT_REVIEW.md`.
+1. run the UE 5.8 `Build.bat` Editor target from the first attempt outside the sandbox;
+2. run `Automation RunTests BathhouseSim` and the focused physical carry test;
+3. prove the new far-side start-penetration regression, nested delegate reentry, existing normal wall placement and failed-drop retry all pass;
+4. run `git diff --check`;
+5. search for stale `HandleReleasedBy`, concrete normal-drop `AddImpulse`/`SetActorLocation`, reflected-name changes and the contradictory architecture wording;
+6. report exact commands, test count, failures and remaining PIE-only items in regenerated `.md/PROMPT_REVIEW.md`.
 
 ## Resubmission Acceptance
 
-- a Bath transaction uses one reservation-time approach/action snapshot from navigation through activity and cleanup;
-- changing the slot after reservation cannot redirect navigation, rotate the snapped customer or change the return point;
-- non-Bath facilities retain their existing unsnapped movement/activity path;
-- all previously passing montage, cleanup and domain tests still pass;
-- no Unreal asset work is performed before code re-review approval.
+- no start-penetration path can place a mop or basket beyond the initial wall;
+- unsafe start penetration fails without mutating held state;
+- delegate reentry cannot duplicate the commit or split carry/concrete held state;
+- normal wall, empty-space and retry behavior remain intact for both equipment types;
+- Interaction documentation describes G world drop without contradicting its own scope;
+- Editor target and complete BathhouseSim automation suite pass;
+- no `Content/`, Config, `.uproject` or unrelated Source change is introduced by this rework.

@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-11(KST) 청소·수건 순환 확정 설계 기준
-- 상태: 기존 customer loop C++ 구현과 key/counter/UI 계약 유지, Cleaning/Towel C++ 구현 대기
+- 기준일: 2026-08-12(KST) Towel Stack/Pile/Slot presentation 확정 설계 기준
+- 상태: Cleaning/Towel gameplay와 기본 Blueprint 구현 완료, Stack/Pile runtime 연결과 미연결 Slot component 구현 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -21,7 +21,6 @@
   - Economy
   - Customer
   - UI
-- 확정 구현 target:
   - Cleaning
   - Towel
 - `Content`는 Blueprint 참조 검증 범위로만 다룬다. C++ 시스템 책임의 정본은 Source 하위 문서에 둔다.
@@ -38,6 +37,7 @@
 - [UISystem.md](Architecture/UISystem.md): native Widget/Widget Blueprint 경계와 interaction prompt target
 - [CleaningSystem.md](Architecture/CleaningSystem.md): water stain spawn, wet mop hold cleaning과 presentation
 - [TowelSystem.md](Architecture/TowelSystem.md): towel circulation, atomic transfer, overflow와 processing machine
+- [TowelPresentationSystem.md](Architecture/TowelPresentationSystem.md): towel quantity mesh profile과 Stack/Pile/Slot world presentation
 - [CoreSystem.md](Architecture/CoreSystem.md): 공통 문서 규칙, 모듈 경계, Source/Content/Config 경계, Core Redirect
 
 ## Source 구조
@@ -52,8 +52,8 @@ Source/BathhouseSim/
     Economy/
     Customer/
     UI/
-    Cleaning/  # target
-    Towel/     # target
+    Cleaning/
+    Towel/
   Private/
     Character/
     Camera/
@@ -62,6 +62,8 @@ Source/BathhouseSim/
     Economy/
     Customer/
     UI/
+    Cleaning/
+    Towel/
     Tests/
 ```
 
@@ -75,6 +77,8 @@ Source/BathhouseSim/
   - Economy: player money와 cash claim 책임
   - Customer: StateTree routine과 customer session 책임
   - UI: interaction query의 local HUD 표현 책임
+  - Cleaning: zone/stain registry, 물 얼룩 spawn/hold cleaning과 wet mop 책임
+  - Towel: 수건 재고/전송, 설비, overflow, 처리 기계와 recovery ledger 책임
   - Core: 모듈/redirect/문서 경계 책임
 
 ## 시스템 간 책임 흐름
@@ -97,6 +101,7 @@ Source/BathhouseSim/
 - UI는 Interaction query를 표시하고 domain 상태를 직접 판단하거나 변경하지 않는다.
 - Cleaning은 zone 기반 water stain spawn과 wet mop hold-cleaning state를 소유한다.
 - Towel은 homogeneous count, atomic transfer, used-bin overflow와 washer/dryer state를 소유한다.
+- Towel Presentation은 inventory snapshot을 읽어 clean stack/used bin/basket의 Stack과 기존 washer/dryer의 Pile을 표시한다. Slot은 component/preview까지만 구현하고 gameplay actor에 연결하지 않는다.
 - 사용 수건통 내부는 container 단위 E/F interaction이고, overflow world towel만 개별 E interaction이다.
 - Customer는 clean towel token과 satisfaction을 session에 보관하고, used bin full이면 floor overflow로 반납한다.
 - Core는 런타임 gameplay 상태를 소유하지 않고 모듈 의존성, Source 경계, Content/Config 정책, Core Redirect 기준을 문서화한다.
@@ -120,6 +125,7 @@ Source/BathhouseSim/
 - Cleaning -> Interaction
 - Towel -> Interaction
 - Towel -> Facility
+- Towel Presentation -> Towel
 - Customer -> Towel
 - Core -> Engine module boundary
 
@@ -153,4 +159,5 @@ Source/BathhouseSim/
 - 현재 Source에는 Core, Character, Camera, Interaction, Facility, Economy, Customer와 UI native class가 존재한다.
 - `ST_CustomerRoutine`, Data Asset, Blueprint facility/key/customer/cash/UI와 Level 배치는 C++ 코드 리뷰 승인 후 Unreal 단계 target이다.
 - 현재 Source는 customer-owned montage playback component, Bath action/approach snap과 두 native montage StateTree Task까지 구현한다. AnimNotify, Motion Warping, 신발·의상 전환은 포함하지 않는다.
-- Cleaning/Towel Source, secondary/drop input, prompt 확장과 customer towel StateTree 연결은 다음 구현 target이다.
+- Cleaning/Towel Source, secondary/drop input, native prompt 확장과 customer towel StateTree Task/Condition은 구현되었다. InputAction/IMC, WBP hierarchy, Blueprint actor, facility 배치와 `ST_CustomerRoutine` asset 연결은 Unreal 후속 단계다.
+- Towel Stack/Pile/Slot native presentation은 다음 구현 target이다. 기존 `BP_Washer`/`BP_Dryer`를 확장하며 신규 machine이나 drying-rack gameplay actor를 만들지 않는다.

@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath snap/montage Source는 구현되었고 clean towel 획득·사용·반납, shortage fallback과 satisfaction은 다음 구현 target이다.
+이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath snap/montage와 clean towel 획득·사용·반납, shortage fallback 및 satisfaction Source가 구현되어 있다.
 
 ## Source Scope
 
@@ -17,6 +17,7 @@ Source/BathhouseSim/Public/Customer/
   BathhouseCustomerSpawner.h
   StateTree/CustomerStateTreeTasks.h
   StateTree/CustomerStateTreeConditions.h
+  StateTree/CustomerTowelStateTreeTasks.h
 
 Source/BathhouseSim/Private/Customer/
   BathhouseCustomerTypes.cpp
@@ -28,9 +29,11 @@ Source/BathhouseSim/Private/Customer/
   BathhouseCustomerSpawner.cpp
   StateTree/CustomerStateTreeTasks.cpp
   StateTree/CustomerStateTreeConditions.cpp
+  StateTree/CustomerTowelStateTreeTasks.cpp
 
 Source/BathhouseSim/Private/Tests/
   BathhouseDomainTests.cpp  # Bath snap cleanup, montage candidate와 playback token coverage
+  CleaningTowelAutomationTests.cpp  # towel acquire/shortage/return/interruption coverage
 ```
 
 ## Responsibilities
@@ -111,7 +114,7 @@ Blueprint event:
 - `OnActivityStarted(ActivityType)`
 - `OnActivityFinished(ActivityType)`
 - `OnCustomerPresentationStateChanged(PresentationState)`
-- `OnCustomerSatisfactionChanged(NewValue, Delta)`  # towel shortage presentation target
+- `OnCustomerSatisfactionChanged(PreviousSatisfaction, NewSatisfaction)`
 
 `UCustomerMontagePlaybackComponent`는 AnimInstance, 현재 montage, monotonic playback token과 종료 결과를 소유한다. StateTree Task는 token으로 자신이 시작한 montage만 조회·중단한다. AnimNotify, Motion Warping, prop animation과 신발·의상 전환은 이번 target에 포함하지 않는다.
 

@@ -16,7 +16,9 @@ enum class ECustomerSessionCondition : uint8
 	BathStayExpired,
 	CashClaimed,
 	TechnicalAbort,
-	Finished
+	Finished,
+	HasTowel,
+	TowelWaitExpired
 };
 
 USTRUCT()
