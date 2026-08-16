@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-15(KST) HeldTransform, water-stain variation, Towel Editor preview와 collision-independent Bath snap 확정 설계 기준
-- 상태: 기존 Cleaning/Towel/Customer Source 위 네 확장 target의 native 구현과 automation 검증 완료, Blueprint authoring/Editor 통합 대기
+- 기준일: 2026-08-16(KST) world-space computer monitor focus와 sample click 확정 설계 기준
+- 상태: 기존 Cleaning/Towel/Customer 확장은 native 구현 완료 상태이며 Computer target은 설계 완료, C++ 구현 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -23,6 +23,8 @@
   - UI
   - Cleaning
   - Towel
+- 확정 구현 target:
+  - Computer
 - `Content`는 Blueprint 참조 검증 범위로만 다룬다. C++ 시스템 책임의 정본은 Source 하위 문서에 둔다.
 - `Config/DefaultEngine.ini`는 GameMode/Pawn/Controller 연결 또는 Core Redirect가 필요한 rename 호환 경로로만 문서화한다.
 
@@ -38,6 +40,7 @@
 - [CleaningSystem.md](Architecture/CleaningSystem.md): water stain spawn, wet mop hold cleaning과 presentation
 - [TowelSystem.md](Architecture/TowelSystem.md): towel circulation, atomic transfer, overflow와 processing machine
 - [TowelPresentationSystem.md](Architecture/TowelPresentationSystem.md): towel quantity mesh profile과 Stack/Pile/Slot world presentation
+- [ComputerSystem.md](Architecture/ComputerSystem.md): world-space monitor, player focus/input session과 sample click UI
 - [CoreSystem.md](Architecture/CoreSystem.md): 공통 문서 규칙, 모듈 경계, Source/Content/Config 경계, Core Redirect
 
 ## Source 구조
@@ -67,6 +70,8 @@ Source/BathhouseSim/
     Tests/
 ```
 
+Computer 구현 target은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, `Private/UI` 확장을 사용한다.
+
 - `Core`는 소스 폴더가 아니라 문서상 공통 경계다.
 - 시스템 하위 폴더명은 include 경로의 1차 네임스페이스 역할을 한다.
 - 현재 파일 분포는 하위 시스템 문서를 기준으로 확인한다.
@@ -79,6 +84,7 @@ Source/BathhouseSim/
   - UI: interaction query의 local HUD 표현 책임
   - Cleaning: zone/stain registry, 물 얼룩 spawn/hold cleaning과 wet mop 책임
   - Towel: 수건 재고/전송, 설비, overflow, 처리 기계와 recovery ledger 책임
+  - Computer: 월드 monitor, focus camera, 사용권과 player computer-use session 책임
   - Core: 모듈/redirect/문서 경계 책임
 
 ## 시스템 간 책임 흐름
@@ -99,6 +105,7 @@ Source/BathhouseSim/
 - Bath의 `ApproachPoint`와 `ActionPoint`는 모두 캐릭터 발바닥 transform으로 authoring하며, Customer Session이 scaled capsule half height를 한 번 더해 실제 actor/capsule-center transform으로 변환한다. 고객은 NavMesh 위 `ApproachPoint`까지 이동한 뒤 blocking collision 사전 검사 없이 `ActionPoint`로 unswept snap하고, 퇴탕 시 같은 방식으로 `ApproachPoint`에 복귀한 뒤 navigation을 재개한다.
 - Customer 행동 montage는 native StateTree Task가 유효 후보 중 하나를 EnterState에서 선택하며 one-shot 종료 또는 선택된 한 montage의 duration loop를 완료 기준으로 사용한다.
 - UI는 Interaction query를 표시하고 domain 상태를 직접 판단하거나 변경하지 않는다.
+- Computer는 빈손 primary interaction으로 진입하고 world-space monitor를 유지한 채 player별 camera/input session만 전환한다. 포커스아웃은 widget을 파괴하지 않아 actor lifetime 동안 마지막 화면 상태를 유지한다.
 - Cleaning은 zone 기반 water stain spawn, spawn별 material/yaw/XY scale variation과 wet mop hold-cleaning state를 소유한다.
 - Towel은 homogeneous count, atomic transfer, used-bin overflow와 washer/dryer state를 소유한다.
 - Towel Presentation은 inventory snapshot을 읽어 clean stack/used bin/basket의 Stack과 기존 washer/dryer의 Pile을 표시한다. Stack/Pile/Slot은 transient CallInEditor preview를 제공하며 Slot은 gameplay actor에 연결하지 않는다.
@@ -110,6 +117,7 @@ Source/BathhouseSim/
 
 - Character -> Camera
 - Character -> Interaction
+- Character -> Computer
 - Character -> EnhancedInput
 - Character -> Engine Character/Movement
 - Camera -> Character
@@ -122,6 +130,8 @@ Source/BathhouseSim/
 - Customer -> Economy
 - Customer -> UE GameplayStateTree/AI/Navigation
 - UI -> Interaction
+- Computer -> Interaction
+- Computer -> UMG/Engine Camera/PlayerController
 - Cleaning -> Interaction
 - Towel -> Interaction
 - Towel -> Facility
@@ -154,6 +164,7 @@ Source/BathhouseSim/
 - E는 primary, F는 secondary, G는 droppable equipment release intent다. Character는 intent만 routing하고 domain mutation은 상태 owner가 수행한다.
 - 모든 towel endpoint 이동은 source 감소와 destination 증가를 단일 native transaction으로 commit한다.
 - Customer routine의 gameplay 상태 변경은 native C++ API를 통해 수행하고 StateTree/Blueprint asset에 domain mutation을 두지 않는다.
+- 컴퓨터 사용은 game을 pause하거나 fullscreen viewport UI를 열지 않는다. Character는 입력 의도만 분기하고 Computer component가 view/input session lifecycle을 소유하며 screen Widget은 domain gameplay 상태를 소유하지 않는다.
 
 ## Implementation Boundary
 
@@ -163,3 +174,4 @@ Source/BathhouseSim/
 - Cleaning/Towel Source, secondary/drop input, native prompt 확장과 customer towel StateTree Task/Condition은 구현되었다. InputAction/IMC, WBP hierarchy, Blueprint actor, facility 배치와 `ST_CustomerRoutine` asset 연결은 Unreal 후속 단계다.
 - Towel Stack/Pile/Slot native presentation은 collision-free `TowelPresentationVisual` reflected 계약으로 구현되었다. 기존 `BP_Washer`/`BP_Dryer`의 inherited Pile authoring과 profile 지정은 Editor 후속 단계이며 신규 machine이나 drying-rack gameplay actor는 만들지 않는다.
 - per-item `HeldTransform`, seeded water-stain visual variation, Stack/Pile/Slot Editor preview와 collision-independent Bath snap은 Source와 native automation까지 구현되었다. `HeldTransform`/stain Blueprint authoring, inherited towel preview와 blocked Bath Editor 통합 검증은 후속 단계다.
+- `ABathhouseComputerActor`, `UPlayerComputerUseComponent`, `UComputerSampleScreenWidget`, interaction suppression과 click input은 확정 target이며 아직 Source/Content에 구현되지 않았다.

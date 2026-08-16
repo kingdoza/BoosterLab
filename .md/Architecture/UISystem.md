@@ -4,7 +4,7 @@
 
 UI System은 BathhouseSim의 native C++ Widget과 Widget Blueprint 사이의 공통 책임 경계를 정의한다.
 
-native UI Source는 primary/secondary action, 의도별 실패와 hold progress를 같은 interaction prompt widget에서 처리한다. 신규 필수 BindWidget hierarchy 연결은 Unreal 후속 단계다.
+native UI Source는 primary/secondary action, 의도별 실패와 hold progress를 같은 interaction prompt widget에서 처리한다. world-space computer sample screen의 native base와 두 필수 BindWidget은 확정 구현 target이다.
 
 ```text
 Source/BathhouseSim/Public/UI/
@@ -15,6 +15,10 @@ Current classes:
 
 - `ABathhouseHUD`: local prompt 생성·제거와 possessed pawn context 연결
 - `UInteractionPromptWidget`: primary/secondary query/result lifecycle, hold progress, transient failure timer와 필수 `BindWidget` 표시 갱신
+
+Confirmed target:
+
+- `UComputerSampleScreenWidget`: world monitor의 sample button lifecycle과 클릭 확인 표시
 
 `Content/`의 Widget Blueprint와 UI asset은 serialized project data다. 명시적인 Editor 작업 없이 수정하거나 resave하지 않는다.
 
@@ -27,6 +31,7 @@ Current classes:
 - root, slot, row, operation과 domain owner 사이의 책임 분리
 - interaction prompt의 local lifecycle과 표현 계약
 - primary E, secondary F와 hold progress의 분리 표시
+- world-space monitor sample click과 actor lifetime 화면 상태 유지 계약
 
 UI는 gameplay domain 상태를 소유하거나 domain mutation 규칙을 다시 구현하지 않는다. UI는 사용자 의도를 전달하고 결과를 표현하며, 실제 상태 변경은 해당 domain의 상태 owner가 수행한다.
 
@@ -120,12 +125,24 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 - inventory, hotbar, item slot과 money HUD는 현재 범위에 포함하지 않는다.
 - towel count HUD를 별도로 만들지 않으며 basket/stack/machine world presentation과 target prompt만 사용한다.
 
+## Computer Sample Screen
+
+- `ABathhouseComputerActor`의 `UWidgetComponent`가 World Space로 Widget Blueprint instance를 생성하고 유지한다.
+- `UComputerSampleScreenWidget`은 `TestButton: UButton`, `ClickResultText: UTextBlock` 두 필수 `BindWidget`만 요구한다.
+- C++은 construct/destruct의 대칭 button delegate, 클릭 여부와 text 갱신을 소유한다.
+- 초기 text는 `버튼을 클릭하세요`, 클릭 뒤 text는 `클릭 확인`이다.
+- Widget Blueprint는 screen hierarchy, layout, style와 animation만 담당하며 Event Graph 없이 클릭 확인이 동작해야 한다.
+- player의 `UWidgetInteractionComponent`가 mouse-source pointer를 전달한다. Widget의 hardware input 수신을 동시에 사용하지 않는다.
+- focus-out은 widget을 remove/recreate하지 않는다. 같은 computer Actor lifetime 동안 마지막 화면 상태를 유지하고 재진입 시 그대로 표시한다.
+- sample 클릭 여부는 표현 확인용 local widget state다. 실제 gameplay computer 데이터가 생기면 별도 Computer domain owner가 소유하고 Widget에는 표시값만 전달한다.
+
 ## Blueprint/API Contracts
 
 - Blueprint가 사용해야 하는 API와 event만 `BlueprintCallable`, `BlueprintPure` 또는 `BlueprintImplementableEvent`로 노출한다.
 - C++ 내부 연결용 함수는 불필요하게 Blueprint에 노출하지 않는다.
 - `BindWidget`은 native 로직에 반드시 필요한 최소 widget에만 사용한다.
 - 신규 secondary/progress widget은 runtime 정확성에 필요하므로 `BindWidget`으로 요구하고 WBP migration 단계에서 hierarchy를 함께 갱신한다.
+- computer sample의 button/text도 native 동작에 필요하므로 필수 `BindWidget`이며 정확한 이름과 타입으로 WBP에 구성한다.
 - Blueprint event는 domain object 전체보다 표현에 필요한 data를 전달한다.
 - native parent, reflected type, function, property 또는 component 이름은 Content asset 계약으로 취급한다.
 - 공개 Blueprint 계약을 rename하거나 제거할 때는 asset migration, Core Redirect 필요 여부, Blueprint compile/save와 post-migration scan을 함께 계획한다.
@@ -135,6 +152,7 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 
 - UI System은 필요한 gameplay domain의 public API에 의존할 수 있다.
 - 현재 interaction prompt UI는 Interaction System에만 의존한다.
+- computer sample widget은 UMG에만 의존하고 gameplay domain mutation을 수행하지 않는다.
 - UI는 Cleaning/Towel concrete class를 판별하지 않고 확장된 Interaction query/result만 소비한다.
 - gameplay domain은 구체 Widget class에 의존하지 않는다. 필요하면 event, interface 또는 presentation data 경계를 사용한다.
 - `UMG`, `Slate`, `SlateCore` 같은 모듈 의존성은 실제 Source include와 사용처가 생길 때만 `BathhouseSim.Build.cs`에 추가한다.
@@ -157,3 +175,5 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 - pawn 교체와 HUD 종료에서 query/result delegate가 정확히 한 번 해제되는지 확인한다.
 - focus, held key와 target 상태 변화에 따라 prompt가 즉시 갱신되는지 확인한다.
 - hold cancel/completion, towel capacity/state, machine state와 individual overflow towel에 따라 primary/secondary failure가 즉시 갱신되는지 확인한다.
+- computer sample WBP의 `TestButton`, `ClickResultText` 이름/타입과 Event Graph 부재를 확인한다.
+- focus-out/re-entry에서 widget instance와 `클릭 확인` 상태가 유지되고 actor/level 종료에서만 수명이 끝나는지 확인한다.

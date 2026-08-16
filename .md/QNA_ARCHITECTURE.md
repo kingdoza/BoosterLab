@@ -1,4 +1,4 @@
-# QnA — 청소와 수건 순환 (답변 완료)
+# QnA — BathhouseSim Architecture (답변 완료)
 
 기존 Q1~Q26 답변은 [QNA_ARCHITECTURE_CUSTOMER_COMPLETED.md](QNA_ARCHITECTURE_CUSTOMER_COMPLETED.md)에 그대로 보존한다.
 
@@ -33,3 +33,11 @@
 - C: 자원이 생길 때까지 계속 대기
 - 권장안: A — 손님 흐름을 영구 정지시키지 않으면서 존재하지 않는 수건을 생성하거나 소실하지 않는다.
 - 답변: A, 그리고 고객 내부의 만족도 수치는 하락.
+
+## Q31. 물건을 든 상태에서 인게임 컴퓨터 사용을 시작할 수 있을까?
+
+- A: 빈손일 때만 컴퓨터 사용 허용
+- B: 물건을 든 상태 그대로 컴퓨터 사용 허용
+- C: 기존 G 드랍 transaction으로 자동 내려놓기에 성공한 경우에만 컴퓨터 사용
+- 권장안: A — key/mop/basket의 소유권과 드랍 실패 transaction을 건드리지 않고, held mesh가 모니터와 커서를 가리는 문제도 피할 수 있다.
+- 답변: A

@@ -23,7 +23,7 @@ Source/BathhouseSim/
 
 ## Module Rules
 
-`BathhouseSim.Build.cs`는 현재 1인칭 조작과 customer gameplay loop에 실제 사용되는 런타임 의존성을 유지한다.
+`BathhouseSim.Build.cs`는 현재 1인칭 조작, customer gameplay loop와 native/world-space UI에 실제 사용되는 런타임 의존성을 유지한다.
 
 - `Core`
 - `CoreUObject`
@@ -41,7 +41,7 @@ UE 5.8 customer loop 구현은 실제 include/use site와 함께 다음 runtime 
 - `GameplayStateTreeModule`
 - `UMG`
 
-`BathhouseSim.uproject`에는 UE 5.8 `StateTree`, `GameplayStateTree` plugin이 활성화되어 있다. `StateTreeEditorModule`, `Slate`, `SlateCore`는 runtime module에 추가하지 않는다.
+`BathhouseSim.uproject`에는 UE 5.8 `StateTree`, `GameplayStateTree` plugin이 활성화되어 있다. Computer target의 `UWidgetComponent`, `UWidgetInteractionComponent`와 native sample widget은 기존 `UMG`/`InputCore` 의존성으로 구현한다. direct API 사용처가 없는 `StateTreeEditorModule`, `Slate`, `SlateCore`는 runtime module에 추가하지 않는다.
 
 ## Runtime Entry
 
@@ -84,13 +84,14 @@ Core System은 고정된 native class inventory를 유지하지 않는다. 구�
 - `CleaningSystem.md`: water stain spawn과 wet mop cleaning 경계
 - `TowelSystem.md`: towel inventory, atomic transfer와 processing 경계
 - `TowelPresentationSystem.md`: Towel 하위 Stack/Pile/Slot world presentation 경계
+- `ComputerSystem.md`: world monitor, focus/input session과 sample screen 경계
 - `CoreSystem.md`: Source 루트, 모듈/문서/redirect 공통 규칙
 
 `Source/BathhouseSim/Private/Tests`는 system이 아니라 focused native automation test 경로다.
 
 새 Source 하위 디렉터리를 추가하면 같은 이름의 `*System.md`를 추가하고 책임, 핵심 클래스, runtime flow, 의존성, Blueprint/API 계약, 수동 검토 지점을 문서화한다.
 
-Cleaning/Towel target은 현재 runtime module dependency 안에서 구현한다. 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
+Cleaning/Towel과 Computer target은 현재 runtime module dependency 안에서 구현한다. 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
 
 ## Manual Review Points
 

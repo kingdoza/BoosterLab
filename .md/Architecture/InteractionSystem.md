@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`의 interface 기본값, 세 concrete Actor authoring, player-held 적용과 unit-scale validation까지 Source와 automation에 구현되었고 Blueprint class default authoring은 Editor 후속 단계다.
+이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`까지 Source와 automation에 구현되었으며 Computer focus 동안 world interaction을 멈추는 suppression 계약은 확정 구현 target이다.
 
 ## Source Scope
 
@@ -37,6 +37,7 @@ Source/BathhouseSim/Private/Tests/
 - 공용 held anchor와 아이템별 local held transform의 분리
 - 번호 key actor의 유일한 lifecycle과 player held presentation
 - focus와 held key 변화의 UI용 delegate
+- 외부 focus mode가 활성화된 동안 active hold, trace와 prompt를 중단하는 C++ suppression 경계
 
 Interaction은 cleaning progress, towel count/machine, customer routine, facility slot, queue와 player money를 소유하지 않는다.
 
@@ -69,6 +70,9 @@ Interaction은 cleaning progress, towel count/machine, customer routine, facilit
 - key, mop, basket, towel, stain, customer, cash 같은 구체 domain type을 직접 판별하지 않는다.
 - active hold는 target/input/focus/carry/EndPlay invalidation에서 정확히 한 번 cancel한다.
 - pawn 종료·교체 시 focus를 지우고 query/result delegate를 정리한다.
+- `SetInteractionSuppressed(true)`는 active hold를 transient failure 없이 한 번 cancel하고 current target/query를 지우며 suppress 중 trace와 public attempt의 mutation을 막는다.
+- `SetInteractionSuppressed(false)`는 즉시 query를 refresh한다. 같은 값의 반복 설정은 lifecycle을 중복 실행하지 않는다.
+- suppression은 generic 외부 focus 계약이며 Computer concrete type이나 computer session 상태를 판별하지 않는다.
 
 ## `UPlayerCarryComponent`
 
@@ -160,6 +164,7 @@ Technical recovery는 transition 전 실제 `StateOwner`를 snapshot하고 optio
 - `UPlayerCarryComponent`
 - first-person camera 하위 `HeldKeyAnchor`
 - existing instant primary 호환을 유지하면서 E Started/Completed/Canceled, F Started와 G Started를 Interaction/Carry intent API에 전달한다.
+- computer session이 input을 capture하면 해당 session이 E lifecycle을 소비하고 Interaction에는 전달하지 않는다.
 
 Character는 focus 규칙과 key transaction을 직접 구현하지 않는다. PlayerController는 mapping context 등록·해제 책임을 유지한다.
 
@@ -172,6 +177,7 @@ Blueprint 조회·표현 API:
 - primary begin/end, secondary attempt와 equipment drop attempt API
 - `UPlayerInteractionComponent::OnInteractionQueryChanged`는 Blueprint 표시 갱신 계약이다.
 - `UPlayerInteractionComponent::OnInteractionAttemptFinishedNative`는 C++ 전용 실행 결과 계약이며 BlueprintAssignable로 노출하지 않는다.
+- `UPlayerInteractionComponent::SetInteractionSuppressed`, `IsInteractionSuppressed`는 외부 focus owner가 사용하는 C++ 전용 계약이며 Blueprint에 노출하지 않는다.
 - `UPlayerCarryComponent::IsHandEmpty`
 - `UPlayerCarryComponent::GetHeldKey`
 - generic held object와 held kind 조회, `OnHeldObjectChanged`
@@ -198,7 +204,9 @@ Editor authoring 값:
 - Cleaning -> Interaction public hold/carry 계약
 - Towel -> Interaction public intent/carry 계약
 - Character -> Interaction
+- Computer -> Interaction public query/carry/suppression 계약
 - UI -> Interaction
+- Interaction은 Computer concrete class에 의존하지 않는다.
 - Interaction은 Customer와 UI concrete class에 의존하지 않는다.
 
 ## Manual Review Points
@@ -216,5 +224,7 @@ Editor authoring 값:
 - mop/basket drop이 같은 carry component commit 경로를 사용하고 concrete actor가 직접 위치·physics·impulse를 적용하지 않는지 확인한다.
 - Identity `HeldTransform`이 기존 anchor 부착을 보존하고, 세 아이템의 서로 다른 location/rotation이 player-held 상태에만 적용되는지 확인한다.
 - held transform이 hook/counter/world drop transform과 physical bounds scale을 오염시키지 않는지 확인한다.
+- suppression 시작이 hold를 한 번만 cancel하고 query/prompt를 지우며, 해제 직후 최신 target을 다시 조회하는지 확인한다.
+- suppress 중 E/F/G 직접 호출도 domain mutation이나 stale attempt feedback을 만들지 않는지 확인한다.
 - 벽, 비스듬한 면과 모서리에서 swept AABB가 벽 내부나 너머에 배치되지 않는지 확인한다.
 - start penetration 또는 안전 공간 없음 실패가 held attachment, carrier와 presentation을 보존하고 빈 방향 재시도를 허용하는지 확인한다.
