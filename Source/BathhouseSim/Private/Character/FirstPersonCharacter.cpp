@@ -8,6 +8,8 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/WidgetInteractionComponent.h"
+#include "Computer/PlayerComputerUseComponent.h"
 #include "EnhancedInputComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputActionValue.h"
@@ -33,6 +35,19 @@ AFirstPersonCharacter::AFirstPersonCharacter(const FObjectInitializer& ObjectIni
 	PlayerCarry->ConfigureHeldAnchor(HeldKeyAnchor);
 	PlayerInteraction = CreateDefaultSubobject<UPlayerInteractionComponent>(TEXT("PlayerInteraction"));
 	PlayerInteraction->Configure(FirstPersonCamera, PlayerCarry);
+	ComputerWidgetInteraction = CreateDefaultSubobject<UWidgetInteractionComponent>(TEXT("ComputerWidgetInteraction"));
+	ComputerWidgetInteraction->SetupAttachment(FirstPersonCamera);
+	ComputerWidgetInteraction->InteractionSource = EWidgetInteractionSource::Mouse;
+	ComputerWidgetInteraction->InteractionDistance = 500.0f;
+	ComputerWidgetInteraction->bEnableHitTesting = false;
+	ComputerWidgetInteraction->bShowDebug = false;
+	PlayerComputerUse = CreateDefaultSubobject<UPlayerComputerUseComponent>(TEXT("PlayerComputerUse"));
+	PlayerComputerUse->Configure(
+		FirstPersonCamera,
+		FirstPersonMovement,
+		PlayerInteraction,
+		PlayerCarry,
+		ComputerWidgetInteraction);
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -111,23 +126,50 @@ void AFirstPersonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 			this,
 			&AFirstPersonCharacter::DropCarryInput);
 	}
+
+	if (ComputerClickAction)
+	{
+		EnhancedInputComponent->BindAction(
+			ComputerClickAction,
+			ETriggerEvent::Started,
+			this,
+			&AFirstPersonCharacter::ComputerClickStartInput);
+		EnhancedInputComponent->BindAction(
+			ComputerClickAction,
+			ETriggerEvent::Completed,
+			this,
+			&AFirstPersonCharacter::ComputerClickEndInput);
+		EnhancedInputComponent->BindAction(
+			ComputerClickAction,
+			ETriggerEvent::Canceled,
+			this,
+			&AFirstPersonCharacter::ComputerClickEndInput);
+	}
 }
 
 void AFirstPersonCharacter::MoveInput(const FInputActionValue& Value)
 {
+	if (PlayerComputerUse && PlayerComputerUse->IsCapturingInput())
+	{
+		return;
+	}
 	const FVector2D MovementValue = Value.Get<FVector2D>() * MoveSpeedScale;
 	DoMove(MovementValue.X, MovementValue.Y);
 }
 
 void AFirstPersonCharacter::LookInput(const FInputActionValue& Value)
 {
+	if (PlayerComputerUse && PlayerComputerUse->IsCapturingInput())
+	{
+		return;
+	}
 	const FVector2D LookAxisValue = Value.Get<FVector2D>() * LookSpeedScale;
 	DoLook(LookAxisValue.X, LookAxisValue.Y);
 }
 
 void AFirstPersonCharacter::SprintStartInput()
 {
-	if (!FirstPersonMovement)
+	if ((PlayerComputerUse && PlayerComputerUse->IsCapturingInput()) || !FirstPersonMovement)
 	{
 		return;
 	}
@@ -143,7 +185,7 @@ void AFirstPersonCharacter::SprintStartInput()
 
 void AFirstPersonCharacter::SprintReleaseInput()
 {
-	if (!FirstPersonMovement || bSprintToggle)
+	if ((PlayerComputerUse && PlayerComputerUse->IsCapturingInput()) || !FirstPersonMovement || bSprintToggle)
 	{
 		return;
 	}
@@ -153,14 +195,31 @@ void AFirstPersonCharacter::SprintReleaseInput()
 
 void AFirstPersonCharacter::InteractStartInput()
 {
+	if (PlayerComputerUse && PlayerComputerUse->IsCapturingInput())
+	{
+		bComputerOwnsInteractPress = true;
+		PlayerComputerUse->RequestEndComputerUse();
+		return;
+	}
+
+	bComputerOwnsInteractPress = false;
 	if (PlayerInteraction)
 	{
 		PlayerInteraction->BeginPrimaryInteraction();
+	}
+	if (PlayerComputerUse && PlayerComputerUse->IsCapturingInput())
+	{
+		bComputerOwnsInteractPress = true;
 	}
 }
 
 void AFirstPersonCharacter::InteractEndInput()
 {
+	if (bComputerOwnsInteractPress)
+	{
+		bComputerOwnsInteractPress = false;
+		return;
+	}
 	if (PlayerInteraction)
 	{
 		PlayerInteraction->EndPrimaryInteraction();
@@ -169,6 +228,10 @@ void AFirstPersonCharacter::InteractEndInput()
 
 void AFirstPersonCharacter::SecondaryInteractInput()
 {
+	if (PlayerComputerUse && PlayerComputerUse->IsCapturingInput())
+	{
+		return;
+	}
 	if (PlayerInteraction)
 	{
 		PlayerInteraction->TrySecondaryInteract();
@@ -177,6 +240,10 @@ void AFirstPersonCharacter::SecondaryInteractInput()
 
 void AFirstPersonCharacter::DropCarryInput()
 {
+	if (PlayerComputerUse && PlayerComputerUse->IsCapturingInput())
+	{
+		return;
+	}
 	if (PlayerInteraction && FirstPersonCamera)
 	{
 		PlayerInteraction->TryDropCarry(
@@ -185,9 +252,28 @@ void AFirstPersonCharacter::DropCarryInput()
 	}
 }
 
+void AFirstPersonCharacter::ComputerClickStartInput()
+{
+	bComputerOwnsPointerPress = PlayerComputerUse && PlayerComputerUse->PressPointer();
+}
+
+void AFirstPersonCharacter::ComputerClickEndInput()
+{
+	if (!bComputerOwnsPointerPress)
+	{
+		return;
+	}
+
+	bComputerOwnsPointerPress = false;
+	if (PlayerComputerUse)
+	{
+		PlayerComputerUse->ReleasePointer();
+	}
+}
+
 void AFirstPersonCharacter::DoMove(float Right, float Forward)
 {
-	if (!Controller)
+	if ((PlayerComputerUse && PlayerComputerUse->IsCapturingInput()) || !Controller)
 	{
 		return;
 	}
@@ -198,7 +284,7 @@ void AFirstPersonCharacter::DoMove(float Right, float Forward)
 
 void AFirstPersonCharacter::DoLook(float Yaw, float Pitch)
 {
-	if (!Controller)
+	if ((PlayerComputerUse && PlayerComputerUse->IsCapturingInput()) || !Controller)
 	{
 		return;
 	}
@@ -209,6 +295,10 @@ void AFirstPersonCharacter::DoLook(float Yaw, float Pitch)
 
 void AFirstPersonCharacter::DoJumpStart()
 {
+	if (PlayerComputerUse && PlayerComputerUse->IsCapturingInput())
+	{
+		return;
+	}
 	Jump();
 }
 

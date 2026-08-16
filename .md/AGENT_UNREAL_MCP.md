@@ -54,9 +54,14 @@
 
 ## 세션과 재시작 정책
 
+- 동일 project path를 연 Unreal Editor는 항상 한 프로세스만 유지한다. 사용자 visible Editor가 실행 중이면 조건이 맞는 그 세션에 연결하고 별도 background Editor를 실행하지 않는다.
+- 실행 중인 호환 Editor가 없을 때만 작업 전용 background/offscreen Editor를 새로 실행하고, 해당 PID와 agent-owned 여부를 기준선에 기록한다.
 - 정상 Editor 세션 하나에서 inspection, authoring, compile, validation, save와 가능한 PIE를 묶어 수행한다.
 - 작업 도중 값 확인만을 위해 Editor를 반복해서 닫고 열지 않는다.
 - 저장 전에는 재시작하지 않고, 저장 후 디스크 재로드 검증을 위해 마지막에 한 번만 재시작한다.
+- agent-owned background Editor는 작업 완료 시 PIE 종료, allowlist 저장, 디스크 재로드 검증, dirty package 0을 확인한 뒤 반드시 종료하고 프로세스가 실제로 사라졌는지 확인한다.
+- 사용자 visible Editor는 명시적 종료 요청이 없으면 종료하지 않는다. 다음 작업 시작 시 해당 Editor가 살아 있으면 새 background Editor 대신 재연결을 우선한다.
+- 저장 로그에 Windows `Error Code 32`, `MoveFile` 실패 또는 sharing violation이 나오면 재저장을 반복하지 않는다. `Save All`을 중단하고 중복 Editor PID를 확인한 뒤 agent-owned background Editor만 종료하고 대상 에셋을 다시 저장한다.
 - 강제 종료는 target asset 저장 여부와 dirty package를 확인한 뒤, 보존할 사용자 변경이 없을 때만 사용한다.
 - GUI 재시작이 실패하면 같은 명령을 반복하지 않고 commandlet 재로드 검증으로 전환한다.
 - commandlet는 직접 PIE, 사용자 입력 또는 시각 판정을 대체했다고 기록하지 않는다.

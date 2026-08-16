@@ -26,6 +26,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void Configure(UCameraComponent* InCamera, UPlayerCarryComponent* InCarryComponent);
+	void SetInteractionSuppressed(bool bSuppressed);
+	bool IsInteractionSuppressed() const { return bInteractionSuppressed; }
 
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	FPlayerInteractionQuery GetCurrentInteractionQuery() const { return CurrentQuery; }
@@ -65,6 +67,7 @@ protected:
 private:
 	friend class FBathhouseInteractionAttemptResultTest;
 	friend class FBathhouseCleaningInteractionTest;
+	friend class FBathhouseComputerSessionTest;
 
 	bool BuildInteraction(FPlayerInteractionContext& OutContext, IPlayerInteractable*& OutInteractable, UObject*& OutTargetObject) const;
 	FPlayerInteractionResult FinishInteractionAttempt(const FPlayerInteractionResult& Result);
@@ -96,4 +99,5 @@ private:
 
 	float ActiveHoldProgress = 0.0f;
 	bool bPrimaryInputHeld = false;
+	bool bInteractionSuppressed = false;
 };

@@ -7,12 +7,14 @@
 #include "FirstPersonCharacter.generated.h"
 
 class UCameraComponent;
+class UPlayerComputerUseComponent;
 class UFirstPersonCameraShakeComponent;
 class UFirstPersonMovementComponent;
 class UInputAction;
 class UPlayerCarryComponent;
 class UPlayerInteractionComponent;
 class USceneComponent;
+class UWidgetInteractionComponent;
 struct FInputActionValue;
 
 UCLASS()
@@ -40,6 +42,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	UPlayerCarryComponent* GetPlayerCarry() const { return PlayerCarry; }
 
+	UFUNCTION(BlueprintPure, Category = "Computer")
+	UPlayerComputerUseComponent* GetPlayerComputerUse() const { return PlayerComputerUse; }
+
 protected:
 	void MoveInput(const FInputActionValue& Value);
 	void LookInput(const FInputActionValue& Value);
@@ -49,6 +54,8 @@ protected:
 	void InteractEndInput();
 	void SecondaryInteractInput();
 	void DropCarryInput();
+	void ComputerClickStartInput();
+	void ComputerClickEndInput();
 
 	UFUNCTION(BlueprintCallable, Category = "Input")
 	void DoMove(float Right, float Forward);
@@ -81,6 +88,12 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> HeldKeyAnchor;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Computer", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UWidgetInteractionComponent> ComputerWidgetInteraction;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Computer", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UPlayerComputerUseComponent> PlayerComputerUse;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> MoveAction;
 
@@ -102,6 +115,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> DropCarryAction;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> ComputerClickAction;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
 	float MoveSpeedScale = 1.0f;
 
@@ -110,4 +126,10 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sprint")
 	bool bSprintToggle = true;
+
+private:
+	friend class FBathhouseComputerSessionTest;
+
+	bool bComputerOwnsInteractPress = false;
+	bool bComputerOwnsPointerPress = false;
 };

@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 월드 모니터 기반 컴퓨터 상호작용의 확정 구현 target을 정의한다. 현재 Source와 Content에는 Computer native class와 asset이 없으며 C++ 구현, automation, Blueprint/Editor 연결은 후속 단계다.
+이 문서는 월드 모니터 기반 컴퓨터 상호작용의 현재 native 구현을 정의한다. Computer Actor, player session component, interaction suppression, sample widget과 focused automation은 Source에 구현되었고 Blueprint/Editor 연결은 후속 단계다.
 
 이번 범위는 컴퓨터 한 대의 포커스 진입/이탈과 월드 `UWidgetComponent`에 표시되는 클릭 확인용 샘플 화면이다. 범용 운영체제, 프로그램 목록과 저장 시스템은 포함하지 않는다.
 
@@ -88,10 +88,11 @@ player별 authoritative transient session owner다. 내부 phase는 `Inactive`, 
 3. `UPlayerInteractionComponent`를 suppress해 active hold를 조용히 한 번 cancel하고 prompt/query를 지운다.
 4. computer Actor를 `SetViewTargetWithBlend` 대상으로 설정한다.
 5. blend가 끝나면 `Active`로 전환하고 mouse cursor, `FInputModeGameAndUI`와 widget pointer hit testing을 활성화한다.
+6. UE 5.8의 CameraComponent에는 view별 AA method override가 없으므로, active computer focus 동안 태그가 붙은 `r.AntiAliasingMethod=FXAA` override를 적용해 world-widget의 TSR history 잔상을 피한다.
 
 focus-in 중 E를 다시 누르면 focus-out으로 전환할 수 있다. pointer click은 `Active`에서만 허용한다.
 
-종료 시 pointer press가 남았다면 release하고 hit testing과 cursor를 먼저 끈다. 저장한 view target으로 blend한 뒤 movement mode, 1인칭 입력과 interaction query를 복구하고 expected user reservation을 해제한다. blend가 0이면 같은 frame에 완료한다.
+종료 시 pointer press가 남았다면 release하고 hit testing과 cursor를 먼저 끈다. focus용 AA override를 태그로 unset해 이전 project/runtime 값을 복구하고, 저장한 view target으로 blend한 뒤 movement mode, 1인칭 입력과 interaction query를 복구하고 expected user reservation을 해제한다. blend가 0이면 같은 frame에 완료한다.
 
 컴퓨터 또는 player/controller가 유효하지 않게 되면 timer와 pointer state를 정리하고 가능한 player pawn/view target, `FInputModeGameOnly`, 저장된 movement mode와 interaction을 즉시 복구한다. begin/end/unavailable은 반복 호출해도 상태를 복제하거나 잠금을 남기지 않는다.
 
@@ -150,7 +151,7 @@ focus-out은 `ScreenWidget`이나 user widget을 remove/recreate하지 않는다
 - `UComputerSampleScreenWidget` native parent와 `TestButton`, `ClickResultText` BindWidget
 - computer focus camera/blend와 widget interaction distance/debug authoring 값
 
-기존 reflected symbol을 rename/delete하지 않으므로 Core Redirect는 필요하지 않다. Content asset 생성과 assignment는 Unreal 단계에서 수행한다.
+기존 reflected symbol을 rename/delete하지 않으므로 Core Redirect는 필요하지 않다. Content asset 생성과 assignment는 Unreal 단계에서 수행한다. 현재 Content scan에는 computer/monitor asset과 `IA_ComputerClick`이 없고 기존 player/input asset만 존재한다.
 
 ## Out Of Scope
 
@@ -170,5 +171,6 @@ focus-out은 `ScreenWidget`이나 user widget을 remove/recreate하지 않는다
 - mouse press/release와 focus-out 강제 release가 button stuck 또는 double click을 만들지 않는지 확인한다.
 - monitor가 정면으로 보이면서 주변 목욕탕이 viewport에 남는지 플레이 테스트한다.
 - focus-out/re-entry 뒤 `클릭 확인` 상태가 유지되고 widget construct가 반복되지 않는지 확인한다.
+- active focus에서는 FXAA가 적용되고 정상 종료와 강제 cleanup 뒤에는 진입 전 AA method가 복구되는지 확인한다.
 - computer/player EndPlay 뒤 view target, cursor, input mode, movement와 interaction prompt가 복구되는지 확인한다.
 - world/NPC simulation이 computer 사용 중 pause되지 않는지 확인한다.

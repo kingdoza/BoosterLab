@@ -34,6 +34,10 @@ void UPlayerInteractionComponent::TickComponent(
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (bInteractionSuppressed)
+	{
+		return;
+	}
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (OwnerPawn && OwnerPawn->IsLocallyControlled())
@@ -77,6 +81,31 @@ void UPlayerInteractionComponent::Configure(UCameraComponent* InCamera, UPlayerC
 	RefreshInteractionQuery();
 }
 
+void UPlayerInteractionComponent::SetInteractionSuppressed(const bool bSuppressed)
+{
+	if (bInteractionSuppressed == bSuppressed)
+	{
+		return;
+	}
+
+	bInteractionSuppressed = bSuppressed;
+	if (bInteractionSuppressed)
+	{
+		if (ActiveHoldTarget)
+		{
+			CancelActiveHold(false, FText::GetEmpty(), false);
+		}
+		else
+		{
+			ClearActiveHoldState();
+		}
+		ClearInteractionQuery();
+		return;
+	}
+
+	RefreshInteractionQuery();
+}
+
 FPlayerInteractionResult UPlayerInteractionComponent::TryInteract()
 {
 	return BeginPrimaryInteraction();
@@ -84,6 +113,12 @@ FPlayerInteractionResult UPlayerInteractionComponent::TryInteract()
 
 FPlayerInteractionResult UPlayerInteractionComponent::BeginPrimaryInteraction()
 {
+	if (bInteractionSuppressed)
+	{
+		return FPlayerInteractionResult::Failed(
+			NSLOCTEXT("BathhouseInteraction", "InteractionSuppressed", "현재 상호작용을 사용할 수 없습니다."));
+	}
+
 	if (bPrimaryInputHeld)
 	{
 		RefreshInteractionQuery();
@@ -137,6 +172,10 @@ FPlayerInteractionResult UPlayerInteractionComponent::BeginPrimaryInteraction()
 void UPlayerInteractionComponent::EndPrimaryInteraction()
 {
 	bPrimaryInputHeld = false;
+	if (bInteractionSuppressed)
+	{
+		return;
+	}
 	if (ActiveHoldTarget)
 	{
 		CancelActiveHold(
@@ -147,6 +186,13 @@ void UPlayerInteractionComponent::EndPrimaryInteraction()
 
 FPlayerInteractionResult UPlayerInteractionComponent::TrySecondaryInteract()
 {
+	if (bInteractionSuppressed)
+	{
+		return FPlayerInteractionResult::Failed(
+			NSLOCTEXT("BathhouseInteraction", "SecondaryInteractionSuppressed", "현재 상호작용을 사용할 수 없습니다."),
+			EPlayerInteractionIntent::Secondary);
+	}
+
 	FPlayerInteractionContext Context;
 	IPlayerInteractable* Interactable = nullptr;
 	UObject* TargetObject = nullptr;
@@ -177,6 +223,13 @@ FPlayerInteractionResult UPlayerInteractionComponent::TryDropCarry(
 	const FVector& ViewOrigin,
 	const FVector& ViewDirection)
 {
+	if (bInteractionSuppressed)
+	{
+		return FPlayerInteractionResult::Failed(
+			NSLOCTEXT("BathhouseInteraction", "DropCarrySuppressed", "현재 장비를 내려놓을 수 없습니다."),
+			EPlayerInteractionIntent::DropCarry);
+	}
+
 	if (ActiveHoldTarget)
 	{
 		CancelActiveHold(
@@ -195,6 +248,11 @@ FPlayerInteractionResult UPlayerInteractionComponent::TryDropCarry(
 
 void UPlayerInteractionComponent::RefreshInteractionQuery()
 {
+	if (bInteractionSuppressed)
+	{
+		return;
+	}
+
 	FPlayerInteractionContext Context;
 	IPlayerInteractable* Interactable = nullptr;
 	UObject* TargetObject = nullptr;
@@ -224,7 +282,7 @@ bool UPlayerInteractionComponent::BuildInteraction(
 {
 	OutInteractable = nullptr;
 	OutTargetObject = nullptr;
-	if (!Camera || !GetWorld() || !GetOwner())
+	if (bInteractionSuppressed || !Camera || !GetWorld() || !GetOwner())
 	{
 		return false;
 	}

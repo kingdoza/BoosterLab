@@ -4,7 +4,7 @@
 
 UI System은 BathhouseSim의 native C++ Widget과 Widget Blueprint 사이의 공통 책임 경계를 정의한다.
 
-native UI Source는 primary/secondary action, 의도별 실패와 hold progress를 같은 interaction prompt widget에서 처리한다. world-space computer sample screen의 native base와 두 필수 BindWidget은 확정 구현 target이다.
+native UI Source는 primary/secondary action, 의도별 실패와 hold progress를 같은 interaction prompt widget에서 처리한다. world-space computer sample screen의 native base와 두 필수 BindWidget도 구현되어 있다.
 
 ```text
 Source/BathhouseSim/Public/UI/
@@ -15,9 +15,6 @@ Current classes:
 
 - `ABathhouseHUD`: local prompt 생성·제거와 possessed pawn context 연결
 - `UInteractionPromptWidget`: primary/secondary query/result lifecycle, hold progress, transient failure timer와 필수 `BindWidget` 표시 갱신
-
-Confirmed target:
-
 - `UComputerSampleScreenWidget`: world monitor의 sample button lifecycle과 클릭 확인 표시
 
 `Content/`의 Widget Blueprint와 UI asset은 serialized project data다. 명시적인 Editor 작업 없이 수정하거나 resave하지 않는다.

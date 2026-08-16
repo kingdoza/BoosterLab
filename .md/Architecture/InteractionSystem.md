@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`까지 Source와 automation에 구현되었으며 Computer focus 동안 world interaction을 멈추는 suppression 계약은 확정 구현 target이다.
+이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`과 Computer focus 동안 world interaction을 멈추는 suppression 계약까지 Source와 automation에 구현되었다.
 
 ## Source Scope
 
@@ -25,6 +25,7 @@ Source/BathhouseSim/Private/Interaction/
 Source/BathhouseSim/Private/Tests/
   BathhouseDomainTests.cpp  # single-key carry와 interaction attempt result coverage
   CleaningTowelAutomationTests.cpp  # mop/basket carry, hold cleaning과 key G rejection coverage
+  ComputerAutomationTests.cpp  # suppression, computer focus/input/pointer/cleanup coverage
 ```
 
 ## Responsibilities

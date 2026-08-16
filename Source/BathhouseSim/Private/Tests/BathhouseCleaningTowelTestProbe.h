@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Interaction/InteractionTypes.h"
 #include "Towel/TowelTypes.h"
 #include "UObject/Object.h"
 #include "BathhouseCleaningTowelTestProbe.generated.h"
@@ -9,6 +10,7 @@ class UTowelInventoryComponent;
 class AWaterStainActor;
 class AWetMopActor;
 class UPlayerCarryComponent;
+class UPlayerInteractionComponent;
 
 UCLASS(Transient, NotBlueprintable)
 class UBathhouseTowelAtomicCommitProbe : public UObject
@@ -55,6 +57,26 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AWaterStainActor> Stain = nullptr;
+};
+
+UCLASS(Transient, NotBlueprintable)
+class UBathhouseInteractionQueryProbe : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	void Bind(UPlayerInteractionComponent* InInteraction);
+	void Unbind();
+
+	int32 BroadcastCount = 0;
+	FPlayerInteractionQuery LastQuery;
+
+private:
+	UFUNCTION()
+	void HandleInteractionQueryChanged(const FPlayerInteractionQuery& Query);
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPlayerInteractionComponent> Interaction = nullptr;
 };
 
 UCLASS(Transient, NotBlueprintable)

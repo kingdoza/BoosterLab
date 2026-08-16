@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-1인칭 이동, sprint, camera, Interaction/Carry 조립과 E primary, F secondary, G equipment release 입력 routing은 현재 Source에 구현되어 있다. Computer use component, widget pointer 조립과 computer input gate는 확정 구현 target이며 아직 Source에 없다.
+1인칭 이동, sprint, camera, Interaction/Carry 조립, E primary, F secondary, G equipment release와 Computer focus/click 입력 routing은 현재 Source에 구현되어 있다. Computer InputAction assignment와 IMC mapping은 Editor 후속 단계다.
 
 ## Responsibilities
 
@@ -84,7 +84,7 @@ Source/BathhouseSim/Private/Character/
 4. `AFirstPersonController::SetupInputComponent`가 `DefaultMappingContext`를 로컬 Enhanced Input subsystem에 등록한다.
 5. `AFirstPersonCharacter::SetupPlayerInputComponent`가 설정된 input action들을 바인딩한다.
 6. Interaction/Carry component에 camera와 held anchor context를 제공한다.
-7. Computer use component에 movement, interaction, carry와 widget interaction context를 제공한다.
+7. Computer use component에 first-person camera, movement, interaction, carry와 widget interaction context를 제공한다.
 
 ### Shutdown
 

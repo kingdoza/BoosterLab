@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-16(KST) world-space computer monitor focus와 sample click 확정 설계 기준
-- 상태: 기존 Cleaning/Towel/Customer 확장은 native 구현 완료 상태이며 Computer target은 설계 완료, C++ 구현 대기
+- 기준일: 2026-08-16(KST) world-space computer monitor focus와 sample click native 구현 기준
+- 상태: Cleaning/Towel/Customer 확장과 Computer focus/sample screen은 native 구현 및 automation 완료, Content/Editor 통합 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -23,7 +23,6 @@
   - UI
   - Cleaning
   - Towel
-- 확정 구현 target:
   - Computer
 - `Content`는 Blueprint 참조 검증 범위로만 다룬다. C++ 시스템 책임의 정본은 Source 하위 문서에 둔다.
 - `Config/DefaultEngine.ini`는 GameMode/Pawn/Controller 연결 또는 Core Redirect가 필요한 rename 호환 경로로만 문서화한다.
@@ -70,7 +69,7 @@ Source/BathhouseSim/
     Tests/
 ```
 
-Computer 구현 target은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, `Private/UI` 확장을 사용한다.
+Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, `Private/UI` 확장을 사용한다.
 
 - `Core`는 소스 폴더가 아니라 문서상 공통 경계다.
 - 시스템 하위 폴더명은 include 경로의 1차 네임스페이스 역할을 한다.
@@ -174,4 +173,4 @@ Computer 구현 target은 `Public/Computer`, `Private/Computer`와 기존 `Publi
 - Cleaning/Towel Source, secondary/drop input, native prompt 확장과 customer towel StateTree Task/Condition은 구현되었다. InputAction/IMC, WBP hierarchy, Blueprint actor, facility 배치와 `ST_CustomerRoutine` asset 연결은 Unreal 후속 단계다.
 - Towel Stack/Pile/Slot native presentation은 collision-free `TowelPresentationVisual` reflected 계약으로 구현되었다. 기존 `BP_Washer`/`BP_Dryer`의 inherited Pile authoring과 profile 지정은 Editor 후속 단계이며 신규 machine이나 drying-rack gameplay actor는 만들지 않는다.
 - per-item `HeldTransform`, seeded water-stain visual variation, Stack/Pile/Slot Editor preview와 collision-independent Bath snap은 Source와 native automation까지 구현되었다. `HeldTransform`/stain Blueprint authoring, inherited towel preview와 blocked Bath Editor 통합 검증은 후속 단계다.
-- `ABathhouseComputerActor`, `UPlayerComputerUseComponent`, `UComputerSampleScreenWidget`, interaction suppression과 click input은 확정 target이며 아직 Source/Content에 구현되지 않았다.
+- `ABathhouseComputerActor`, `UPlayerComputerUseComponent`, `UComputerSampleScreenWidget`, interaction suppression과 click input은 Source와 focused automation까지 구현되었다. Computer Blueprint/WBP, click InputAction/IMC assignment와 level 배치는 Editor 후속 단계다.

@@ -3,6 +3,7 @@
 #include "Cleaning/WaterStainActor.h"
 #include "Cleaning/WetMopActor.h"
 #include "Interaction/PlayerCarryComponent.h"
+#include "Interaction/PlayerInteractionComponent.h"
 #include "Towel/TowelInventoryComponent.h"
 
 void UBathhouseTowelAtomicCommitProbe::Bind(
@@ -70,6 +71,35 @@ void UBathhouseCleaningCancelProbe::Unbind()
 void UBathhouseCleaningCancelProbe::HandleCleaningCancelled()
 {
 	++CancelCount;
+}
+
+void UBathhouseInteractionQueryProbe::Bind(UPlayerInteractionComponent* InInteraction)
+{
+	Unbind();
+	Interaction = InInteraction;
+	if (Interaction)
+	{
+		Interaction->OnInteractionQueryChanged.AddDynamic(
+			this,
+			&UBathhouseInteractionQueryProbe::HandleInteractionQueryChanged);
+	}
+}
+
+void UBathhouseInteractionQueryProbe::Unbind()
+{
+	if (Interaction)
+	{
+		Interaction->OnInteractionQueryChanged.RemoveDynamic(
+			this,
+			&UBathhouseInteractionQueryProbe::HandleInteractionQueryChanged);
+	}
+	Interaction = nullptr;
+}
+
+void UBathhouseInteractionQueryProbe::HandleInteractionQueryChanged(const FPlayerInteractionQuery& Query)
+{
+	++BroadcastCount;
+	LastQuery = Query;
 }
 
 void UBathhousePhysicalDropReentryProbe::Bind(

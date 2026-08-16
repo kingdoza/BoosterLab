@@ -41,7 +41,7 @@ UE 5.8 customer loop 구현은 실제 include/use site와 함께 다음 runtime 
 - `GameplayStateTreeModule`
 - `UMG`
 
-`BathhouseSim.uproject`에는 UE 5.8 `StateTree`, `GameplayStateTree` plugin이 활성화되어 있다. Computer target의 `UWidgetComponent`, `UWidgetInteractionComponent`와 native sample widget은 기존 `UMG`/`InputCore` 의존성으로 구현한다. direct API 사용처가 없는 `StateTreeEditorModule`, `Slate`, `SlateCore`는 runtime module에 추가하지 않는다.
+`BathhouseSim.uproject`에는 UE 5.8 `StateTree`, `GameplayStateTree` plugin이 활성화되어 있다. Computer의 `UWidgetComponent`, `UWidgetInteractionComponent`와 native sample widget은 기존 `UMG`/`InputCore` 의존성으로 구현되어 있다. direct API 사용처가 없는 `StateTreeEditorModule`, `Slate`, `SlateCore`는 runtime module에 추가하지 않는다.
 
 ## Runtime Entry
 
@@ -91,7 +91,7 @@ Core System은 고정된 native class inventory를 유지하지 않는다. 구�
 
 새 Source 하위 디렉터리를 추가하면 같은 이름의 `*System.md`를 추가하고 책임, 핵심 클래스, runtime flow, 의존성, Blueprint/API 계약, 수동 검토 지점을 문서화한다.
 
-Cleaning/Towel과 Computer target은 현재 runtime module dependency 안에서 구현한다. 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
+Cleaning/Towel과 Computer는 현재 runtime module dependency 안에서 구현한다. 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
 
 ## Manual Review Points
 
