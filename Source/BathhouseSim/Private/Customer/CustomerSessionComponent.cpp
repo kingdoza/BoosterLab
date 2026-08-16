@@ -415,12 +415,6 @@ bool UCustomerSessionComponent::SnapToCurrentFacilityActionPoint()
 	const FTransform CharacterActionTransform = MakeCharacterTransformAtFacilityPoint(
 		CachedFacilityActionTransform,
 		*Capsule);
-	if (!IsActionTransformClear(*Character, CharacterActionTransform))
-	{
-		UE_LOG(LogTemp, Error, TEXT("Bathhouse customer %s action-point capsule is blocked; snap was rejected."), *GetNameSafe(GetOwner()));
-		return false;
-	}
-
 	if (AAIController* AIController = Cast<AAIController>(Character->GetController()))
 	{
 		AIController->StopMovement();
@@ -474,28 +468,6 @@ bool UCustomerSessionComponent::ReturnToCurrentFacilityApproachPoint()
 		bSnappedToFacilityActionPoint = false;
 	}
 	return bMoved;
-}
-
-bool UCustomerSessionComponent::IsActionTransformClear(
-	const ACharacter& Character,
-	const FTransform& CharacterActionTransform) const
-{
-	const UWorld* World = Character.GetWorld();
-	const UCapsuleComponent* Capsule = Character.GetCapsuleComponent();
-	if (!World || !Capsule)
-	{
-		return false;
-	}
-	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(
-		Capsule->GetScaledCapsuleRadius(),
-		Capsule->GetScaledCapsuleHalfHeight());
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(CustomerFacilityActionSnap), false, &Character);
-	return !World->OverlapBlockingTestByProfile(
-		CharacterActionTransform.GetLocation(),
-		CharacterActionTransform.GetRotation(),
-		Capsule->GetCollisionProfileName(),
-		CapsuleShape,
-		QueryParams);
 }
 
 void UCustomerSessionComponent::RestoreSavedMovementMode(ACharacter& Character)

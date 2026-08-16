@@ -1,131 +1,128 @@
-# Towel Presentation Authoring — Unreal Integration Review
+# Carry/Stain/Towel Preview/Bath Snap — Unreal Integration Review
 
 ## 작업 상태
 
-- 상태: 부분 완료
+- 상태: 완료
 - 기준 작업서: `.md/PROMPT_UNREAL.md`
-- UE 버전: 5.8.1
-- Content authoring, 저장, 재로드 리드백, Data Validation, Blueprint compile, 전용/전체 자동화 테스트는 완료했다.
-- 직접 PIE 2회 및 플레이어 E/F 입력을 포함한 시각 인수 검증은 Editor 재시작 후 main frame/MCP 응답 정지 때문에 실행하지 못했다.
+- 검증 엔진: Unreal Engine 5.8.1
+- 이번 단계에서는 Source, Config, StateTree graph, map 및 World Partition external actor를 수정하거나 저장하지 않았다.
+- 기존 dirty worktree의 다른 Source/Content/문서는 보존했다.
 
-## Native Preflight
+## 수정 및 저장한 에셋
 
-- 실행 중인 Editor와 Live Coding을 종료했다.
-- UE 5.8 `Build.bat`으로 `BathhouseSimEditor Win64 Development -WaitMutex -NoHotReloadFromIDE`를 빌드했다.
-- 결과: `Succeeded`; target up to date.
-- 새 Editor에서 다섯 Blueprint의 parent, inherited `TowelPresentationVisual` 이름과 concrete type을 확인했다.
-  - Clean stack, used bin, basket: `TowelStackVisualComponent`
-  - Washer, dryer: `TowelPileVisualComponent`
-- 저장 전에 `LogBlueprint: Error`, internal compiler error, duplicate property, missing native property/default subobject, 관련 load error가 없음을 확인했다.
-
-## 생성한 Mesh Profile
-
-모든 profile은 `/Game/Bathhouse/Data/Towel/`에 생성하고 저장했다.
-
-| Asset | State → Mesh |
+| 종류 | 에셋 |
 |---|---|
-| `DA_TowelVisual_Shelf` | Clean → `/Engine/BasicShapes/Cube.Cube` |
-| `DA_TowelVisual_UsedBin` | Used → `/Engine/BasicShapes/Cube.Cube` |
-| `DA_TowelVisual_Basket` | Used, Wet, Clean → `/Engine/BasicShapes/Cube.Cube` |
-| `DA_TowelVisual_Washer` | Used, Wet → `/Engine/BasicShapes/Cube.Cube` |
-| `DA_TowelVisual_Dryer` | Wet, Clean → `/Engine/BasicShapes/Cube.Cube` |
+| HeldTransform | `/Game/Bathhouse/Blueprints/Interaction/BP_BathhouseKey` |
+| HeldTransform | `/Game/Bathhouse/Blueprints/Cleaning/BP_WetMop` |
+| HeldTransform + towel preview | `/Game/Bathhouse/Blueprints/Towel/BP_TowelBasket` |
+| stain authoring | `/Game/Bathhouse/Blueprints/Cleaning/BP_WaterStain` |
+| towel preview | `/Game/Bathhouse/Blueprints/Towel/BP_CleanTowelStack` |
+| towel preview | `/Game/Bathhouse/Blueprints/Towel/BP_UsedTowelBin` |
+| towel preview | `/Game/Bathhouse/Blueprints/Towel/BP_Washer` |
+| towel preview | `/Game/Bathhouse/Blueprints/Towel/BP_Dryer` |
+| towel mesh profile | `/Game/Bathhouse/Data/Towel/DA_TowelVisual_Washer` |
+| towel mesh profile | `/Game/Bathhouse/Data/Towel/DA_TowelVisual_Dryer` |
 
-- 프로젝트 Content에 towel 전용 Static Mesh가 없어서 Engine Cube를 얇게 스케일한 placeholder로 사용했다.
-- `None`, duplicate state, null mesh는 없다.
-- 같은 profile 안에 같은 state 또는 같은 state의 중복 mesh 후보를 넣지 않았다.
-- 모든 상태가 같은 placeholder mesh이므로 현재는 상태별 외형 차이는 없고 수량/배치 표현만 확인 가능하다.
+## Carry HeldTransform
 
-## 수정한 Blueprint와 최종 Layout
+| Blueprint | Location | Rotation `(Pitch,Yaw,Roll)` | Scale |
+|---|---:|---:|---:|
+| `BP_BathhouseKey` | `(0,0,0)` | `(0,0,0)` | `(1,1,1)` |
+| `BP_WetMop` | `(0,15,-10)` | `(0,0,90)` | `(1,1,1)` |
+| `BP_TowelBasket` | `(0,10,-15)` | `(0,0,0)` | `(1,1,1)` |
 
-공통 설정은 `CountStepInterval=0.06`, `bAnimateInventoryChanges=true`, `BaseLocalOffset=(0,0,0)`이다.
+- `HeldKeyAnchor`, world mesh scale, collision, throw 값과 key placement/recovery 계약은 수정하지 않았다.
+- 실제 PIE에서 key hook take와 customer assignment를 실행했고 key Identity가 기존 anchor snap과 일치했다.
+- mop pickup에서 held actor가 `HeldKeyAnchor`에 부착되고 원래 visual scale이 유지되는 것을 확인했다.
+- 최종 재시작 후 세 Blueprint CDO에서 위 값이 그대로 재로드됐다.
+- DefaultMap 외부 액터 패키지에 세 타입 모두 `HeldTransform` 인스턴스 override가 직렬화돼 있지 않아 placed actor도 새 class default를 상속한다.
+- `BP_FirstPersonCharacter`의 `DropCarryAction`은 `IA_DropCarry`에, `IMC_FirstPerson`의 해당 action은 G에 연결된 기존 설정을 유지한다.
+- `BathhouseSim.Interaction.PhysicalCarryDropSweepAndTransaction`이 성공해 mop/basket G intent, drop bounds, physics release, wall sweep, 실패 rollback 및 재획득 계약을 확인했다.
 
-| Blueprint | Profile | Seed | Relative Transform | Layout |
-|---|---|---:|---|---|
-| `/Game/Bathhouse/Blueprints/Towel/BP_CleanTowelStack` | Shelf | 101 | L `(0,0,51)`, R `(0,0,0)`, S `(0.3,0.2,0.02)` | `ZSpacing=105` |
-| `/Game/Bathhouse/Blueprints/Towel/BP_UsedTowelBin` | UsedBin | 202 | L `(0,0,51)`, R `(0,0,0)`, S `(0.22,0.22,0.022)` | `ZSpacing=100` |
-| `/Game/Bathhouse/Blueprints/Towel/BP_TowelBasket` | Basket | 303 | L `(0,0,55)`, R `(0,0,0)`, S `(0.65,0.6,0.1)` | `ZSpacing=110` |
-| `/Game/Bathhouse/Blueprints/Towel/BP_Washer` | Washer | 404 | L `(31,0,45)`, R `(0,0,0)`, S `(0.16,0.12,0.025)` | Pile 설정 아래 참조 |
-| `/Game/Bathhouse/Blueprints/Towel/BP_Dryer` | Dryer | 505 | L `(31,0,45)`, R `(0,0,0)`, S `(0.16,0.12,0.025)` | Pile 설정 아래 참조 |
+## Water Stain Variation
 
-- Basket attachment는 native `WorldMesh`를 유지한다. 나머지는 native actor root에 붙어 있다.
-- Washer/Dryer 공통 pile:
-  - `PileHalfExtent=(60,150,480)`
-  - `ItemsPerLayer=4`
-  - `LayerSpacing=120`
-  - `MaxZJitter=15`
-  - `MinRandomRotation=(-4,-25,-6)`
-  - `MaxRandomRotation=(4,25,6)`
-- Machine kind, processing timer, transfer port, control, delegate와 Event Graph는 수정하지 않았다.
-- `UTowelSlotVisualComponent`, drying-rack 기능, `BP_DryingSpot`은 수정하지 않았다.
+- `StainVisual` 이름을 유지하고 inherited `StainVisualRoot` 아래로 재부착했다.
+- `InteractionCollision`의 root/relative transform/collision은 변경하지 않았다.
+- `MaterialVariants`: `/Engine/EngineMaterials/WaterMaterial.DefaultWaterMaterial` 1개.
+- `MinXYScale=(0.70,0.80)`, `MaxXYScale=(1.30,1.20)`.
+- `MinYawDegrees=-180`, `MaxYawDegrees=180`.
+- `Event Apply Stain Material Variant(SelectedMaterial)`을 `StainVisual.SetMaterial`, element index 0에 연결했다.
+- Event Graph에 random 계산, Tick/Delay, cleaning/registry mutation은 추가하지 않았다.
 
-## BP_CleanTowelStack.StackVisual 결정
+PIE에서 기존 8개와 추가 spawn 5개, 총 13개 stain을 확인했다.
 
-- 결정: 보존
-- 삭제 전 확인한 값:
-  - Mesh: `/Engine/BasicShapes/Cube.Cube`
-  - Material override: 없음
-  - Relative location `(0,0,25)`, scale `(0.5,0.35,0.5)`
-  - Collision: Query Only; Visibility block, Camera ignore
-- 이 컴포넌트는 현재 shelf/base placeholder이자 clean stack의 interaction trace 표면이다.
-- 삭제하면 native presentation instance가 interaction에 참여하지 않는 계약 때문에 E/F trace 표면도 함께 사라진다.
-- native towel은 얇은 scale과 Z=51에서 base 위로 쌓이므로 base와 같은 위치의 중복 towel 표현으로 판단하지 않았다.
-- `BinVisual`, `MachineVisual`도 보존했다.
+- 모든 X/Y scale이 authored 범위 안이고 Z scale은 `1`이었다.
+- 모든 yaw가 authored 범위 안이고 material slot 0은 지정 material이었다.
+- runtime tag로 signature를 기록한 뒤 3초 후 13개 모두 material/yaw/scale이 동일해 lifetime reroll이 없었다.
+- 전체 자동화의 0/1/multiple material 후보, min/max normalization, Z=1, interaction collision 불변, hold 취소/완료 및 spacing 검증도 성공했다.
 
-## Compile, Save, Reload
+## Towel Editor Preview Authoring
 
-- profile 5개 Data Validation: 5개 모두 `contains valid data`, profile error/warning 0. Commandlet 전역에는 무관한 MCP plugin EULA 안내 warning 1개만 있었다.
-- target Blueprint 5개: warnings-as-errors 개별 compile 성공.
-- 저장 직전 dirty asset은 의도한 profile 5개와 Blueprint 5개뿐이었다.
-- 위 10개만 저장했고 저장 직후 `/Game` dirty asset은 0이었다.
-- Editor 프로세스를 종료한 뒤 별도 UE commandlet 프로세스에서 디스크 asset을 다시 로드했다.
-- 재로드 리드백 결과:
-  - profile의 모든 state/mesh 유지
-  - 각 Blueprint의 `TowelPresentationVisual` 정확히 1개
-  - profile reference, seed, animation, relative transform과 layout 값 모두 유지
-  - Python/Blueprint/compiler 오류 0
+| Blueprint | Type | Profile | State/Count | Seed | Relative transform | Layout |
+|---|---|---|---:|---:|---|---|
+| `BP_CleanTowelStack` | Stack | `DA_TowelVisual_Shelf` | Clean / 8 | 101 | L `(0,0,51)`, S `(0.3,0.2,0.02)` | Z spacing `105` |
+| `BP_UsedTowelBin` | Stack | `DA_TowelVisual_UsedBin` | Used / 6 | 202 | L `(0,0,51)`, S `(0.22,0.22,0.022)` | Z spacing `100` |
+| `BP_TowelBasket` | Stack | `DA_TowelVisual_Basket` | Used / 4 | 303 | L `(0,0,55)`, S `(0.65,0.6,0.1)` | Z spacing `110` |
+| `BP_Washer` | Pile | `DA_TowelVisual_Washer` | Used / 6 | 404 | L `(31,0,45)`, S `(0.16,0.12,0.025)` | half extent `(60,150,480)` |
+| `BP_Dryer` | Pile | `DA_TowelVisual_Dryer` | Clean / 6 | 505 | L `(31,0,45)`, S `(0.16,0.12,0.025)` | half extent `(60,150,480)` |
 
-## 자동화 검증
+- 모든 relative rotation은 `(0,0,0)`이다.
+- Washer/Dryer pile은 `ItemsPerLayer=4`, `LayerSpacing=120`, `MaxZJitter=15`, rotation min `(-4,-25,-6)`, max `(4,25,6)`을 유지했다.
+- Washer profile: Used → `SM_Towel_used_common`, Wet → `SM_Towel_wet_common`.
+- Dryer profile: Wet → `SM_Towel_wet_common`, Clean → `SM_Towel_clean_common`.
+- 위 두 profile에 남아 있던 Engine Cube placeholder만 실제 towel mesh로 교체했다. Shelf/UsedBin/Basket profile과 gameplay 설정은 보존했다.
 
-- Focused: `BathhouseSim.Towel.Presentation.StackPileSlotAndLifecycle`
-  - 결과: 1 success / 0 fail
-- 전체: `BathhouseSim`
-  - 결과: 17 success / 0 fail, `GIsCriticalError=0`
-- 전용 테스트가 확인한 범위:
-  - stack top-first 증감과 unrelated revision의 기존 mesh/transform 안정성
-  - state conversion 시 count/transform 보존과 mesh만 교체
-  - pile bounds, lower-layer-first, 동일 seed 재현
-  - ISM collision 없음, overlap 없음, navigation 영향 없음, tick 없음
-  - inventory commit 수렴, 빠른 target reversal, unregister/reregister 재동기화
-  - actor BeginPlay 즉시 binding 및 EndPlay unbind
-- 전체 테스트가 carry/drop sweep, towel atomic transfer/machine recovery, customer towel 흐름 회귀를 함께 통과했다.
+다섯 placed preview 대상 모두 같은 seed/input의 clear/rebuild에서 mesh 및 수치 transform이 동일했다.
 
-## PIE Acceptance 판정
+- `ClearPreview` 후 visible instance와 ISM instance가 모두 0이었다.
+- rebuild count는 각각 8/6/4/6/6이었다.
+- preview 호출 전후 inventory initial state/count/capacity가 변하지 않았다.
+- 별도 임시 test Actor의 `TowelSlotVisual`에 same-owner slot을 `C,A,B` 순으로 연결했다. 요청 4는 유효 slot capacity 3으로 clamp됐고 clear 0/rebuild 3을 확인했다.
+- 임시 actor와 `/Game/__CodexTransient/BP_SlotPreviewTest`는 즉시 삭제했으며 `BP_DryingSpot`과 gameplay actor는 건드리지 않았다.
 
-| 항목 | 판정 | 근거 |
-|---|---|---|
-| 초기 inventory 즉시 표시 | 자동화 통과 / 직접 PIE 미실행 | actor BeginPlay 즉시 binding과 clean stack initial snapshot 검증 |
-| E/F 후 visible count 수렴 | 자동화 통과 / 직접 입력 미실행 | commit, revision, target reversal 수렴 검증 |
-| unrelated revision 안정성 | 통과 | focused test |
-| Basket/Washer/Dryer state swap | native 계약 통과 / authored BP 직접 PIE 미실행 | stack 및 machine state conversion 검증 |
-| Pile bounds/lower-first/seed | 통과 | focused test |
-| collision/overlap/nav 비참여 | 통과 | focused test |
-| carry/drop/process/overflow 회귀 | 자동화 통과 / 직접 PIE 미실행 | 전체 17개 테스트 |
-| clean stack 중복 표시 없음 | 미검증 | base 보존 결정은 완료했으나 런타임 시각 확인 필요 |
-| PIE 종료/재시작 중복 반응 없음 | lifecycle 자동화 통과 / PIE 2회 미실행 | reregister 및 EndPlay 정리 검증 |
+## Towel PIE
 
-## 직접 PIE 미실행 사유와 재현
+- PIE 2회를 실행했다.
+- 다섯 actor 모두 authoritative inventory binding을 가졌다.
+- Clean stack은 `Clean / 20 / revision 0`과 populated ISM bucket 1개를 표시했다.
+- Used bin, basket, washer, dryer는 현재 authoritative `None / 0 / revision 0`을 표시하고 populated bucket은 0이었다.
+- PIE에서 preview rebuild/clear를 호출해도 authoritative state/count/revision이 변하지 않았다.
+- 두 번째 PIE 결과가 첫 번째와 같아 preview 잔존, 중복 ISM, 중복 timer/delegate 반응이 없었다.
+- 별도 자동화에서 transfer/state swap, count animation, basket carry/drop, washer/dryer process와 recovery가 성공했다.
 
-1. 저장 후 Editor를 종료하고 UE 5.8 Editor를 새로 실행한다.
-2. 로그는 MCP port 8000 listener와 toolset 등록, `Engine is initialized`까지 기록된다.
-3. 이후 main frame handle이 생성되지 않고 `/mcp` 요청과 MCP `list_toolsets`가 timeout된다.
-4. `LogBlueprint: Error`, fatal, duplicate/missing native contract 오류는 없다.
-5. 멈춘 Editor PID만 종료한 뒤 commandlet 재로드와 자동화 검증으로 대체했다.
+## Bath Snap 및 StateTree
 
-## 최종 변경 범위
+- `BP_Bath`, `BP_BathhouseCustomer`, `ST_CustomerRoutine` graph는 수정하지 않았다.
+- 두 Bath actor의 모든 slot capsule 위치를 덮도록 임시 `BlockAll` blocker 2개를 배치했다.
+  - `(1750,-638,91)`
+  - `(1750,0,190)`
+- PIE에서 플레이어가 hook의 key를 직접 취득하고 queue-front customer에게 전달했다.
+- 고객은 `Bath2/FacilitySlotB`를 선택해 `(1750,-638,91)`의 cached ActionPoint에 정확히 snap했다. 위치 오차는 `0.0`이었다.
+- blocker 중심과 capsule 중심 거리도 `0.0`인 상태에서 snap이 거부되지 않았다.
+- bath dwell 중 movement는 `MOVE_None`, capsule collision은 `QueryAndPhysics`, WorldStatic/Pawn response는 `Block`으로 유지됐다.
+- navigation retry나 technical abort 없이 dwell을 끝내고 Drying → Dress → checkout까지 진행했다.
+- 종료 후 movement는 `MOVE_Walking`으로 복구됐고 slot이 해제됐으며 key는 `OnCounter` 상태가 됐다.
+- `BathhouseSim.Customer.BathSnapCleanup` 자동화도 성공해 interruption/technical-abort cleanup과 cached approach return 계약을 확인했다.
+- 임시 blocker 2개는 PIE 후 삭제했고 map/external actor는 저장하지 않았다.
 
-- 생성: profile Data Asset 5개
-- 수정: target Blueprint 5개
-- 수정: `.md/PROMPT_INTEGRATION_REVIEW.md`
-- 임시 검증 스크립트는 삭제했다.
-- Source, Config, StateTree, map, machine gameplay, transfer gameplay는 이 Editor 단계에서 수정하지 않았다.
-- Content 기준 의도하지 않은 dirty/untracked asset은 없다.
+## Compile, Data Validation, Reload
+
+- 수정 Blueprint 8개를 warnings-as-errors로 개별 compile: 8/8 성공.
+- 수정 Blueprint 8개와 Data Asset 2개를 Data Validation: 10/10 `VALID`, asset error/warning 0.
+- 의도한 위 10개 에셋만 저장했다.
+- UE 5.8.1 새 commandlet 프로세스에서 디스크 재로드 후 다음을 다시 확인했다.
+  - 세 HeldTransform 값과 unit scale
+  - stain hierarchy, material/range 및 event-to-SetMaterial 연결
+  - 다섯 preview state/count/seed/profile
+  - Washer/Dryer profile의 실제 mesh와 Cube placeholder 부재
+  - Blueprint compile 8/8, Data Validation 10/10
+- 최종 commandlet 결과: `Success - 0 error(s), 1 warning(s)`. warning 1개는 ModelContextProtocol UE EULA 안내이며 asset/compiler warning이 아니다.
+- 현재 저장 상태에서 `BathhouseSim` 전체 자동화: 17 success / 0 failure, `GIsCriticalError=0`.
+
+## 최종 범위 확인
+
+- 생성한 영구 Content asset은 없다.
+- 저장한 Content는 위 10개 에셋뿐이다.
+- 임시 slot test asset과 blocker는 제거했다.
+- StateTree, map, external actor, Source, Config에는 이번 Editor 단계의 저장 변경이 없다.
+- 별도 `USER_UNREAL.md` 후속 작업은 필요하지 않다.

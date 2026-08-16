@@ -7,6 +7,8 @@
 #include "WaterStainActor.generated.h"
 
 class AStainSpawnZoneActor;
+class UMaterialInterface;
+class USceneComponent;
 class USphereComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStainCleaningStarted, AActor*, Cleaner);
@@ -32,7 +34,12 @@ public:
 		float DeltaTime) override;
 	virtual void CancelHoldInteraction(const FPlayerInteractionContext& Context) override;
 
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
+
 	void SetSpawnZone(AStainSpawnZoneActor* InSpawnZone);
+	void ConfigureVisualVariationSeed(int32 InSeed);
 	AStainSpawnZoneActor* GetSpawnZone() const { return SpawnZone.Get(); }
 
 	UFUNCTION(BlueprintPure, Category = "Cleaning")
@@ -53,20 +60,62 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Cleaning|Presentation")
 	FOnStainCleaningCompleted OnCleaningCompleted;
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "Cleaning|Presentation")
+	void ApplyStainMaterialVariant(UMaterialInterface* SelectedMaterial);
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cleaning")
 	TObjectPtr<USphereComponent> InteractionCollision;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cleaning|Presentation")
+	TObjectPtr<USceneComponent> StainVisualRoot;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cleaning|Presentation|Variation")
+	TArray<TObjectPtr<UMaterialInterface>> MaterialVariants;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cleaning|Presentation|Variation")
+	FVector2D MinXYScale = FVector2D(1.0, 1.0);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cleaning|Presentation|Variation")
+	FVector2D MaxXYScale = FVector2D(1.0, 1.0);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cleaning|Presentation|Variation")
+	float MinYawDegrees = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cleaning|Presentation|Variation")
+	float MaxYawDegrees = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cleaning", meta = (ClampMin = "0.1"))
 	float RemovalDurationSeconds = 2.0f;
 
 private:
+	friend class FBathhouseCleaningInteractionTest;
+
 	bool HasRequiredMop(const FPlayerInteractionContext& Context) const;
 	void ResetCleaning(bool bNotify);
 	void CompleteCleaning();
+	void ResolveAndApplyVisualVariation();
 
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> ActiveCleaner = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> SelectedMaterialVariant = nullptr;
+
+	UPROPERTY(Transient)
+	FVector2D SelectedXYScale = FVector2D(1.0, 1.0);
+
+	UPROPERTY(Transient)
+	float SelectedYawDegrees = 0.0f;
+
+	UPROPERTY(Transient)
+	int32 VisualVariationSeed = 0;
+
+	UPROPERTY(Transient)
+	bool bHasConfiguredVisualVariationSeed = false;
+
+	UPROPERTY(Transient)
+	bool bVisualVariationInitialized = false;
 
 	TWeakObjectPtr<AStainSpawnZoneActor> SpawnZone;
 	EStainCleaningState CleaningState = EStainCleaningState::Idle;

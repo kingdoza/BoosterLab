@@ -9,6 +9,13 @@ class BATHHOUSESIM_API UTowelPileVisualComponent : public UTowelQuantityVisualCo
 {
 	GENERATED_BODY()
 
+public:
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Towel|Presentation|Pile")
+	void RebuildPreview();
+
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Towel|Presentation|Pile")
+	void ClearPreview();
+
 protected:
 	virtual FTransform BuildLocalTransform(int32 VisualIndex) override;
 
@@ -33,6 +40,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel|Presentation|Pile")
 	FRotator MaxRandomRotation = FRotator(5.0f, 180.0f, 5.0f);
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel|Presentation|Pile")
+	ETowelState PreviewState = ETowelState::Clean;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel|Presentation|Pile", meta = (ClampMin = "0"))
+	int32 PreviewCount = 0;
+
 private:
 	friend class FBathhouseTowelPresentationTest;
+
+	int64 PreviewRevision = 0;
 };

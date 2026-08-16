@@ -1,6 +1,7 @@
 #include "Towel/Presentation/TowelSlotVisualComponent.h"
 
 #include "Components/SceneComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
 void UTowelSlotVisualComponent::OnRegister()
@@ -11,9 +12,19 @@ void UTowelSlotVisualComponent::OnRegister()
 
 void UTowelSlotVisualComponent::RebuildPreview()
 {
+	const UWorld* World = GetWorld();
+	if (!World || (World->WorldType != EWorldType::Editor && World->WorldType != EWorldType::EditorPreview))
+	{
+		RebuildEditorPreview(PreviewState, PreviewCount, PreviewRevision);
+		return;
+	}
 	ResolveSlots();
-	ClearPresentation();
-	SetTargetPresentation(PreviewState, PreviewCount, ++PreviewRevision, false);
+	RebuildEditorPreview(PreviewState, PreviewCount, ++PreviewRevision);
+}
+
+void UTowelSlotVisualComponent::ClearPreview()
+{
+	ClearEditorPreview();
 }
 
 FTransform UTowelSlotVisualComponent::BuildLocalTransform(const int32 VisualIndex)

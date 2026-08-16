@@ -9,6 +9,13 @@ class BATHHOUSESIM_API UTowelStackVisualComponent : public UTowelQuantityVisualC
 {
 	GENERATED_BODY()
 
+public:
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Towel|Presentation|Stack")
+	void RebuildPreview();
+
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Towel|Presentation|Stack")
+	void ClearPreview();
+
 protected:
 	virtual FTransform BuildLocalTransform(int32 VisualIndex) override;
 
@@ -18,6 +25,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel|Presentation|Stack", meta = (ClampMin = "0.0"))
 	float ZSpacing = 4.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel|Presentation|Stack")
+	ETowelState PreviewState = ETowelState::Clean;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Towel|Presentation|Stack", meta = (ClampMin = "0"))
+	int32 PreviewCount = 0;
+
 private:
 	friend class FBathhouseTowelPresentationTest;
+
+	int64 PreviewRevision = 0;
 };

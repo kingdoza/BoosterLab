@@ -18,6 +18,7 @@ class BATHHOUSESIM_API UTowelQuantityVisualComponent : public USceneComponent
 public:
 	UTowelQuantityVisualComponent();
 
+	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Towel|Presentation")
@@ -57,6 +58,8 @@ protected:
 	virtual int32 GetVisualCapacity() const;
 	virtual void PrepareLayout();
 
+	void RebuildEditorPreview(ETowelState State, int32 Count, int64 Revision);
+	void ClearEditorPreview();
 	void RebuildVisibleMeshesPreservingTransforms();
 	void ClearPresentation();
 	FRandomStream& GetVisualRandomStream() { return RandomStream; }
@@ -98,6 +101,8 @@ private:
 	UInstancedStaticMeshComponent* FindOrCreateBucket(UStaticMesh* Mesh);
 	void DestroyBucket(UStaticMesh* Mesh, UInstancedStaticMeshComponent* Bucket);
 	void DestroyAllBuckets();
+	void MarkPreviewRenderStateDirty();
+	bool IsEditorPreviewWorld() const;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UTowelInventoryComponent> BoundInventory;
@@ -119,4 +124,5 @@ private:
 	FRandomStream RandomStream;
 	FTimerHandle StepTimerHandle;
 	bool bCleaningUp = false;
+	bool bEditorPreviewActive = false;
 };

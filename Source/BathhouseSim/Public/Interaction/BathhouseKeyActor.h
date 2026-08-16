@@ -40,10 +40,15 @@ public:
 	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
 	virtual EPhysicalCarryKind GetPhysicalCarryKind() const override { return EPhysicalCarryKind::Key; }
 	virtual FText GetPhysicalCarryDisplayName() const override;
+	virtual FTransform GetHeldTransform() const override;
 	virtual bool CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const override;
 	virtual bool HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor) override;
 	virtual bool CanFreeDrop(FText& OutFailureReason) const override;
 	virtual void RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry) override;
+
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 
 	UFUNCTION(BlueprintPure, Category = "Bathhouse Key")
 	int32 GetKeyNumber() const { return KeyNumber; }
@@ -81,10 +86,15 @@ protected:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Bathhouse Key")
 	TObjectPtr<ABathhouseKeyHookActor> KeyHook = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Bathhouse Key|Carry|Presentation")
+	FTransform HeldTransform = FTransform::Identity;
+
 private:
 	friend class FBathhouseKeyRecoveryTest;
+	friend class FBathhousePhysicalCarryDropTest;
 
 	bool CommitState(EBathhouseKeyState NewState, UObject* NewOwner);
+	void ApplyHeldTransform();
 	void AttachAtHook();
 	void SetWorldPresentation(bool bVisible, bool bCollisionEnabled);
 

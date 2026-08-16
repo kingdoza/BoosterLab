@@ -3,6 +3,9 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Interaction/PlayerCarryComponent.h"
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "WetMopActor"
 
@@ -68,6 +71,13 @@ FText AWetMopActor::GetPhysicalCarryDisplayName() const
 	return LOCTEXT("MopTarget", "물걸레");
 }
 
+FTransform AWetMopActor::GetHeldTransform() const
+{
+	FTransform Result = HeldTransform;
+	Result.SetScale3D(FVector::OneVector);
+	return Result;
+}
+
 bool AWetMopActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
 	if (Carrier || !Carry.IsHandEmpty())
@@ -91,6 +101,7 @@ bool AWetMopActor::HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* 
 	if (HeldAnchor)
 	{
 		AttachToComponent(HeldAnchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		ApplyHeldTransform();
 	}
 	OnHeldPresentationChanged.Broadcast(true);
 	return true;
@@ -147,5 +158,30 @@ void AWetMopActor::SetWorldPhysics(const bool bEnabled)
 		}
 	}
 }
+
+void AWetMopActor::ApplyHeldTransform()
+{
+	const FTransform LocalHeldTransform = GetHeldTransform();
+	if (USceneComponent* Root = GetRootComponent())
+	{
+		Root->SetRelativeLocationAndRotation(
+			LocalHeldTransform.GetLocation(),
+			LocalHeldTransform.GetRotation());
+	}
+}
+
+#if WITH_EDITOR
+EDataValidationResult AWetMopActor::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+	if (!HeldTransform.GetScale3D().Equals(FVector::OneVector))
+	{
+		Context.AddWarning(LOCTEXT(
+			"HeldTransformScaleIgnored",
+			"HeldTransform scale is ignored at runtime. Author a unit scale and use location/rotation only."));
+	}
+	return Result == EDataValidationResult::NotValidated ? EDataValidationResult::Valid : Result;
+}
+#endif
 
 #undef LOCTEXT_NAMESPACE

@@ -307,13 +307,63 @@ bool FBathhouseTowelPresentationTest::RunTest(const FString& Parameters)
 		SlotVisual->LayerRecords[1].LocalTransform.Equals(
 			SlotOne->GetComponentTransform().GetRelativeTransform(SlotVisual->GetComponentTransform())));
 	SlotVisual->PreviewState = ETowelState::Clean;
+	SlotVisual->PreviewCount = 0;
+	const int64 GameGuardRevisionBefore = SlotVisual->PreviewRevision;
+	SlotVisual->RebuildPreview();
+	TestEqual(TEXT("Game-world preview rebuild does not mutate the runtime slot presentation"),
+		SlotVisual->DisplayedCount, 2);
+	TestEqual(TEXT("Game-world preview rebuild preserves the runtime target"), SlotVisual->TargetCount, 5);
+	TestEqual(TEXT("Game-world preview rebuild does not advance preview revision"),
+		SlotVisual->PreviewRevision, GameGuardRevisionBefore);
+
+	World->WorldType = EWorldType::EditorPreview;
+	Stack->PreviewState = ETowelState::Clean;
+	Stack->PreviewCount = 3;
+	Stack->RebuildPreview();
+	TArray<FTowelVisualLayerRecord> FirstStackPreview = Stack->LayerRecords;
+	Stack->ClearPreview();
+	TestEqual(TEXT("Stack preview clear removes transient records"), Stack->LayerRecords.Num(), 0);
+	TestEqual(TEXT("Stack preview clear removes transient buckets"), Stack->MeshBuckets.Num(), 0);
+	Stack->RebuildPreview();
+	TestEqual(TEXT("Stack preview rebuild restores the requested count"), Stack->DisplayedCount, 3);
+	for (int32 Index = 0; Index < Stack->LayerRecords.Num(); ++Index)
+	{
+		TestTrue(TEXT("Same-seed stack preview reproduces its transform"),
+			Stack->LayerRecords[Index].LocalTransform.Equals(FirstStackPreview[Index].LocalTransform));
+		TestEqual(TEXT("Same-seed stack preview reproduces its mesh"),
+			Stack->LayerRecords[Index].Mesh, FirstStackPreview[Index].Mesh);
+	}
+
+	PileA->PreviewState = ETowelState::Clean;
+	PileA->PreviewCount = 6;
+	PileA->RebuildPreview();
+	TArray<FTowelVisualLayerRecord> FirstPilePreview = PileA->LayerRecords;
+	PileA->ClearPreview();
+	TestEqual(TEXT("Pile preview clear removes transient records"), PileA->LayerRecords.Num(), 0);
+	PileA->RebuildPreview();
+	TestEqual(TEXT("Pile preview rebuild restores the requested count"), PileA->DisplayedCount, 6);
+	for (int32 Index = 0; Index < PileA->LayerRecords.Num(); ++Index)
+	{
+		TestTrue(TEXT("Same-seed pile preview reproduces its transform"),
+			PileA->LayerRecords[Index].LocalTransform.Equals(FirstPilePreview[Index].LocalTransform));
+		TestEqual(TEXT("Same-seed pile preview reproduces its mesh"),
+			PileA->LayerRecords[Index].Mesh, FirstPilePreview[Index].Mesh);
+	}
+
 	SlotVisual->PreviewCount = 2;
 	SlotVisual->RebuildPreview();
 	TestEqual(TEXT("CallInEditor preview builds the requested valid slots"), SlotVisual->DisplayedCount, 2);
+	World->WorldType = EWorldType::Game;
 	SlotVisual->PreviewCount = 0;
 	SlotVisual->RebuildPreview();
-	TestEqual(TEXT("Preview rebuild cleans transient preview records"), SlotVisual->LayerRecords.Num(), 0);
-	TestEqual(TEXT("Preview rebuild cleans transient preview buckets"), SlotVisual->MeshBuckets.Num(), 0);
+	SlotVisual->ClearPreview();
+	TestEqual(TEXT("Game-world preview rebuild and clear leave the existing preview untouched"),
+		SlotVisual->DisplayedCount, 2);
+	World->WorldType = EWorldType::EditorPreview;
+	SlotVisual->ClearPreview();
+	TestEqual(TEXT("Slot preview clear removes transient preview records"), SlotVisual->LayerRecords.Num(), 0);
+	TestEqual(TEXT("Slot preview clear removes transient preview buckets"), SlotVisual->MeshBuckets.Num(), 0);
+	World->WorldType = EWorldType::Game;
 
 	AActor* BindingOwner = CreatePresentationOwner(*World, TEXT("BindingRoot"));
 	UTowelInventoryComponent* Inventory = NewObject<UTowelInventoryComponent>(BindingOwner, TEXT("BindingInventory"));
@@ -323,8 +373,18 @@ bool FBathhouseTowelPresentationTest::RunTest(const FString& Parameters)
 	UTowelStackVisualComponent* BindingVisual = AddVisualComponent<UTowelStackVisualComponent>(
 		*BindingOwner, TEXT("BindingVisual"));
 	BindingVisual->MeshProfile = Profile;
+	World->WorldType = EWorldType::EditorPreview;
+	BindingVisual->PreviewState = ETowelState::Clean;
+	BindingVisual->PreviewCount = 4;
+	BindingVisual->RebuildPreview();
+	TestEqual(TEXT("Binding visual creates an unbound editor preview"), BindingVisual->DisplayedCount, 4);
+	TestNull(TEXT("Editor preview does not bind an inventory source"), BindingVisual->GetBoundInventorySource());
+	World->WorldType = EWorldType::Game;
 	BeginActorForPresentationTest(BindingOwner);
+	TestEqual(TEXT("BeginPlay removes the stale unbound editor preview"), BindingVisual->DisplayedCount, 0);
 	BindingVisual->BindInventorySource(Inventory);
+	TestEqual(TEXT("Runtime bind removes stale preview records before applying authority"),
+		BindingVisual->LayerRecords.Num(), 2);
 	TestEqual(TEXT("Bind applies the current inventory snapshot immediately"), BindingVisual->DisplayedCount, 2);
 	CommitInventoryForPresentation(*Inventory, ETowelState::Clean, 5, 1001);
 	TestEqual(TEXT("Inventory commit updates the latest target"), BindingVisual->TargetCount, 5);

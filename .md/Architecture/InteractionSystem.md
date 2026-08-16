@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다.
+이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`의 interface 기본값, 세 concrete Actor authoring, player-held 적용과 unit-scale validation까지 Source와 automation에 구현되었고 Blueprint class default authoring은 Editor 후속 단계다.
 
 ## Source Scope
 
@@ -34,6 +34,7 @@ Source/BathhouseSim/Private/Tests/
 - side-effect 없는 상호작용 조회와 실행 직전 재검증
 - query 상태와 별개인 interaction 실행 결과의 일회성 native notification
 - inventory/hotbar 없는 0개 또는 1개의 physical key/mop/basket 소지
+- 공용 held anchor와 아이템별 local held transform의 분리
 - 번호 key actor의 유일한 lifecycle과 player held presentation
 - focus와 held key 변화의 UI용 delegate
 
@@ -78,8 +79,9 @@ Interaction은 cleaning progress, towel count/machine, customer routine, facilit
 - 빈손일 때만 key/mop/basket을 받을 수 있고 자동 swap하지 않는다.
 - key는 대응하는 `ABathhouseKeyHookActor` 또는 승인된 customer/counter transaction으로만 release한다.
 - key의 임의 바닥 drop과 모든 carryable의 임시 선반 보관은 현재 범위 밖이다. mop/basket의 G world drop은 아래 공통 계약으로 처리한다.
-- held key를 camera 하위 `HeldKeyAnchor`에 부착하고 world collision을 끈다.
-- 기존 serialized `HeldKeyAnchor`를 공용 held anchor로 사용하며 rename하지 않는다.
+- key/mop/basket을 camera 하위 `HeldKeyAnchor`에 부착하고 held 중 world collision을 끈다.
+- 기존 serialized `HeldKeyAnchor`는 모든 physical carryable의 공용 기준점으로 사용하며 rename하지 않는다.
+- 아이템별 위치·회전 보정은 `IPhysicalCarryable::GetHeldTransform()`에서 조회하며 공용 anchor transform에 합쳐 저장하지 않는다.
 - G release는 `IPhysicalCarryable`이 허용한 mop/basket만 처리하며 key는 held 상태를 유지하고 실패한다.
 - free drop 전에 carryable root primitive의 월드 AABB로 held 위치부터 기존 목표 위치까지 box sweep을 수행한다.
 - 기본 sweep channel은 `ECC_Visibility`이고 carry owner와 대상 actor를 무시한다. actor 원점과 bounds 중심 차이는 `BoundsOffset`으로 보정한다.
@@ -96,6 +98,7 @@ Cash는 carry 대상이 아니며 Economy System의 즉시 획득 interaction으
 `IPhysicalCarryable`은 concrete domain type을 Interaction에 결합하지 않고 다음을 제공한다.
 
 - display name과 pickup query
+- 공용 held anchor 기준 아이템별 local `HeldTransform`
 - held presentation begin/end
 - free world drop 허용 여부
 - root physical primitive, 장비별 drop distance/impulse와 safe recovery
@@ -106,11 +109,16 @@ free drop을 허용하는 구현의 physical primitive는 actor root여야 한�
 
 Key는 기존 state transaction을 계속 정본으로 사용하며 G free drop을 거부한다. Wet mop과 towel basket은 world pickup과 G drop을 허용한다.
 
+`GetHeldTransform()`의 기본 반환값은 Identity다. `ABathhouseKeyActor`, `AWetMopActor`, `ATowelBasketActor`가 각각 `EditDefaultsOnly`, `BlueprintReadOnly` `HeldTransform`을 소유하고 player-held 부착 경로에서만 사용한다. key hook, counter return slot과 customer assignment에는 적용하지 않는다.
+
+이번 계약에서 `HeldTransform`의 authoritative 값은 location과 rotation이며 scale은 `(1,1,1)`로 유지한다. 물건의 월드 물리 크기와 drop bounds를 held presentation 때문에 바꾸지 않는다. 새 공통 carry Actor 또는 `UPhysicalCarryableComponent`는 만들지 않으며 기존 Actor가 interface 계약을 직접 구현한다.
+
 ## `ABathhouseKeyActor`
 
 - 변경되지 않는 `KeyNumber`와 원래 `KeyHook`을 가진다.
 - 같은 key number의 유일한 물리 token이다.
 - mesh/collision과 first-person 표시를 겸하지만 key state는 actor 하나에만 존재한다.
+- player-held 상태에서만 자기 `HeldTransform`을 공용 anchor 기준으로 적용한다.
 - Blueprint presentation은 key number를 3D actor에 표시할 수 있다.
 
 `EBathhouseKeyState`:
@@ -177,6 +185,7 @@ Editor authoring 값:
 - `AFirstPersonCharacter::DropCarryAction`
 - trace 거리와 collision channel
 - `HeldKeyAnchor` transform
+- key, wet mop, towel basket Blueprint class default의 개별 `HeldTransform`
 - `UPlayerCarryComponent`의 `DropSweepChannel`, `DropSweepClearance`
 - wet mop/towel basket의 기존 `ThrowSpawnDistance`, `ThrowImpulseStrength`
 - key actor mesh/number presentation
@@ -205,5 +214,7 @@ Editor authoring 값:
 - player/customer 비정상 종료 시 key가 원래 hook으로 복구되는지 확인한다.
 - key number가 HUD text가 아니라 first-person 3D key에 표시되는지 확인한다.
 - mop/basket drop이 같은 carry component commit 경로를 사용하고 concrete actor가 직접 위치·physics·impulse를 적용하지 않는지 확인한다.
+- Identity `HeldTransform`이 기존 anchor 부착을 보존하고, 세 아이템의 서로 다른 location/rotation이 player-held 상태에만 적용되는지 확인한다.
+- held transform이 hook/counter/world drop transform과 physical bounds scale을 오염시키지 않는지 확인한다.
 - 벽, 비스듬한 면과 모서리에서 swept AABB가 벽 내부나 너머에 배치되지 않는지 확인한다.
 - start penetration 또는 안전 공간 없음 실패가 held attachment, carrier와 presentation을 보존하고 빈 방향 재시도를 허용하는지 확인한다.

@@ -16,6 +16,9 @@ public:
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Towel|Presentation|Slot")
 	void RebuildPreview();
 
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Towel|Presentation|Slot")
+	void ClearPreview();
+
 	UFUNCTION(BlueprintPure, Category = "Towel|Presentation|Slot")
 	int32 GetValidSlotCount() const { return ResolvedSlots.Num(); }
 

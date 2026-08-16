@@ -33,6 +33,8 @@ public:
 	bool IsNumberTopologyValid(FText* OutFailureReason = nullptr) const;
 
 protected:
+	friend class FBathhousePhysicalCarryDropTest;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bathhouse Key")
 	TObjectPtr<USceneComponent> SceneRoot;
 

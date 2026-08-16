@@ -1,5 +1,23 @@
 #include "Towel/Presentation/TowelPileVisualComponent.h"
 
+#include "Engine/World.h"
+
+void UTowelPileVisualComponent::RebuildPreview()
+{
+	const UWorld* World = GetWorld();
+	if (!World || (World->WorldType != EWorldType::Editor && World->WorldType != EWorldType::EditorPreview))
+	{
+		RebuildEditorPreview(PreviewState, PreviewCount, PreviewRevision);
+		return;
+	}
+	RebuildEditorPreview(PreviewState, PreviewCount, ++PreviewRevision);
+}
+
+void UTowelPileVisualComponent::ClearPreview()
+{
+	ClearEditorPreview();
+}
+
 FTransform UTowelPileVisualComponent::BuildLocalTransform(const int32 VisualIndex)
 {
 	FRandomStream& Random = GetVisualRandomStream();

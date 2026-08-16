@@ -37,6 +37,20 @@ void UTowelQuantityVisualComponent::OnUnregister()
 	Super::OnUnregister();
 }
 
+void UTowelQuantityVisualComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	if (bEditorPreviewActive)
+	{
+		ResetForNewSource();
+	}
+	if (UTowelInventoryComponent* InventorySource = BoundInventory.Get())
+	{
+		const FTowelInventorySnapshot Snapshot = InventorySource->GetSnapshot();
+		SetTargetPresentation(Snapshot.State, Snapshot.Count, Snapshot.Revision, false);
+	}
+}
+
 void UTowelQuantityVisualComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bCleaningUp = true;
@@ -48,6 +62,10 @@ void UTowelQuantityVisualComponent::EndPlay(const EEndPlayReason::Type EndPlayRe
 
 void UTowelQuantityVisualComponent::BindInventorySource(UTowelInventoryComponent* InventorySource)
 {
+	if (bEditorPreviewActive)
+	{
+		ResetForNewSource();
+	}
 	if (BoundInventory.Get() == InventorySource)
 	{
 		if (InventorySource)
@@ -197,6 +215,52 @@ void UTowelQuantityVisualComponent::PrepareLayout()
 {
 }
 
+void UTowelQuantityVisualComponent::RebuildEditorPreview(
+	const ETowelState State,
+	const int32 Count,
+	const int64 Revision)
+{
+	if (!IsEditorPreviewWorld())
+	{
+		UE_LOG(
+			LogTemp,
+			Verbose,
+			TEXT("Towel preview rebuild ignored outside Editor/EditorPreview world for %s."),
+			*GetPathName());
+		return;
+	}
+	if (BoundInventory.IsValid())
+	{
+		UE_LOG(
+			LogTemp,
+			Verbose,
+			TEXT("Towel preview rebuild ignored while %s is bound to an inventory source."),
+			*GetPathName());
+		return;
+	}
+
+	ResetForNewSource();
+	PrepareLayout();
+	SetTargetPresentation(State, Count, Revision, false);
+	bEditorPreviewActive = true;
+	MarkPreviewRenderStateDirty();
+}
+
+void UTowelQuantityVisualComponent::ClearEditorPreview()
+{
+	if (!IsEditorPreviewWorld())
+	{
+		UE_LOG(
+			LogTemp,
+			Verbose,
+			TEXT("Towel preview clear ignored outside Editor/EditorPreview world for %s."),
+			*GetPathName());
+		return;
+	}
+	ResetForNewSource();
+	MarkPreviewRenderStateDirty();
+}
+
 void UTowelQuantityVisualComponent::RebuildVisibleMeshesPreservingTransforms()
 {
 	TArray<FTransform> PreservedTransforms;
@@ -232,6 +296,7 @@ void UTowelQuantityVisualComponent::ClearPresentation()
 	DestroyAllBuckets();
 	LayerRecords.Reset();
 	DisplayedCount = 0;
+	bEditorPreviewActive = false;
 }
 
 void UTowelQuantityVisualComponent::HandleInventoryChanged(
@@ -435,4 +500,22 @@ void UTowelQuantityVisualComponent::DestroyAllBuckets()
 			Bucket->DestroyComponent();
 		}
 	}
+}
+
+void UTowelQuantityVisualComponent::MarkPreviewRenderStateDirty()
+{
+	MarkRenderStateDirty();
+	for (const TPair<TObjectPtr<UStaticMesh>, TObjectPtr<UInstancedStaticMeshComponent>>& Pair : MeshBuckets)
+	{
+		if (Pair.Value)
+		{
+			Pair.Value->MarkRenderStateDirty();
+		}
+	}
+}
+
+bool UTowelQuantityVisualComponent::IsEditorPreviewWorld() const
+{
+	const UWorld* World = GetWorld();
+	return World && (World->WorldType == EWorldType::Editor || World->WorldType == EWorldType::EditorPreview);
 }

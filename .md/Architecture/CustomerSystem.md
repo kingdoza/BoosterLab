@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath snap/montage와 clean towel 획득·사용·반납, shortage fallback 및 satisfaction Source가 구현되어 있다.
+이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath ActionPoint의 blocking collision 여부와 무관한 unswept snap, collision-state 보존과 cached ApproachPoint 복귀는 Source와 automation에 구현되었고 Editor 통합 검증만 남았다.
 
 ## Source Scope
 
@@ -87,7 +87,7 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 - assigned `ABathhouseKeyActor`와 `KeyNumber`
 - current counter lane/queue handle
 - current facility slot reservation
-- current Bath action-point snap 여부와 예약 당시 발바닥 기준 approach/action transform
+- current Bath action-point snap 여부, 예약 당시 발바닥 기준 approach/action transform과 collision-independent snap/return
 - last used bath actor
 - bath stay end time와 expiry timer
 - current logical activity와 service interaction gate
@@ -147,7 +147,7 @@ Native C++이 소유하는 것:
 
 - Task/Condition 구현
 - session transaction과 cleanup
-- cached Bath 발바닥 transform에 scaled capsule half height를 한 번 더하는 actor/capsule-center 변환
+- cached Bath 발바닥 transform에 scaled capsule half height를 한 번 더하는 actor/capsule-center 변환과 unswept teleport
 - queue/facility/key/wallet API 호출
 - gameplay event 발행
 - montage 후보 검증, 단일 선택과 실제 playback 종료 판정
@@ -160,7 +160,7 @@ Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 �
 - check-in key 대기와 timeout 시작·취소
 - facility/slot 선택·예약·release
 - built-in `FStateTreeMoveToTask`에 목적지 binding 제공
-- Bath action/approach point snap과 movement mode 복구
+- Bath action/approach point의 collision-independent snap과 movement mode 복구
 - logical activity begin, finish와 timer-only fallback
 - 후보 중 하나를 한 번 선택해 실제 종료를 기다리는 one-shot montage
 - 후보 중 하나를 한 번 선택해 같은 montage만 지정 시간 동안 반복하는 duration-loop montage
@@ -187,7 +187,7 @@ Queue removal은 session membership와 wait/service guard를 먼저 지운 뒤 c
 10. Shower slot에서 pre-shower timed activity를 수행한다.
 11. Pre-shower 완료 순간 고정 60초 bath stay timer를 시작한다.
 12. Available bath 중 random slot을 예약하고 NavMesh 위 approach point까지 이동한다.
-13. 이동을 정지하고 발바닥 action point를 capsule-center actor transform으로 변환해 snap한 뒤 입욕을 시작한다.
+13. 이동을 정지하고 발바닥 action point를 capsule-center actor transform으로 변환한 뒤 blocking collision 사전 검사 없이 unswept snap하여 입욕을 시작한다.
 14. 탕마다 `10~20초` random dwell 동안 EnterState에서 선택한 montage 하나만 반복하고 시간이 남으면 다른 available bath를 선택한다.
 15. 다른 bath가 있으면 직전 bath를 제외하며 모든 bath가 점유 중이면 reservation 없이 availability event를 기다린다.
 16. dwell 완료 또는 60초 만료 시 montage를 중단하고 approach point로 복귀한 뒤 slot을 release한다.
@@ -223,7 +223,7 @@ Player의 key pickup/rack 반환은 customer 퇴장 조건이 아니다.
 animation을 사용하는 논리 행동은 다음 순서를 사용한다.
 
 1. slot reserve
-2. navigation target으로 이동하고 Bath면 발바닥 action point에 capsule 높이를 한 번 적용해 snap
+2. navigation target으로 이동하고 Bath면 발바닥 action point에 capsule 높이를 한 번 적용해 collision-independent unswept snap
 3. `BeginActivity`와 `OnActivityStarted`
 4. StateTree montage Task가 유효 후보를 필터링하고 EnterState에서 정확히 하나 선택
 5. one-shot은 실제 montage 정상 종료, duration-loop는 같은 선택 montage의 지정 시간 반복을 완료 기준으로 사용
@@ -233,12 +233,22 @@ animation을 사용하는 논리 행동은 다음 순서를 사용한다.
 
 후보가 하나면 random 호출 없이 그 montage를 사용하고 후보가 없거나 재생할 수 없으면 Task가 실패한다. Loop Task는 실행 중 후보를 다시 선택하지 않는다. StateTree interruption은 token owner의 montage만 blend-out하고 session cleanup을 실행한다. animation이 없는 상태는 기존 timer-only activity를 사용할 수 있다.
 
+## Bath Snap Collision Policy
+
+Bath ActionPoint와 ApproachPoint는 reservation-time cached 발바닥 transform을 사용하고 scaled capsule half height를 정확히 한 번 적용한다. ActionPoint snap은 `IsActionTransformClear` 또는 capsule overlap 사전 검사를 수행하지 않는다.
+
+`SnapToCurrentFacilityActionPoint()`는 유효한 reservation/slot, cached transform, Character, capsule과 movement component만 검증한다. AI와 movement를 정지하고 movement mode를 저장한 뒤 `SetActorLocationAndRotation`의 `bSweep=false`, `ETeleportType::TeleportPhysics`로 정확한 transform을 적용한다. Blocking Volume, facility mesh 또는 다른 collision과 겹쳐도 그 사실만으로 snap을 실패시키거나 navigation failure를 증가시키지 않는다.
+
+Snap 중 capsule/Actor collision enabled 상태와 response는 변경하지 않는다. 요구사항은 placement 검사 무시이며 고객을 facility 사용 전체 동안 ghost actor로 바꾸지 않는다. movement는 기존처럼 `MOVE_None`으로 유지하므로 사용 중 CharacterMovement가 위치를 수정하지 않는다.
+
+ActionPoint에서 나올 때도 cached ApproachPoint로 unswept teleport하고 저장했던 movement mode를 복원한다. invalid owner/cache/component 또는 transform 적용 자체 실패만 technical failure다. release, StateTree interruption, technical abort와 EndPlay cleanup은 같은 return/restore 경로를 사용하며 반복 호출에 안전해야 한다.
+
 ## Technical Abort
 
 Navigation이 설정된 횟수만큼 반복 실패하면 gameplay 분기가 아니라 technical abort로 처리한다.
 
 - active timer와 StateTree wait 취소
-- Bath action point에 있으면 cached approach point 복귀 시도와 movement mode 복구
+- Bath action point에 있으면 collision 사전 검사 없이 cached approach point 복귀와 movement mode 복구
 - current slot release
 - queue entry 제거
 - assigned key를 원래 hook으로 복구
@@ -267,6 +277,8 @@ Check-in 외 gameplay timeout은 두지 않는다.
 - check-in timeout이 front 도착 후 시작되고 key 수령 시 취소되는지 확인한다.
 - player가 준 key 번호와 두 numbered facility가 전체 routine에서 일치하는지 확인한다.
 - bath timer가 pre-shower 완료 시 시작하고 정확히 60초에 current montage를 중단한 뒤 approach 복귀와 release를 수행하는지 확인한다.
+- blocking collision이 action point를 점유해도 snap이 성공하고 정확한 cached transform, `MOVE_None`과 기존 collision enabled 상태를 유지하는지 확인한다.
+- blocked action snap 후 정상 release/technical abort가 cached approach로 복귀하고 movement mode를 복원하는지 확인한다.
 - bath random dwell과 다른 bath 선택이 고정 체류시간 종료를 지연하지 않는지 확인한다.
 - 모든 StateTree exit/abort에서 queue, slot, timer와 key가 정리되는지 확인한다.
 - key 배치와 cash claim 뒤 NPC가 key 회수를 기다리지 않고 퇴장하는지 확인한다.

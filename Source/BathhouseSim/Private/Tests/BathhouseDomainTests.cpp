@@ -255,14 +255,33 @@ bool FBathhouseCustomerBathSnapTest::RunTest(const FString& Parameters)
 	BlockingBox->SetWorldLocation(
 		MakeCharacterTransformAtFacilityPoint(BlockedSnapshot.Action).GetLocation());
 	BlockingBox->UpdateOverlaps();
-	const FTransform BeforeBlockedSnap = Customer->GetActorTransform();
-	AddExpectedError(TEXT("action-point capsule is blocked"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestFalse(TEXT("A blocked action point rejects the snap"),
+	const ECollisionEnabled::Type CapsuleCollisionBeforeSnap =
+		Customer->GetCapsuleComponent()->GetCollisionEnabled();
+	const FCollisionResponseContainer CapsuleResponsesBeforeSnap =
+		Customer->GetCapsuleComponent()->GetCollisionResponseToChannels();
+	const bool bActorCollisionBeforeSnap = Customer->GetActorEnableCollision();
+	const int32 NavigationFailuresBeforeSnap = Session->NavigationFailureCount;
+	TestTrue(TEXT("A blocked action point still permits the authoritative unswept snap"),
 		Session->SnapCurrentFacility(ECustomerFacilitySnapTarget::ActionPoint));
-	TestEqual(TEXT("A rejected snap does not move the customer"), Customer->GetActorTransform(), BeforeBlockedSnap);
-	TestEqual(TEXT("A rejected snap leaves walking enabled"),
-		Customer->GetCharacterMovement()->MovementMode, MOVE_Walking);
+	TestTrue(TEXT("Blocked action snap still places the character feet at the cached action point"),
+		Customer->GetActorTransform().Equals(MakeCharacterTransformAtFacilityPoint(BlockedSnapshot.Action)));
+	TestEqual(TEXT("Blocked action snap disables character movement"),
+		Customer->GetCharacterMovement()->MovementMode, MOVE_None);
+	TestEqual(TEXT("Blocked action snap preserves capsule collision enabled state"),
+		Customer->GetCapsuleComponent()->GetCollisionEnabled(), CapsuleCollisionBeforeSnap);
+	TestTrue(TEXT("Blocked action snap preserves every capsule collision response"),
+		Customer->GetCapsuleComponent()->GetCollisionResponseToChannels() == CapsuleResponsesBeforeSnap);
+	TestEqual(TEXT("Blocked action snap preserves actor collision state"),
+		Customer->GetActorEnableCollision(), bActorCollisionBeforeSnap);
+	TestEqual(TEXT("Blocked action snap does not consume a navigation retry"),
+		Session->NavigationFailureCount, NavigationFailuresBeforeSnap);
+	TestTrue(TEXT("Blocked action snap can enter occupied Bath use"), Session->BeginUseCurrentFacility());
 	Session->ReleaseCurrentFacility();
+	TestTrue(TEXT("Blocked action cleanup returns to the cached approach point"),
+		Customer->GetActorTransform().Equals(MakeCharacterTransformAtFacilityPoint(BlockedSnapshot.Approach)));
+	TestEqual(TEXT("Blocked action cleanup restores walking movement"),
+		Customer->GetCharacterMovement()->MovementMode, MOVE_Walking);
+	TestTrue(TEXT("Blocked action cleanup releases the slot"), Slot->IsAvailable());
 	BlockingBox->DestroyComponent();
 	Obstacle->Destroy();
 
@@ -425,8 +444,30 @@ bool FBathhouseKeyRecoveryTest::RunTest(const FString& Parameters)
 	CounterKey->CounterOwner = Counter;
 	CounterKey->CounterReturnSlotIndex = 0;
 	CounterKey->CommitState(EBathhouseKeyState::OnCounter, Counter);
+	CounterKey->HeldTransform = FTransform(
+		FRotator(-12.0f, 63.0f, 7.0f),
+		FVector(-8.0f, 5.0f, 6.0f),
+		FVector(3.0f));
+	AActor* CounterCarryOwner = NewObject<AActor>();
+	USceneComponent* CounterHeldAnchor = NewObject<USceneComponent>(CounterCarryOwner);
+	UPlayerCarryComponent* CounterCarry = NewObject<UPlayerCarryComponent>(CounterCarryOwner);
+	CounterCarryOwner->SetRootComponent(CounterHeldAnchor);
+	CounterCarry->ConfigureHeldAnchor(CounterHeldAnchor);
+	TestTrue(TEXT("The counter transaction takes the returned key"),
+		CounterKey->TryTakeFromCounter(*CounterCarry));
+	TestEqual(TEXT("Counter take applies the held key local location"),
+		CounterKey->GetRootComponent()->GetRelativeLocation(), CounterKey->GetHeldTransform().GetLocation());
+	TestTrue(TEXT("Counter take applies the held key local rotation"),
+		CounterKey->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(
+			CounterKey->GetHeldTransform().GetRotation()));
+	TestEqual(TEXT("Counter take ignores authored HeldTransform scale"),
+		CounterKey->GetHeldTransform().GetScale3D(), FVector::OneVector);
 	CounterKey->RecoverToHook();
 	TestEqual(TEXT("Counter key recovers to its hook"), CounterKey->GetKeyState(), EBathhouseKeyState::AtHook);
+	TestTrue(TEXT("Counter recovery removes the held offset at the hook"),
+		CounterKey->GetRootComponent()->GetRelativeTransform().GetLocation().IsNearlyZero()
+		&& CounterKey->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(FQuat::Identity));
+	TestTrue(TEXT("Counter recovery clears the carry owner"), CounterCarry->IsHandEmpty());
 	TestNull(TEXT("Recovery clears the returned object slot"), ReturnedSlot.ReturnedObject.Get());
 	TestNull(TEXT("Recovery clears the returned slot reservation"), ReturnedSlot.ReservationOwner.Get());
 

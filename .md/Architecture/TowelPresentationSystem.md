@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-기존 Towel inventory snapshot을 Static Mesh Instance로 표현하는 Stack/Pile/Slot 공통 Source 계층은 구현되었다. 기존 actor의 Stack/Pile runtime bind와 Slot component/API/validation/Editor preview가 포함되며 profile/layout Content authoring과 PIE 시각 검증은 Editor 후속 단계다.
+기존 Towel inventory snapshot을 Static Mesh Instance로 표현하는 Stack/Pile/Slot 공통 Source 계층과 세 layout의 PIE 없는 Editor preview는 구현되었다. native preview lifecycle, Game/PIE guard, same-seed 재현과 runtime bind override automation은 완료되었고 실제 Blueprint inherited component의 authoring/viewport 검증은 Editor 후속 단계다.
 
 이번 연결 범위:
 
@@ -36,7 +36,7 @@ Towel System 내부 표현 하위 계층이며 새 top-level module이나 depend
 - 최신 authoritative snapshot으로 count animation 수렴
 - vertical stack, random layered pile과 ordered authored slot transform 생성
 - inventory delegate bind/unbind와 runtime instance cleanup
-- Slot reference validation과 Editor preview
+- Stack/Pile/Slot의 PIE 없는 transient Editor preview
 
 Presentation은 towel state/count/capacity, machine state, transfer와 interaction을 변경하지 않는다.
 
@@ -99,6 +99,8 @@ Runtime state:
 - unique mesh별 transient `UInstancedStaticMeshComponent` bucket
 - initialized random stream
 
+Base는 layout별 preview property를 소유하지 않고 `RebuildEditorPreview(State, Count, Revision)`와 `ClearEditorPreview()` protected helper만 제공한다. 기존 Slot의 reflected property/function owner를 옮기지 않으며 Stack과 Pile이 같은 이름의 자기 preview authoring API를 추가한다.
+
 Bind 시 current snapshot을 즉시 적용한다. stale revision은 무시하고 같은 revision의 다른 payload는 ensure/log 후 authoritative current snapshot으로 재동기화한다.
 
 Count animation:
@@ -145,6 +147,8 @@ Native default subobject 연결:
 
 각 Actor가 BeginPlay에 자기 `Inventory`를 명시적으로 bind하고 EndPlay에 unbind한다. owner/component search로 암묵 연결하지 않는다. Used bin 내부 instance는 표현 전용이고 overflow `AWorldUsedTowelActor`와 무관하다.
 
+Stack component는 `PreviewState`, `PreviewCount`, `RebuildPreview()`와 `ClearPreview()`를 제공하여 clean stack, used bin과 basket Blueprint에서 PIE 없이 mesh/profile/pivot/Z spacing을 확인한다.
+
 ## Pile Layout
 
 `UTowelPileVisualComponent` property:
@@ -162,6 +166,8 @@ index는 `LayerIndex = Index / ItemsPerLayer`를 사용한다. X/Y는 authored e
 
 기존 machine timer, transfer port, control, state delegate와 Blueprint process animation은 변경하지 않는다. Pile instance를 drum 회전에 포함할지는 Blueprint attachment/presentation으로 결정한다.
 
+Pile component는 Stack과 같은 preview API를 제공하여 washer/dryer Blueprint에서 Used/Wet/Clean profile, bounds, layer와 seed 배치를 PIE 없이 확인한다.
+
 ## Slot Layout Target
 
 `UTowelSlotVisualComponent`는 ordered `TArray<FComponentReference> SlotReferences`를 가진다.
@@ -176,14 +182,29 @@ BeginPlay/preview resolve 조건:
 
 count N은 valid slot의 앞 N개를 표시하고 감소는 마지막 visible slot부터 제거한다. target count가 valid slot count보다 크면 valid capacity까지만 표시하고 진단 로그를 남기며 gameplay count는 변경하지 않는다. slot world transform은 visual component local transform으로 변환해 ISM instance에 사용한다.
 
-이번 구현은 API와 Editor preview까지만 포함한다.
+Slot은 기존 API와 Editor preview 계약을 유지한다.
 
 - `PreviewState`
 - `PreviewCount`
 - `RebuildPreview()` `CallInEditor`
+- `ClearPreview()` `CallInEditor`
 - preview/runtime instance의 transient cleanup
 
 `ATowelDryingRackActor`, `BP_TowelDryingRack`, inventory bind, transfer, drying process와 interaction은 만들지 않는다. existing `BP_DryingSpot`도 수정하지 않는다.
+
+## Editor Preview Contract
+
+Stack/Pile/Slot의 `RebuildPreview()`는 Editor 또는 EditorPreview world에서만 다음 순서로 실행한다.
+
+1. inventory source를 bind하거나 mutate하지 않는다.
+2. active timer와 기존 preview bucket/record를 정리한다.
+3. `RandomStream`을 authored `RandomSeed`로 다시 초기화한다.
+4. layout별 resolve/validation 후 preview state/count를 animation 없이 즉시 동기화한다.
+5. transient ISM render state를 갱신한다.
+
+같은 seed와 authoring 값은 같은 mesh 선택과 Pile transform을 재현한다. 새 variation 확인은 `RandomSeed` 변경으로 명시한다. preview count/state 설정은 asset에 저장될 수 있지만 생성된 bucket/instance와 displayed runtime state는 `RF_Transient`이며 저장하지 않는다.
+
+`ClearPreview()`는 preview bucket/record와 target/displayed state만 정리한다. Game/PIE world에서 preview button은 inventory authority와 경쟁하지 않도록 no-op과 진단을 사용한다. BeginPlay의 explicit `BindInventorySource()`는 남은 preview를 먼저 제거하고 authoritative inventory snapshot을 즉시 적용한다. unregister, reconstruction과 EndPlay도 동일 transient cleanup을 보장한다.
 
 ## Blueprint/API Contracts
 
@@ -194,7 +215,8 @@ Editor authoring:
 - visual component `MeshProfile`, seed와 count step interval
 - Stack pivot/offset/Z spacing
 - Washer/Dryer pile pivot, bounds/layer/jitter
-- Slot owner component references와 preview state/count
+- Stack/Pile/Slot preview state/count와 CallInEditor rebuild/clear
+- Slot owner component references
 
 Blueprint Event Graph는 inventory count를 다시 계산하거나 instance를 생성하지 않는다. optional sound/material response만 기존 inventory/machine event에 연결한다.
 
@@ -211,5 +233,7 @@ Blueprint Event Graph는 inventory count를 다시 계산하거나 instance를 �
 - state swap이 count/layout을 유지하고 profile mesh만 교체하는지 확인한다.
 - stale revision, rapid bulk increase/decrease와 rebind 뒤 displayed count가 최신 snapshot으로 수렴하는지 확인한다.
 - 모든 ISM이 collision/navigation/interaction trace에 영향을 주지 않는지 확인한다.
+- PIE 없이 placed Actor의 inherited visual component에서 Stack/Pile/Slot preview를 rebuild/clear할 수 있는지 확인한다.
+- 같은 seed의 rebuild가 동일 결과를 만들고 BeginPlay bind가 preview를 authoritative snapshot으로 교체하는지 확인한다.
 - Stack 세 Actor와 기존 Washer/Dryer만 runtime inventory에 bind되는지 확인한다.
 - Slot이 어느 gameplay actor에도 연결되지 않고 건조대 기능/asset이 생성되지 않는지 확인한다.

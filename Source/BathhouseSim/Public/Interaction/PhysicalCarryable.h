@@ -30,6 +30,7 @@ class BATHHOUSESIM_API IPhysicalCarryable
 public:
 	virtual EPhysicalCarryKind GetPhysicalCarryKind() const = 0;
 	virtual FText GetPhysicalCarryDisplayName() const = 0;
+	virtual FTransform GetHeldTransform() const { return FTransform::Identity; }
 	virtual bool CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const = 0;
 	virtual bool HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor) = 0;
 	virtual bool CanFreeDrop(FText& OutFailureReason) const { return false; }

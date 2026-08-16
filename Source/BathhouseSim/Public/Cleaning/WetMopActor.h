@@ -27,6 +27,7 @@ public:
 	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
 	virtual EPhysicalCarryKind GetPhysicalCarryKind() const override { return EPhysicalCarryKind::WetMop; }
 	virtual FText GetPhysicalCarryDisplayName() const override;
+	virtual FTransform GetHeldTransform() const override;
 	virtual bool CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const override;
 	virtual bool HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor) override;
 	virtual bool CanFreeDrop(FText& OutFailureReason) const override { return true; }
@@ -35,6 +36,10 @@ public:
 	virtual float GetThrowImpulseStrength() const override { return ThrowImpulseStrength; }
 	virtual void NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry) override;
 	virtual void RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry) override;
+
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 
 	UPROPERTY(BlueprintAssignable, Category = "Cleaning|Presentation")
 	FOnWetMopHeldPresentationChanged OnHeldPresentationChanged;
@@ -49,7 +54,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cleaning|Carry", meta = (ClampMin = "0.0"))
 	float ThrowSpawnDistance = 70.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cleaning|Carry|Presentation")
+	FTransform HeldTransform = FTransform::Identity;
+
 private:
+	friend class FBathhousePhysicalCarryDropTest;
+
+	void ApplyHeldTransform();
 	void SetWorldPhysics(bool bEnabled);
 
 	UPROPERTY(Transient)

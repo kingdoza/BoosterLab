@@ -3,8 +3,12 @@
 #include "Cleaning/CleaningWorldSubsystem.h"
 #include "Cleaning/StainSpawnZoneActor.h"
 #include "Cleaning/WetMopActor.h"
+#include "Components/SceneComponent.h"
 #include "Components/SphereComponent.h"
 #include "Interaction/PlayerCarryComponent.h"
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "WaterStainActor"
 
@@ -15,6 +19,8 @@ AWaterStainActor::AWaterStainActor()
 	SetRootComponent(InteractionCollision);
 	InteractionCollision->InitSphereRadius(45.0f);
 	InteractionCollision->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+	StainVisualRoot = CreateDefaultSubobject<USceneComponent>(TEXT("StainVisualRoot"));
+	StainVisualRoot->SetupAttachment(InteractionCollision);
 }
 
 void AWaterStainActor::SetSpawnZone(AStainSpawnZoneActor* InSpawnZone)
@@ -22,12 +28,84 @@ void AWaterStainActor::SetSpawnZone(AStainSpawnZoneActor* InSpawnZone)
 	SpawnZone = InSpawnZone;
 }
 
+void AWaterStainActor::ConfigureVisualVariationSeed(const int32 InSeed)
+{
+	if (bVisualVariationInitialized)
+	{
+		return;
+	}
+	VisualVariationSeed = InSeed;
+	bHasConfiguredVisualVariationSeed = true;
+}
+
 void AWaterStainActor::BeginPlay()
 {
 	Super::BeginPlay();
+	ResolveAndApplyVisualVariation();
 	if (UCleaningWorldSubsystem* Subsystem = GetWorld()->GetSubsystem<UCleaningWorldSubsystem>())
 	{
 		Subsystem->RegisterStain(this);
+	}
+}
+
+void AWaterStainActor::ResolveAndApplyVisualVariation()
+{
+	if (bVisualVariationInitialized)
+	{
+		return;
+	}
+	bVisualVariationInitialized = true;
+	if (!bHasConfiguredVisualVariationSeed)
+	{
+		VisualVariationSeed = FMath::Rand();
+	}
+
+	FRandomStream RandomStream(VisualVariationSeed);
+	TArray<UMaterialInterface*> ValidMaterials;
+	ValidMaterials.Reserve(MaterialVariants.Num());
+	for (UMaterialInterface* Material : MaterialVariants)
+	{
+		if (IsValid(Material))
+		{
+			ValidMaterials.Add(Material);
+		}
+	}
+	if (ValidMaterials.Num() == 1)
+	{
+		SelectedMaterialVariant = ValidMaterials[0];
+	}
+	else if (ValidMaterials.Num() > 1)
+	{
+		SelectedMaterialVariant = ValidMaterials[RandomStream.RandRange(0, ValidMaterials.Num() - 1)];
+	}
+
+	constexpr float MinimumSafeVisualScale = 0.001f;
+	const float MinimumX = FMath::Max(
+		MinimumSafeVisualScale,
+		FMath::Min(MinXYScale.X, MaxXYScale.X));
+	const float MaximumX = FMath::Max(
+		MinimumX,
+		FMath::Max(MinXYScale.X, MaxXYScale.X));
+	const float MinimumY = FMath::Max(
+		MinimumSafeVisualScale,
+		FMath::Min(MinXYScale.Y, MaxXYScale.Y));
+	const float MaximumY = FMath::Max(
+		MinimumY,
+		FMath::Max(MinXYScale.Y, MaxXYScale.Y));
+	SelectedXYScale.X = RandomStream.FRandRange(MinimumX, MaximumX);
+	SelectedXYScale.Y = RandomStream.FRandRange(MinimumY, MaximumY);
+	SelectedYawDegrees = RandomStream.FRandRange(
+		FMath::Min(MinYawDegrees, MaxYawDegrees),
+		FMath::Max(MinYawDegrees, MaxYawDegrees));
+
+	if (StainVisualRoot)
+	{
+		StainVisualRoot->SetRelativeScale3D(FVector(SelectedXYScale.X, SelectedXYScale.Y, 1.0f));
+		StainVisualRoot->SetRelativeRotation(FRotator(0.0f, SelectedYawDegrees, 0.0f));
+	}
+	if (SelectedMaterialVariant)
+	{
+		ApplyStainMaterialVariant(SelectedMaterialVariant);
 	}
 }
 
@@ -181,5 +259,20 @@ void AWaterStainActor::CompleteCleaning()
 	OnCleaningCompleted.Broadcast();
 	SetLifeSpan(0.05f);
 }
+
+#if WITH_EDITOR
+EDataValidationResult AWaterStainActor::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+	if (MinXYScale.X <= 0.0f || MinXYScale.Y <= 0.0f
+		|| MaxXYScale.X <= 0.0f || MaxXYScale.Y <= 0.0f)
+	{
+		Context.AddWarning(LOCTEXT(
+			"NonPositiveVisualScale",
+			"Water stain XY scale ranges should be positive. Non-positive values are clamped at runtime."));
+	}
+	return Result == EDataValidationResult::NotValidated ? EDataValidationResult::Valid : Result;
+}
+#endif
 
 #undef LOCTEXT_NAMESPACE

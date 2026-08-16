@@ -18,12 +18,15 @@
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Facility/BathhouseFacilityActor.h"
 #include "Facility/BathhouseFacilitySlotComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Interaction/BathhouseKeyActor.h"
+#include "Interaction/BathhouseKeyHookActor.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Interaction/PlayerInteractionComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/Material.h"
 #include "Misc/AutomationTest.h"
 #include "Towel/CleanTowelStackActor.h"
 #include "Towel/TowelBasketActor.h"
@@ -34,6 +37,7 @@
 #include "Towel/UsedTowelBinActor.h"
 #include "Towel/WorldUsedTowelActor.h"
 #include "UI/InteractionPromptWidget.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -439,10 +443,26 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 	ATowelBasketActor* Basket = World->SpawnActor<ATowelBasketActor>();
 	BeginActorForTest(Mop);
 	BeginActorForTest(Basket);
+	TestTrue(TEXT("A carryable actor defaults to the identity held transform"),
+		Basket->GetHeldTransform().Equals(FTransform::Identity));
+	Mop->HeldTransform = FTransform(
+		FRotator(8.0f, 32.0f, -4.0f),
+		FVector(12.0f, -7.0f, 5.0f),
+		FVector(3.0f, 2.0f, 4.0f));
+	Basket->HeldTransform = FTransform(
+		FRotator(-6.0f, -25.0f, 9.0f),
+		FVector(-10.0f, 6.0f, 3.0f),
+		FVector(0.5f));
+	TestEqual(TEXT("Mop held contract ignores authored held scale"),
+		Mop->GetHeldTransform().GetScale3D(), FVector::OneVector);
+	TestEqual(TEXT("Basket held contract ignores authored held scale"),
+		Basket->GetHeldTransform().GetScale3D(), FVector::OneVector);
 	TestTrue(TEXT("The mop has non-zero physical sweep bounds"),
 		ConfigureCarryPrimitiveForTest(Mop, CarryTestMesh));
 	TestTrue(TEXT("The basket has non-zero physical sweep bounds"),
 		ConfigureCarryPrimitiveForTest(Basket, CarryTestMesh));
+	const FVector MopPhysicalScale = Mop->GetActorScale3D();
+	const FVector BasketPhysicalScale = Basket->GetActorScale3D();
 
 	AActor* WallActor = World->SpawnActor<AActor>();
 	UBoxComponent* Wall = NewObject<UBoxComponent>(WallActor, TEXT("DropWall"));
@@ -457,6 +477,11 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 	FText CarryFailure;
 	TestTrue(TEXT("The drop sweep setup takes the wet mop"),
 		Carry->TryTakePhysicalObject(Mop, CarryFailure));
+	TestEqual(TEXT("Held mop applies its actor-specific local location"),
+		Mop->GetRootComponent()->GetRelativeLocation(), Mop->GetHeldTransform().GetLocation());
+	TestTrue(TEXT("Held mop applies its actor-specific local rotation"),
+		Mop->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(Mop->GetHeldTransform().GetRotation()));
+	TestEqual(TEXT("Held mop preserves its physical actor scale"), Mop->GetActorScale3D(), MopPhysicalScale);
 	const FPlayerInteractionResult WallDrop = Carry->TryReleaseHeldEquipment(
 		HeldAnchor->GetComponentLocation(),
 		FVector::ForwardVector);
@@ -465,10 +490,13 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 		Mop->GetActorLocation().X < 45.0f);
 	TestTrue(TEXT("The common drop path enables physics"),
 		Mop->GetPhysicalCarryPrimitive()->IsSimulatingPhysics());
+	TestEqual(TEXT("Mop drop keeps the physical scale independent of HeldTransform"),
+		Mop->GetActorScale3D(), MopPhysicalScale);
 	World->Tick(LEVELTICK_All, 1.0f / 60.0f);
 	TestTrue(TEXT("The common drop path applies the authored forward impulse"),
 		Mop->GetPhysicalCarryPrimitive()->GetPhysicsLinearVelocity().X > 0.0f);
 
+	Mop->HeldTransform = FTransform::Identity;
 	TestTrue(TEXT("The dropped mop can be picked up again"),
 		Carry->TryTakePhysicalObject(Mop, CarryFailure));
 	UPrimitiveComponent* MopPrimitive = Mop->GetPhysicalCarryPrimitive();
@@ -560,9 +588,75 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Delegate reentry leaves the committed mop simulating physics"),
 		MopPrimitive->IsSimulatingPhysics());
 	ReentryProbe->Unbind();
+	TestTrue(TEXT("The same common path takes a towel basket"),
+		Carry->TryTakePhysicalObject(Basket, CarryFailure));
+	TestEqual(TEXT("Held basket applies its actor-specific local location"),
+		Basket->GetRootComponent()->GetRelativeLocation(), Basket->GetHeldTransform().GetLocation());
+	TestTrue(TEXT("Held basket applies its actor-specific local rotation"),
+		Basket->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(Basket->GetHeldTransform().GetRotation()));
+	TestEqual(TEXT("Held basket preserves its physical actor scale"),
+		Basket->GetActorScale3D(), BasketPhysicalScale);
 	TestTrue(TEXT("The same common path releases a towel basket"),
-		Carry->TryTakePhysicalObject(Basket, CarryFailure)
-		&& Carry->TryReleaseHeldEquipment(HeldAnchor->GetComponentLocation(), FVector::ForwardVector).bSucceeded);
+		Carry->TryReleaseHeldEquipment(HeldAnchor->GetComponentLocation(), FVector::ForwardVector).bSucceeded);
+	TestEqual(TEXT("Basket drop keeps the physical scale independent of HeldTransform"),
+		Basket->GetActorScale3D(), BasketPhysicalScale);
+
+	FEnumProperty* FacilityTypeProperty = FindFProperty<FEnumProperty>(
+		ABathhouseFacilityActor::StaticClass(),
+		TEXT("FacilityType"));
+	FIntProperty* FacilityNumberProperty = FindFProperty<FIntProperty>(
+		ABathhouseFacilityActor::StaticClass(),
+		TEXT("FacilityNumber"));
+	const auto SpawnNumberedFacility = [&](const EBathhouseFacilityType FacilityType)
+	{
+		ABathhouseFacilityActor* Facility = World->SpawnActor<ABathhouseFacilityActor>();
+		if (Facility && FacilityTypeProperty && FacilityNumberProperty)
+		{
+			void* TypeAddress = FacilityTypeProperty->ContainerPtrToValuePtr<void>(Facility);
+			FacilityTypeProperty->GetUnderlyingProperty()->SetIntPropertyValue(
+				TypeAddress,
+				static_cast<int64>(FacilityType));
+			FacilityNumberProperty->SetPropertyValue_InContainer(Facility, 0);
+			BeginActorForTest(Facility);
+		}
+		return Facility;
+	};
+	TestNotNull(TEXT("Facility type reflection is available for key topology setup"), FacilityTypeProperty);
+	TestNotNull(TEXT("Facility number reflection is available for key topology setup"), FacilityNumberProperty);
+	ABathhouseFacilityActor* ShoeLocker = SpawnNumberedFacility(EBathhouseFacilityType::ShoeLocker);
+	ABathhouseFacilityActor* ClothesLocker = SpawnNumberedFacility(EBathhouseFacilityType::ClothesLocker);
+	TestTrue(TEXT("Key topology setup registers the numbered shoe locker"),
+		ShoeLocker && ShoeLocker->GetFacilityNumber() == 0);
+	TestTrue(TEXT("Key topology setup registers the numbered clothes locker"),
+		ClothesLocker && ClothesLocker->GetFacilityNumber() == 0);
+
+	ABathhouseKeyHookActor* KeyHook = World->SpawnActor<ABathhouseKeyHookActor>();
+	ABathhouseKeyActor* Key = World->SpawnActor<ABathhouseKeyActor>();
+	KeyHook->KeyActor = Key;
+	BeginActorForTest(KeyHook);
+	BeginActorForTest(Key);
+	Key->HeldTransform = FTransform(
+		FRotator(11.0f, 47.0f, -8.0f),
+		FVector(9.0f, 4.0f, -3.0f),
+		FVector(2.0f));
+	const FVector KeyPhysicalScale(1.2f, 0.8f, 1.1f);
+	Key->SetActorScale3D(KeyPhysicalScale);
+	TestTrue(TEXT("The carry test key initializes on its registered hook"), Key->InitializeAtHook(KeyHook));
+	TestTrue(TEXT("HeldTransform is not applied while the key is on its hook"),
+		Key->GetRootComponent()->GetRelativeTransform().GetLocation().IsNearlyZero()
+		&& Key->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(FQuat::Identity));
+	TestTrue(TEXT("The registered hook transaction takes the key"), Key->TryTakeFromHook(*Carry, *KeyHook));
+	TestEqual(TEXT("Held key applies its actor-specific local location"),
+		Key->GetRootComponent()->GetRelativeLocation(), Key->GetHeldTransform().GetLocation());
+	TestTrue(TEXT("Held key applies its actor-specific local rotation"),
+		Key->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(Key->GetHeldTransform().GetRotation()));
+	TestEqual(TEXT("Held key preserves physical scale while authored held scale is ignored"),
+		Key->GetActorScale3D(), KeyPhysicalScale);
+	TestTrue(TEXT("The held key returns through its hook transaction"), Key->TryReturnToHook(*Carry, *KeyHook));
+	TestTrue(TEXT("Hook return removes the held offset instead of applying it at the hook"),
+		Key->GetRootComponent()->GetRelativeTransform().GetLocation().IsNearlyZero()
+		&& Key->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(FQuat::Identity));
+	TestEqual(TEXT("Hook return preserves the key physical scale"), Key->GetActorScale3D(), KeyPhysicalScale);
 	return true;
 }
 
@@ -697,6 +791,86 @@ bool FBathhouseCleaningInteractionTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("G rejects key free-drop"), KeyDrop.bSucceeded);
 	TestEqual(TEXT("Rejected key drop preserves held key identity"), Carry->GetHeldKey(), Key);
 	Carry->CommitReleaseKey(Key);
+
+	UMaterial* FirstVariationMaterial = NewObject<UMaterial>();
+	UMaterial* SecondVariationMaterial = NewObject<UMaterial>();
+	AWaterStainActor* NullVariationStain = NewObject<AWaterStainActor>();
+	NullVariationStain->MaterialVariants = {nullptr};
+	NullVariationStain->MinXYScale = FVector2D(1.4, -2.0);
+	NullVariationStain->MaxXYScale = FVector2D(0.6, 0.0);
+	NullVariationStain->MinYawDegrees = 30.0f;
+	NullVariationStain->MaxYawDegrees = -15.0f;
+	const FTransform NullVariationCollisionBefore =
+		NullVariationStain->InteractionCollision->GetRelativeTransform();
+	NullVariationStain->ConfigureVisualVariationSeed(101);
+	NullVariationStain->ResolveAndApplyVisualVariation();
+	TestNull(TEXT("A null-only material list preserves the existing Blueprint material"),
+		NullVariationStain->SelectedMaterialVariant.Get());
+	TestTrue(TEXT("Inverted X scale bounds are normalized"),
+		NullVariationStain->SelectedXYScale.X >= 0.6
+		&& NullVariationStain->SelectedXYScale.X <= 1.4);
+	TestTrue(TEXT("Non-positive Y scale bounds are clamped to a safe positive value"),
+		NullVariationStain->SelectedXYScale.Y > 0.0);
+	TestTrue(TEXT("Inverted yaw bounds are normalized"),
+		NullVariationStain->SelectedYawDegrees >= -15.0f
+		&& NullVariationStain->SelectedYawDegrees <= 30.0f);
+	TestTrue(TEXT("Visual-root variation leaves the interaction collision transform unchanged"),
+		NullVariationStain->InteractionCollision->GetRelativeTransform().Equals(
+			NullVariationCollisionBefore));
+	TestEqual(TEXT("Water stain visual variation always keeps local Z scale at one"),
+		NullVariationStain->StainVisualRoot->GetRelativeScale3D().Z, 1.0);
+
+	AWaterStainActor* SingleVariationStain = NewObject<AWaterStainActor>();
+	SingleVariationStain->MaterialVariants = {nullptr, FirstVariationMaterial, nullptr};
+	SingleVariationStain->MinXYScale = FVector2D(0.5, 0.75);
+	SingleVariationStain->MaxXYScale = FVector2D(1.5, 1.75);
+	SingleVariationStain->MinYawDegrees = -20.0f;
+	SingleVariationStain->MaxYawDegrees = 35.0f;
+	constexpr int32 SingleVariationSeed = 241;
+	FRandomStream SingleVariationExpectedStream(SingleVariationSeed);
+	const float ExpectedSingleScaleX = SingleVariationExpectedStream.FRandRange(0.5f, 1.5f);
+	const float ExpectedSingleScaleY = SingleVariationExpectedStream.FRandRange(0.75f, 1.75f);
+	const FVector2D ExpectedSingleScale(
+		ExpectedSingleScaleX,
+		ExpectedSingleScaleY);
+	const float ExpectedSingleYaw = SingleVariationExpectedStream.FRandRange(-20.0f, 35.0f);
+	SingleVariationStain->ConfigureVisualVariationSeed(SingleVariationSeed);
+	SingleVariationStain->ResolveAndApplyVisualVariation();
+	TestTrue(TEXT("A single valid material is selected through null filtering"),
+		SingleVariationStain->SelectedMaterialVariant.Get() == FirstVariationMaterial);
+	TestTrue(TEXT("A single material candidate does not consume an extra random draw"),
+		SingleVariationStain->SelectedXYScale.Equals(ExpectedSingleScale)
+		&& FMath::IsNearlyEqual(SingleVariationStain->SelectedYawDegrees, ExpectedSingleYaw));
+
+	AWaterStainActor* FirstSeededVariation = NewObject<AWaterStainActor>();
+	AWaterStainActor* SecondSeededVariation = NewObject<AWaterStainActor>();
+	for (AWaterStainActor* SeededStain : {FirstSeededVariation, SecondSeededVariation})
+	{
+		SeededStain->MaterialVariants = {FirstVariationMaterial, nullptr, SecondVariationMaterial};
+		SeededStain->MinXYScale = FVector2D(0.7, 0.8);
+		SeededStain->MaxXYScale = FVector2D(1.3, 1.4);
+		SeededStain->MinYawDegrees = -90.0f;
+		SeededStain->MaxYawDegrees = 90.0f;
+		SeededStain->ConfigureVisualVariationSeed(1729);
+		SeededStain->ResolveAndApplyVisualVariation();
+	}
+	TestTrue(TEXT("Equal variation seeds reproduce the selected valid material"),
+		FirstSeededVariation->SelectedMaterialVariant.Get()
+		== SecondSeededVariation->SelectedMaterialVariant.Get());
+	TestTrue(TEXT("Equal variation seeds reproduce independent XY scale and local yaw"),
+		FirstSeededVariation->SelectedXYScale.Equals(SecondSeededVariation->SelectedXYScale)
+		&& FMath::IsNearlyEqual(
+			FirstSeededVariation->SelectedYawDegrees,
+			SecondSeededVariation->SelectedYawDegrees));
+	const FTransform FirstResolvedVisualTransform =
+		FirstSeededVariation->StainVisualRoot->GetRelativeTransform();
+	FirstSeededVariation->ConfigureVisualVariationSeed(42);
+	FirstSeededVariation->MinXYScale = FVector2D(4.0, 4.0);
+	FirstSeededVariation->MaxXYScale = FVector2D(4.0, 4.0);
+	FirstSeededVariation->ResolveAndApplyVisualVariation();
+	TestTrue(TEXT("A stain never rerolls visual variation during its lifetime"),
+		FirstSeededVariation->StainVisualRoot->GetRelativeTransform().Equals(
+			FirstResolvedVisualTransform));
 
 	AActor* FloorActor = World->SpawnActor<AActor>();
 	UBoxComponent* Floor = NewObject<UBoxComponent>(FloorActor, TEXT("CleaningFloor"));

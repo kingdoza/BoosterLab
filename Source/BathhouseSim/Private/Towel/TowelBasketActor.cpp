@@ -6,6 +6,9 @@
 #include "Towel/TowelCirculationSubsystem.h"
 #include "Towel/TowelInventoryComponent.h"
 #include "Towel/Presentation/TowelStackVisualComponent.h"
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "TowelBasketActor"
 
@@ -86,6 +89,13 @@ FText ATowelBasketActor::GetPhysicalCarryDisplayName() const
 	return LOCTEXT("BasketTarget", "수건 바구니");
 }
 
+FTransform ATowelBasketActor::GetHeldTransform() const
+{
+	FTransform Result = HeldTransform;
+	Result.SetScale3D(FVector::OneVector);
+	return Result;
+}
+
 bool ATowelBasketActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
 	if (Carrier || !Carry.IsHandEmpty())
@@ -109,6 +119,7 @@ bool ATowelBasketActor::HandleTakenBy(UPlayerCarryComponent& Carry, USceneCompon
 	if (HeldAnchor)
 	{
 		AttachToComponent(HeldAnchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		ApplyHeldTransform();
 	}
 	OnHeldPresentationChanged.Broadcast(true);
 	return true;
@@ -162,5 +173,30 @@ void ATowelBasketActor::SetWorldPhysics(const bool bEnabled)
 		WorldMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 }
+
+void ATowelBasketActor::ApplyHeldTransform()
+{
+	const FTransform LocalHeldTransform = GetHeldTransform();
+	if (USceneComponent* Root = GetRootComponent())
+	{
+		Root->SetRelativeLocationAndRotation(
+			LocalHeldTransform.GetLocation(),
+			LocalHeldTransform.GetRotation());
+	}
+}
+
+#if WITH_EDITOR
+EDataValidationResult ATowelBasketActor::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+	if (!HeldTransform.GetScale3D().Equals(FVector::OneVector))
+	{
+		Context.AddWarning(LOCTEXT(
+			"HeldTransformScaleIgnored",
+			"HeldTransform scale is ignored at runtime. Author a unit scale and use location/rotation only."));
+	}
+	return Result == EDataValidationResult::NotValidated ? EDataValidationResult::Valid : Result;
+}
+#endif
 
 #undef LOCTEXT_NAMESPACE

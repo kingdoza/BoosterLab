@@ -5,6 +5,9 @@
 #include "Facility/BathhouseCounterActor.h"
 #include "Interaction/BathhouseKeyHookActor.h"
 #include "Interaction/PlayerCarryComponent.h"
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "BathhouseKeyActor"
 
@@ -79,6 +82,13 @@ FText ABathhouseKeyActor::GetPhysicalCarryDisplayName() const
 	return FText::Format(LOCTEXT("KeyTarget", "{0}번 키"), FText::AsNumber(KeyNumber));
 }
 
+FTransform ABathhouseKeyActor::GetHeldTransform() const
+{
+	FTransform Result = HeldTransform;
+	Result.SetScale3D(FVector::OneVector);
+	return Result;
+}
+
 bool ABathhouseKeyActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
 	OutFailureReason = LOCTEXT("KeyTransactionRequired", "키는 키걸이 또는 카운터에서 가져와야 합니다.");
@@ -138,6 +148,7 @@ bool ABathhouseKeyActor::TryTakeFromHook(UPlayerCarryComponent& Carry, ABathhous
 	if (USceneComponent* Anchor = Carry.GetHeldAnchor())
 	{
 		AttachToComponent(Anchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		ApplyHeldTransform();
 	}
 	SetActorHiddenInGame(false);
 	SetWorldPresentation(true, false);
@@ -220,6 +231,7 @@ bool ABathhouseKeyActor::TryTakeFromCounter(UPlayerCarryComponent& Carry)
 	if (USceneComponent* Anchor = Carry.GetHeldAnchor())
 	{
 		AttachToComponent(Anchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		ApplyHeldTransform();
 	}
 	SetWorldPresentation(true, false);
 	return true;
@@ -296,5 +308,30 @@ void ABathhouseKeyActor::SetWorldPresentation(const bool bVisible, const bool bC
 		WorldMesh->SetCollisionEnabled(bCollisionEnabled ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 	}
 }
+
+void ABathhouseKeyActor::ApplyHeldTransform()
+{
+	const FTransform LocalHeldTransform = GetHeldTransform();
+	if (USceneComponent* Root = GetRootComponent())
+	{
+		Root->SetRelativeLocationAndRotation(
+			LocalHeldTransform.GetLocation(),
+			LocalHeldTransform.GetRotation());
+	}
+}
+
+#if WITH_EDITOR
+EDataValidationResult ABathhouseKeyActor::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+	if (!HeldTransform.GetScale3D().Equals(FVector::OneVector))
+	{
+		Context.AddWarning(LOCTEXT(
+			"HeldTransformScaleIgnored",
+			"HeldTransform scale is ignored at runtime. Author a unit scale and use location/rotation only."));
+	}
+	return Result == EDataValidationResult::NotValidated ? EDataValidationResult::Valid : Result;
+}
+#endif
 
 #undef LOCTEXT_NAMESPACE

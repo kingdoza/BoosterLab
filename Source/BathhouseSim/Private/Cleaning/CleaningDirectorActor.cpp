@@ -46,7 +46,7 @@ void ACleaningDirectorActor::TrySpawnStain()
 	FRandomStream RandomStream(FMath::Rand());
 	for (int32 Attempt = 0; Attempt < MaxPlacementAttemptsPerInterval && !EligibleZones.IsEmpty(); ++Attempt)
 	{
-		AStainSpawnZoneActor* Zone = SelectZone(EligibleZones);
+		AStainSpawnZoneActor* Zone = SelectZone(EligibleZones, RandomStream);
 		FTransform SpawnTransform;
 		if (!Zone || !Zone->FindSpawnTransform(
 			RandomStream,
@@ -64,6 +64,7 @@ void ACleaningDirectorActor::TrySpawnStain()
 			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 		if (Stain)
 		{
+			Stain->ConfigureVisualVariationSeed(RandomStream.RandHelper(MAX_int32));
 			Stain->SetSpawnZone(Zone);
 			UGameplayStatics::FinishSpawningActor(Stain, SpawnTransform);
 		}
@@ -71,7 +72,9 @@ void ACleaningDirectorActor::TrySpawnStain()
 	}
 }
 
-AStainSpawnZoneActor* ACleaningDirectorActor::SelectZone(const TArray<AStainSpawnZoneActor*>& Zones) const
+AStainSpawnZoneActor* ACleaningDirectorActor::SelectZone(
+	const TArray<AStainSpawnZoneActor*>& Zones,
+	FRandomStream& RandomStream) const
 {
 	float TotalWeight = 0.0f;
 	for (const AStainSpawnZoneActor* Zone : Zones)
@@ -82,7 +85,7 @@ AStainSpawnZoneActor* ACleaningDirectorActor::SelectZone(const TArray<AStainSpaw
 	{
 		return Zones.IsEmpty() ? nullptr : Zones[0];
 	}
-	float Choice = FMath::FRandRange(0.0f, TotalWeight);
+	float Choice = RandomStream.FRandRange(0.0f, TotalWeight);
 	for (AStainSpawnZoneActor* Zone : Zones)
 	{
 		Choice -= FMath::Max(0.0f, Zone->GetSelectionWeight());

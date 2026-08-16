@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-12(KST) Towel Stack/Pile/Slot presentation 확정 설계 기준
-- 상태: Cleaning/Towel gameplay와 기본 Blueprint 구현 완료, Stack/Pile runtime 연결과 미연결 Slot component Source 구현 완료, Editor authoring 대기
+- 기준일: 2026-08-15(KST) HeldTransform, water-stain variation, Towel Editor preview와 collision-independent Bath snap 확정 설계 기준
+- 상태: 기존 Cleaning/Towel/Customer Source 위 네 확장 target의 native 구현과 automation 검증 완료, Blueprint authoring/Editor 통합 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -91,17 +91,17 @@ Source/BathhouseSim/
 - Camera는 player camera manager를 통해 상하 시야각 제한 기본값을 제공하고, Blueprint 파생 class에서 값을 조정할 수 있게 한다.
 - Camera는 비로컬 플레이어에서 Tick interval 조정과 shake 중단으로 비용을 줄인다.
 - Character는 Interact 입력을 Interaction에 전달하고 carry/held key component를 조립한다.
-- Interaction은 camera trace와 key/wet mop/towel basket 중 physical actor 하나의 held state를 소유한다.
+- Interaction은 camera trace와 key/wet mop/towel basket 중 physical actor 하나의 held state를 소유한다. 공용 held anchor는 기준점만 제공하고 각 Actor는 `IPhysicalCarryable` 계약의 local `HeldTransform`을 직접 authoring한다.
 - Facility는 다중 use slot과 check-in/checkout 독립 FIFO queue를 소유한다.
 - Economy는 PlayerState wallet을 소유하고 cash claim을 한 번만 반영한다.
 - Customer StateTree는 routine을 조율하고 session/queue/facility/key/wallet API에 실행을 위임한다.
 - Customer bath stay는 pre-shower 완료부터 고정 60초이며 그동안 available bath를 random 이동한다.
-- Bath의 `ApproachPoint`와 `ActionPoint`는 모두 캐릭터 발바닥 transform으로 authoring하며, Customer Session이 scaled capsule half height를 한 번 더해 실제 actor/capsule-center transform으로 변환한다. 고객은 NavMesh 위 `ApproachPoint`까지 이동한 뒤 `ActionPoint`로 snap하고, 퇴탕 시 `ApproachPoint`로 복귀한 뒤 navigation을 재개한다.
+- Bath의 `ApproachPoint`와 `ActionPoint`는 모두 캐릭터 발바닥 transform으로 authoring하며, Customer Session이 scaled capsule half height를 한 번 더해 실제 actor/capsule-center transform으로 변환한다. 고객은 NavMesh 위 `ApproachPoint`까지 이동한 뒤 blocking collision 사전 검사 없이 `ActionPoint`로 unswept snap하고, 퇴탕 시 같은 방식으로 `ApproachPoint`에 복귀한 뒤 navigation을 재개한다.
 - Customer 행동 montage는 native StateTree Task가 유효 후보 중 하나를 EnterState에서 선택하며 one-shot 종료 또는 선택된 한 montage의 duration loop를 완료 기준으로 사용한다.
 - UI는 Interaction query를 표시하고 domain 상태를 직접 판단하거나 변경하지 않는다.
-- Cleaning은 zone 기반 water stain spawn과 wet mop hold-cleaning state를 소유한다.
+- Cleaning은 zone 기반 water stain spawn, spawn별 material/yaw/XY scale variation과 wet mop hold-cleaning state를 소유한다.
 - Towel은 homogeneous count, atomic transfer, used-bin overflow와 washer/dryer state를 소유한다.
-- Towel Presentation은 inventory snapshot을 읽어 clean stack/used bin/basket의 Stack과 기존 washer/dryer의 Pile을 표시한다. Slot은 component/preview까지만 구현하고 gameplay actor에 연결하지 않는다.
+- Towel Presentation은 inventory snapshot을 읽어 clean stack/used bin/basket의 Stack과 기존 washer/dryer의 Pile을 표시한다. Stack/Pile/Slot은 transient CallInEditor preview를 제공하며 Slot은 gameplay actor에 연결하지 않는다.
 - 사용 수건통 내부는 container 단위 E/F interaction이고, overflow world towel만 개별 E interaction이다.
 - Customer는 clean towel token과 satisfaction을 session에 보관하고, used bin full이면 floor overflow로 반납한다.
 - Core는 런타임 gameplay 상태를 소유하지 않고 모듈 의존성, Source 경계, Content/Config 정책, Core Redirect 기준을 문서화한다.
@@ -150,6 +150,7 @@ Source/BathhouseSim/
 - 새 시스템, 새 의존 방향, Blueprint/API 계약 변경은 이 문서와 관련 `.md/Architecture/*System.md`를 함께 갱신한다.
 - Content asset 수정이나 resave가 필요한 변경은 별도 사용자 지시와 Editor 검증 계획 없이는 진행하지 않는다.
 - Player carry는 inventory/hotbar가 아닌 key/wet mop/towel basket 중 physical actor 하나만 허용한다. key의 hook/customer transaction과 cash 비소지 계약은 유지한다.
+- physical carryable 공통 Actor/Component를 만들지 않고 `IPhysicalCarryable` 계약을 유지한다. `HeldTransform`은 key/mop/basket 각 Actor의 class default authoring 값이다.
 - E는 primary, F는 secondary, G는 droppable equipment release intent다. Character는 intent만 routing하고 domain mutation은 상태 owner가 수행한다.
 - 모든 towel endpoint 이동은 source 감소와 destination 증가를 단일 native transaction으로 commit한다.
 - Customer routine의 gameplay 상태 변경은 native C++ API를 통해 수행하고 StateTree/Blueprint asset에 domain mutation을 두지 않는다.
@@ -161,3 +162,4 @@ Source/BathhouseSim/
 - 현재 Source는 customer-owned montage playback component, Bath action/approach snap과 두 native montage StateTree Task까지 구현한다. AnimNotify, Motion Warping, 신발·의상 전환은 포함하지 않는다.
 - Cleaning/Towel Source, secondary/drop input, native prompt 확장과 customer towel StateTree Task/Condition은 구현되었다. InputAction/IMC, WBP hierarchy, Blueprint actor, facility 배치와 `ST_CustomerRoutine` asset 연결은 Unreal 후속 단계다.
 - Towel Stack/Pile/Slot native presentation은 collision-free `TowelPresentationVisual` reflected 계약으로 구현되었다. 기존 `BP_Washer`/`BP_Dryer`의 inherited Pile authoring과 profile 지정은 Editor 후속 단계이며 신규 machine이나 drying-rack gameplay actor는 만들지 않는다.
+- per-item `HeldTransform`, seeded water-stain visual variation, Stack/Pile/Slot Editor preview와 collision-independent Bath snap은 Source와 native automation까지 구현되었다. `HeldTransform`/stain Blueprint authoring, inherited towel preview와 blocked Bath Editor 통합 검증은 후속 단계다.

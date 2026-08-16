@@ -40,7 +40,9 @@ private:
 	friend class FBathhouseCleaningInteractionTest;
 
 	void TrySpawnStain();
-	AStainSpawnZoneActor* SelectZone(const TArray<AStainSpawnZoneActor*>& Zones) const;
+	AStainSpawnZoneActor* SelectZone(
+		const TArray<AStainSpawnZoneActor*>& Zones,
+		FRandomStream& RandomStream) const;
 
 	FTimerHandle SpawnTimerHandle;
 };
