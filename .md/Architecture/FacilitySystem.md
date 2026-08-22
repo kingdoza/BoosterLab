@@ -109,6 +109,8 @@ Customer와 key hook이 반복적인 world actor scan을 하지 않게 한다.
 7. 일반 facility activity 종료 또는 중단도 `EndUse`, `Release` 순서로 정리한다.
 8. 이동 실패, StateTree exit와 customer EndPlay는 customer cleanup을 통해 snap 복귀와 release를 대칭적으로 보장한다.
 
+Customer knockdown은 StateTree exit가 아니다. 사용중이면 `EndUse(customer)`로 `Occupied -> Reserved`만 전환하고 reservation owner와 cached transform을 유지한다. 기립 후 ApproachPoint 재이동, ActionPoint snap과 `BeginUse(customer)`를 다시 완료한 뒤 국소 행동을 재시작한다. slot/facility 파괴는 soft reservation 보존의 예외이며 기존 cleanup/retry/technical-abort 경계로 이관한다.
+
 후보가 없으면 customer는 어떤 slot도 보유하지 않은 채 availability event를 기다린다.
 
 ## `ABathhouseCounterActor`
@@ -191,5 +193,6 @@ Blueprint 조회·표현 API:
 - 이동 실패, timeout, StateTree 중단과 actor destruction에서 slot/queue가 정리되는지 확인한다.
 - Bath approach point만 NavMesh 위에 있고 action point가 NavMesh 밖이어도 입·퇴탕과 다음 MoveTo가 성공하는지 확인한다.
 - BathStay 만료와 technical abort가 action point에서 slot을 먼저 풀지 않고 approach point 복귀를 시도하는지 확인한다.
+- customer knockdown이 occupancy만 reservation으로 낮추고 다른 customer에게 slot을 노출하지 않으며 recovery 후 같은 slot을 다시 사용하는지 확인한다.
 - `TowelShelf` 추가가 기존 reflected enum ordinal을 바꾸지 않고 `TowelBasket` asset을 유지하는지 확인한다.
 - towel actor의 slot reservation과 towel inventory mutation이 서로 다른 owner에 남는지 확인한다.

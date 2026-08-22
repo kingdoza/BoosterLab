@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-1인칭 이동, sprint, camera, Interaction/Carry 조립, E primary, F secondary, G equipment release와 Computer focus/click 입력 routing은 현재 Source에 구현되어 있다. Computer InputAction assignment와 IMC mapping은 Editor 후속 단계다.
+1인칭 이동, sprint, camera, Interaction/Carry 조립, E primary, F secondary, G equipment release와 Computer focus/click 입력 routing은 현재 Source에 구현되어 있다. 기존 `ComputerClickAction`을 범용 `PrimaryUseAction` LMB로 호환 이관하고 world equipment use와 computer pointer를 모드별로 routing하는 확장은 구현 target이다.
 
 ## Responsibilities
 
@@ -19,6 +19,7 @@ Character System은 범용 1인칭 조작 템플릿의 플레이어 조작을 �
 - SecondaryInteractAction과 DropCarryAction 입력 라우팅
 - player computer-use component와 widget interaction 조립
 - computer focus 중 1인칭 입력 gate와 click action 라우팅
+- player equipment-use component 조립과 LMB Started/Triggered/Completed/Canceled routing
 
 현재 문서화된 Character 책임 밖의 도메인 gameplay logic은 Character System 책임이 아니다.
 
@@ -53,9 +54,11 @@ Source/BathhouseSim/Private/Character/
 - `SecondaryInteractAction` F의 Started를 secondary intent로 전달한다.
 - `DropCarryAction` G의 Started를 camera view와 함께 equipment drop intent로 전달한다.
 - `UPlayerComputerUseComponent`와 mouse-source `UWidgetInteractionComponent`를 조립한다.
-- computer session이 capture 중이면 E Started는 focus-out으로, click action은 widget pointer로 보내고 Move/Look/Jump/Sprint/F/G를 차단한다.
+- `UPlayerEquipmentUseComponent`를 조립하고 camera, carry와 interaction query/result context를 주입한다.
+- computer session이 capture 중이면 E Started는 focus-out으로, LMB primary use는 widget pointer로 보내고 Move/Look/Jump/Sprint/F/G를 차단한다.
+- 일반 상태 LMB는 현재 held Actor의 generic equipment-use lifecycle로 전달하며 Character가 wrench/mop을 cast하지 않는다.
 - 진입에 사용한 E의 Completed/Canceled가 즉시 focus-out 또는 기존 hold lifecycle로 재전달되지 않도록 press ownership을 보존한다.
-- Character는 towel, stain, mop, basket과 key drop 가능 여부를 직접 판정하지 않는다.
+- Character는 towel, stain, mop, basket, monkey wrench의 사용 가능 여부와 key drop 가능 여부를 직접 판정하지 않는다.
 
 ### AFirstPersonController
 
@@ -85,6 +88,7 @@ Source/BathhouseSim/Private/Character/
 5. `AFirstPersonCharacter::SetupPlayerInputComponent`가 설정된 input action들을 바인딩한다.
 6. Interaction/Carry component에 camera와 held anchor context를 제공한다.
 7. Computer use component에 first-person camera, movement, interaction, carry와 widget interaction context를 제공한다.
+8. Equipment use component에 camera, carry와 interaction context를 제공한다.
 
 ### Shutdown
 
@@ -126,9 +130,18 @@ Source/BathhouseSim/Private/Character/
 ### Computer Use
 
 1. 일반 상태의 E primary가 computer Actor 실행에 성공하면 Computer component가 즉시 movement와 world interaction을 잠근다.
-2. focus-in 완료 뒤 `ComputerClickAction`만 world widget left pointer press/release로 전달한다.
+2. focus-in 완료 뒤 `PrimaryUseAction`을 world widget left pointer press/release로 전달한다.
 3. 새 E Started는 focus-out을 시작하고 해당 press lifecycle을 소비한다.
 4. focus-out 완료 뒤 movement와 일반 interaction을 복구한다.
+
+### Primary Equipment Use
+
+1. `PrimaryUseAction` Started에서 현재 input owner를 Computer 또는 Equipment으로 정확히 한 번 결정한다.
+2. Computer Active이면 pointer press를 시작하고 해당 press의 Completed/Canceled만 pointer release로 소비한다.
+3. 일반 상태면 `UPlayerEquipmentUseComponent` Begin/Update/End로 전달한다. 몽키스패너는 Started 한 번, 물걸레는 Hold lifecycle을 사용한다.
+4. press owner를 중간에 바꾸지 않고 End/Cancel을 시작 owner에만 전달한다.
+
+Native reflected property 이관은 `PrimaryUseAction`을 최우선으로 사용하되 기존 `ComputerClickAction`을 deprecated fallback으로 한 migration cycle 보존한다. 둘 다 설정되면 `PrimaryUseAction`만 binding하여 LMB를 중복 처리하지 않는다.
 
 ## Dependencies
 
@@ -156,6 +169,7 @@ Blueprint에서 접근 가능한 주요 API:
 - `AFirstPersonCharacter::DoJumpEnd`
 - `AFirstPersonCharacter::GetPlayerInteraction`
 - `AFirstPersonCharacter::GetPlayerCarry`
+- `AFirstPersonCharacter::GetPlayerEquipmentUse`
 - `AFirstPersonCharacter::GetPlayerComputerUse`
 - `UFirstPersonMovementComponent::StartSprinting`
 - `UFirstPersonMovementComponent::StopSprinting`
@@ -173,7 +187,8 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - `AFirstPersonCharacter::InteractAction`
 - `AFirstPersonCharacter::SecondaryInteractAction`
 - `AFirstPersonCharacter::DropCarryAction`
-- `AFirstPersonCharacter::ComputerClickAction`
+- `AFirstPersonCharacter::PrimaryUseAction`
+- `AFirstPersonCharacter::ComputerClickAction` (deprecated Editor migration fallback)
 - `AFirstPersonCharacter::MoveSpeedScale`
 - `AFirstPersonCharacter::LookSpeedScale`
 - `AFirstPersonCharacter::bSprintToggle`
@@ -186,7 +201,9 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - Character는 component composition과 input routing만 담당하고 focus/key transaction을 직접 소유하지 않는다.
 - computer의 phase, camera blend, cursor/input mode와 reservation은 Computer component/Actor가 소유하며 Character에 상태를 복제하지 않는다.
 - E/F/G는 intent mapping이며 concrete Cleaning/Towel 상태를 Character에 추가하지 않는다.
-- serialized `HeldKeyAnchor` 이름은 기존 Blueprint 호환성을 위해 유지하되 key/mop/basket의 공용 held anchor로 사용한다. 이번 target에서 rename하지 않는다.
+- LMB도 intent mapping이며 Character에 wrench attack, mop cleaning 또는 prompt domain state를 추가하지 않는다.
+- `ComputerClickAction` property를 즉시 rename/delete하지 않고 `PrimaryUseAction` 이관 후 후속 제거 단계에서 Property Redirect를 검토한다.
+- serialized `HeldKeyAnchor` 이름은 기존 Blueprint 호환성을 위해 유지하되 key/mop/basket/monkey wrench의 공용 held anchor로 사용한다. 이번 target에서 rename하지 않는다.
 - Controller는 mapping context 등록/해제 외 책임을 갖지 않는다.
 - Sprint 시작 조건은 전방 가속과 지상 상태를 요구한다.
 - 현재 카메라는 capsule 기준 고정 offset을 사용한다. skeletal mesh socket 기반 카메라나 weapon/hand mesh는 별도 시스템이 생길 때 설계한다.
@@ -204,6 +221,8 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - E hold target이 Completed/Canceled를 받으며 기존 instant interaction이 release 때 재실행되지 않는지 확인한다.
 - F와 G가 각각 한 번만 routing되고 key에 G drop이 적용되지 않는지 확인한다.
 - computer 사용 중 Move/Look/Jump/Sprint/F/G가 기존 component나 domain에 도달하지 않는지 확인한다.
+- `PrimaryUseAction`과 deprecated fallback이 동시에 LMB를 중복 binding하지 않는지 확인한다.
+- Computer pointer press와 Equipment use press owner가 섞이지 않고 Completed/Canceled가 시작 owner에 한 번만 도달하는지 확인한다.
 - 진입 E release와 종료 E press/release가 각각 한 번만 소비되며 world interaction을 오발하지 않는지 확인한다.
 - pawn 종료/교체 시 interaction focus와 held key attachment가 정리되는지 확인한다.
 - Blueprint native parent rename이 필요한 경우 Core Redirect 필요 여부를 먼저 검토한다.

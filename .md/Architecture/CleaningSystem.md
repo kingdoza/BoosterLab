@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-물걸레를 이용한 물 얼룩 제거, bath/dressing floor의 무작위 얼룩 생성과 spawn별 seeded material/local yaw/XY scale variation Source는 구현되었다. native one-time 선택과 automation은 완료되었고 기존 `BP_WaterStain.StainVisual` 재부착, material event와 후보 authoring은 Editor 후속 단계다.
+물걸레를 이용한 E hold 물 얼룩 제거, bath/dressing floor의 무작위 얼룩 생성과 spawn별 seeded material/local yaw/XY scale variation Source는 구현되었다. 청소를 범용 LMB equipment Hold로 이관하고 target 유무와 관계없이 mopping state/motion을 유지하는 확장은 다음 구현 target이다.
 
 이번 범위는 물 얼룩과 물걸레 하나만 구현한다. 다른 얼룩·청소 도구, 물통, 물걸레 세척, 내구도와 소모품은 제외한다.
 
@@ -34,7 +34,8 @@ Source/BathhouseSim/Private/Tests/
 - Editor authoring interval, 전체/구역별 제한에 따른 random spawn
 - 얼룩별 seeded material/yaw/XY scale variation 선택
 - 유효 바닥, 기존 얼룩 간격과 Pawn overlap 검증
-- 물걸레를 요구하는 hold-primary 청소 transaction
+- 물걸레를 요구하는 LMB equipment Hold 청소 transaction
+- target 유무와 분리된 mopping state와 held Actor loop motion
 - 청소 진행·취소·완료 상태와 Blueprint 표현 event
 - stain/tool/player EndPlay의 대칭 cleanup
 
@@ -49,8 +50,9 @@ Cleaning은 player 입력 mapping, carry slot, UI 상태와 고객 routine을 �
 | 구역 범위와 구역별 제한 | `AStainSpawnZoneActor` |
 | 청소자, 진행률과 terminal commit | `AWaterStainActor` |
 | 선택된 material/yaw/XY scale과 visual root | `AWaterStainActor` |
-| 물걸레 world/held presentation | `AWetMopActor` |
-| E hold lifecycle과 focus 재검증 | `UPlayerInteractionComponent` |
+| 물걸레 world/held presentation·mopping state | `AWetMopActor` |
+| LMB Hold lifecycle과 camera context | `UPlayerEquipmentUseComponent` |
+| 물걸레 loop transform 표현 | `UHeldEquipmentMotionComponent` |
 | 단일 소지 reference와 G drop | `UPlayerCarryComponent` |
 
 ## Types
@@ -122,32 +124,35 @@ Native는 `StainVisualRoot`에 local yaw/scale을 적용하고 유효 material�
 `AWetMopActor`는 generic physical carry 계약을 구현한다.
 
 - 빈손 player가 E로 획득
-- 다른 key/mop/basket 소지 중이면 정확한 실패 이유 반환
+- 다른 key/mop/basket/monkey wrench 소지 중이면 정확한 실패 이유 반환
 - held 중 world collision/physics 비활성화와 공용 held anchor 부착
 - G로 camera forward 방향의 authorable impulse를 받아 world에 복귀
 - key와 달리 hook/holder domain state를 만들지 않음
 - falling out of world 또는 carrier EndPlay 시 last safe transform, 없으면 initial transform으로 복구
+- `IHeldEquipmentUsable`의 Hold mode를 구현하고 LMB중 `bIsMopping=true`를 유지
+- active use 시 target이 없어도 `UHeldEquipmentMotionComponent`의 loop curve를 계속 재생
+- LMB release/cancel/drop/EndPlay에서 mopping state, active stain lock과 motion baseline을 한 번 정리
 
 ## Water Stain Interaction
 
-`AWaterStainActor`는 primary hold interaction만 제공한다. secondary action은 노출하지 않는다.
+`AWaterStainActor`는 E primary hold를 제공하지 않고 LMB equipment-use target query와 native cleaning transaction API를 제공한다. secondary action은 노출하지 않는다. 기존 generic E hold interface는 다른 target 호환을 위해 Interaction에 남지만 stain이 사용하지 않는다.
 
 Query 조건:
 
-- held object가 `AWetMopActor`인지 확인
+- held object가 `AWetMopActor`인지 확인하고 LMB action/failure row로 표시
 - 다른 cleaner가 active인지 확인
 - stain이 `Idle` 또는 현재 interactor 소유 `Cleaning`인지 확인
 - 실패 시 `물걸레가 필요합니다.` 같은 `FText`를 반환
 
 Runtime flow:
 
-1. E Started가 같은 target의 hold session을 시작한다.
-2. stain이 interactor identity를 잠그고 `Cleaning`으로 전이한다.
-3. Interaction Tick은 E hold, 동일 focus, mop 소지와 actor 유효성을 재검증한다.
-4. stain이 authorable `RemovalDurationSeconds` 기준 authoritative progress를 갱신한다.
-5. E release, focus 이탈, mop drop, target/player EndPlay 시 취소하고 progress를 0으로 복구한다.
-6. progress 1.0에서 `Removed`를 한 번 commit하고 collision을 끈다.
-7. 완료 event 뒤 actor가 자신을 제거하며 subsystem count를 정리한다.
+1. LMB Started가 mop의 mopping state/motion을 시작한다.
+2. Equipment Use Tick이 camera focus hit를 다시 resolve한다.
+3. 유효한 water stain이 새로 들어오면 기존 stain을 cancel하고 새 stain이 interactor identity를 잠그며 `Cleaning`으로 전이한다.
+4. 같은 stain을 유지하면 authorable `RemovalDurationSeconds` 기준 authoritative progress를 갱신한다.
+5. target을 벗어나면 stain progress/lock만 0으로 취소하고 `bIsMopping`과 loop motion은 유지한다.
+6. LMB release, mop drop, player/tool EndPlay에서 active stain을 cancel하고 mopping/motion을 종료한다.
+7. progress 1.0에서 `Removed`를 한 번 commit하고 collision, subsystem count와 actor lifetime을 정리한다.
 
 다른 interactor가 청소 중이면 takeover하지 않는다. future multiplayer에서도 한 stain의 cleaner는 하나다.
 
@@ -160,6 +165,7 @@ Editor authoring:
 - stain 제거 시간, decal/mesh/collision
 - stain material 후보, yaw 범위와 X/Y scale 범위
 - mop mesh/collision, held presentation과 throw impulse
+- mop loop position/rotation curve, motion period와 optional blend/reset value
 
 Blueprint 표현 event:
 
@@ -169,12 +175,13 @@ Blueprint 표현 event:
 - `AWaterStainActor::OnCleaningCompleted`
 - `AWaterStainActor::ApplyStainMaterialVariant`
 - `AWetMopActor::OnHeldPresentationChanged`
+- `AWetMopActor::OnMoppingStateChanged`
 
 Blueprint는 material, decal, particle, sound와 animation만 담당한다. progress, completion, spawn count와 carry state를 변경하지 않는다.
 
 ## Dependencies
 
-- Cleaning -> Interaction의 query/hold/carry public 계약
+- Cleaning -> Interaction의 query/equipment-use/motion/carry public 계약
 - Cleaning -> Engine collision/timer/world subsystem
 - Character -> Interaction 입력 routing
 - UI -> Interaction 표시 데이터
@@ -186,7 +193,7 @@ Blueprint는 material, decal, particle, sound와 animation만 담당한다. prog
 - invalid/null material 후보: 제외하고 유효 후보가 없으면 기존 Blueprint 기본 material 유지
 - 뒤집힌 scale/yaw 범위: 작은 값과 큰 값을 정규화하되 non-positive scale은 validation 경고와 안전값 clamp
 - mop 없음/다른 소지품: hold 시작 전 실패
-- cleaning 중 G drop: hold cancel 후 mop world drop
+- cleaning 중 G drop: equipment use/stain progress/motion cancel 후 mop world drop
 - stain EndPlay: active hold와 subsystem reference 정리
 - mop EndPlay: carry reference 정리, active cleaning cancel
 - player EndPlay: stain cleaner lock 해제, mop 안전 복구
@@ -197,7 +204,8 @@ Blueprint는 material, decal, particle, sound와 animation만 담당한다. prog
 - 얼룩이 zone 밖, invalid floor, 기존 stain/Pawn overlap 위치에 생성되지 않는지 확인한다.
 - 같은 seed는 같은 material/yaw/XY scale을 만들고 다른 spawn은 lifetime 중 결과를 재추첨하지 않는지 확인한다.
 - visual root scale/rotation이 interaction sphere, floor alignment와 spawn registry 위치를 바꾸지 않는지 확인한다.
-- E를 누르는 동안만 진행하고 release/focus 이탈/mop drop에서 초기화되는지 확인한다.
+- LMB를 누르는 동안 target 유무와 관계없이 mopping state/motion이 유지되는지 확인한다.
+- 유효한 stain에만 progress가 올라가고 focus 이탈은 stain만 취소하며 LMB release/drop은 전체 use를 종료하는지 확인한다.
 - 물걸레 없이 prompt 실패 이유가 지속·실행 결과 양쪽에서 정확한지 확인한다.
 - Blueprint 표현을 중단해도 C++ cleaning state와 active stain count가 일치하는지 확인한다.
 - 다른 stain/tool type이 이번 구현에 추가되지 않았는지 확인한다.

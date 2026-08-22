@@ -85,13 +85,24 @@ Core System은 고정된 native class inventory를 유지하지 않는다. 구�
 - `TowelSystem.md`: towel inventory, atomic transfer와 processing 경계
 - `TowelPresentationSystem.md`: Towel 하위 Stack/Pile/Slot world presentation 경계
 - `ComputerSystem.md`: world monitor, focus/input session과 sample screen 경계
+- `CombatSystem.md`: 범용 equipment use, melee attack과 health 경계
+- `CustomerRecoverySystem.md`: customer knockdown, soft interruption과 restartable StateTree Task 경계
 - `CoreSystem.md`: Source 루트, 모듈/문서/redirect 공통 규칙
 
 `Source/BathhouseSim/Private/Tests`는 system이 아니라 focused native automation test 경로다.
 
 새 Source 하위 디렉터리를 추가하면 같은 이름의 `*System.md`를 추가하고 책임, 핵심 클래스, runtime flow, 의존성, Blueprint/API 계약, 수동 검토 지점을 문서화한다.
 
-Cleaning/Towel과 Computer는 현재 runtime module dependency 안에서 구현한다. 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
+Cleaning/Towel/Computer와 Combat/Customer Recovery target은 현재 runtime module dependency 안에서 구현한다. physics, curve, collision, AI/Navigation과 StateTree는 이미 선언된 Engine/AIModule/GameplayStateTree dependency를 사용하며 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
+
+## Class Growth Policy
+
+- Actor/Character는 default subobject 조립, reflected getter와 상위 flow만 담당한다.
+- 독립적인 타이머, Tick, delegate lifecycle, physics snapshot과 transaction guard는 응집된 Component/Subsystem으로 분리한다.
+- input Character에 damage, cleaning, carry, computer와 customer routine 상태를 복제하지 않는다.
+- `UCustomerSessionComponent`는 domain resource/timer owner로 유지하고 ragdoll physics와 StateTree pause/restart lifecycle은 신규 Customer component에 둔다.
+- `UPlayerInteractionComponent`는 focus/query/result 표시 경계를 유지하고 concrete weapon/cleaning mutation은 equipment actor와 domain owner에 위임한다.
+- 공통 physical carry Actor 상속은 만들지 않고 `IPhysicalCarryable`을 유지한다. 재사용 가능한 held motion은 carry 소유권과 분리된 표현 Component로 둔다.
 
 ## Manual Review Points
 

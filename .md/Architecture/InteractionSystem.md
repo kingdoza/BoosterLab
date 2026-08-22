@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`과 Computer focus 동안 world interaction을 멈추는 suppression 계약까지 Source와 automation에 구현되었다.
+이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`과 Computer focus suppression까지 Source에 구현되었다. monkey wrench carry, 범용 LMB equipment-use, held motion과 equipment prompt intent는 다음 구현 target이다.
 
 ## Source Scope
 
@@ -11,14 +11,19 @@ Source/BathhouseSim/Public/Interaction/
   InteractionTypes.h
   PlayerInteractable.h
   PhysicalCarryable.h
+  HeldEquipmentUsable.h              # target
   PlayerInteractionComponent.h
   PlayerCarryComponent.h
+  PlayerEquipmentUseComponent.h      # target
+  HeldEquipmentMotionComponent.h     # target
   BathhouseKeyActor.h
   BathhouseKeyHookActor.h
 
 Source/BathhouseSim/Private/Interaction/
   PlayerInteractionComponent.cpp
   PlayerCarryComponent.cpp
+  PlayerEquipmentUseComponent.cpp    # target
+  HeldEquipmentMotionComponent.cpp   # target
   BathhouseKeyActor.cpp
   BathhouseKeyHookActor.cpp
 
@@ -34,13 +39,16 @@ Source/BathhouseSim/Private/Tests/
 - instant/hold primary lifecycle과 target/context 재검증
 - side-effect 없는 상호작용 조회와 실행 직전 재검증
 - query 상태와 별개인 interaction 실행 결과의 일회성 native notification
-- inventory/hotbar 없는 0개 또는 1개의 physical key/mop/basket 소지
+- inventory/hotbar 없는 0개 또는 1개의 physical key/mop/basket/monkey wrench 소지
 - 공용 held anchor와 아이템별 local held transform의 분리
+- LMB 장비 사용의 side-effect-free query, Begin/Update/End/Cancel routing
+- one-shot/hold equipment use 공통 lifecycle와 held Actor transform 표현
+- E/F world target과 별도인 LMB equipment-use prompt/result 표시 데이터
 - 번호 key actor의 유일한 lifecycle과 player held presentation
 - focus와 held key 변화의 UI용 delegate
 - 외부 focus mode가 활성화된 동안 active hold, trace와 prompt를 중단하는 C++ suppression 경계
 
-Interaction은 cleaning progress, towel count/machine, customer routine, facility slot, queue와 player money를 소유하지 않는다.
+Interaction은 cleaning progress, attack/damage/health, towel count/machine, customer routine, facility slot, queue와 player money를 소유하지 않는다.
 
 ## Interaction Contract
 
@@ -56,6 +64,22 @@ Interaction은 cleaning progress, towel count/machine, customer routine, facilit
 
 `FPlayerInteractionContext`는 interactor, `UPlayerCarryComponent`, hit actor/component와 hit 정보를 가진다. `FPlayerInteractionQuery`와 결과 문구는 localization 가능한 `FText`를 사용한다.
 
+`FPlayerInteractionQuery`는 기존 E primary/F secondary 필드를 유지하고 optional LMB equipment row의 visibility/can-use/action/failure, activation mode와 progress를 추가한다. `EPlayerInteractionIntent::EquipmentUse`와 `EPhysicalCarryKind::MonkeyWrench`는 기존 reflected ordinal을 보존하도록 각 enum 끝에 추가한다.
+
+## Held Equipment Use Contract
+
+`IHeldEquipmentUsable`은 concrete type을 Character/Interaction에 결합하지 않고 다음을 제공한다.
+
+- `QueryEquipmentUse(Context)`: 실행 가능, action name, failure, mode를 반환하고 상태를 변경하지 않음
+- `BeginEquipmentUse(Context)`: 입력 시작 owner를 commit
+- `UpdateEquipmentUse(Context, DeltaTime)`: Hold use와 progress 갱신
+- `EndEquipmentUse(Context)`: 정상 release
+- `CancelEquipmentUse(Context)`: drop, target/tool invalidation, focus mode/EndPlay cleanup
+
+context는 user/carry, camera origin/forward과 현재 focus hit를 제공한다. held equipment가 실제 domain owner API를 호출하며 `UPlayerEquipmentUseComponent`는 concrete wrench/mop을 cast하지 않는다.
+
+Equipment row 합성은 현재 held Actor가 `IHeldEquipmentUsable`이면 해당 query를 authoritative하게 사용한다. 사용 가능한 held equipment가 없을 때만 focus target이 `물걸레가 필요합니다` 같은 disabled equipment action/failure를 광고할 수 있다. 두 source를 두 LMB row로 동시 표시하지 않으며 focus target은 target name/hit context를 제공한다.
+
 ## `UPlayerInteractionComponent`
 
 - local player camera 기준 configurable distance/channel line trace를 수행한다.
@@ -69,6 +93,8 @@ Interaction은 cleaning progress, towel count/machine, customer routine, facilit
 - `TryInteract()`의 대상 없음, query 실행 불가, execute 성공·실패는 모두 `FPlayerInteractionResult` 하나를 반환하고 `OnInteractionAttemptFinishedNative`를 정확히 한 번 방송한다.
 - execute 뒤에는 query를 먼저 refresh한 다음 attempt result를 방송하므로 UI는 최신 지속 상태 위에 일시 실행 피드백을 표시할 수 있다.
 - key, mop, basket, towel, stain, customer, cash 같은 구체 domain type을 직접 판별하지 않는다.
+- focus target의 world query와 held Actor의 equipment query를 합성해 E/F/LMB row의 단일 `FPlayerInteractionQuery`를 방송한다.
+- equipment-use attempt result를 `EquipmentUse` intent로 받아 기존 query/result delegate에 합성하되 domain mutation을 대행하지 않는다.
 - active hold는 target/input/focus/carry/EndPlay invalidation에서 정확히 한 번 cancel한다.
 - pawn 종료·교체 시 focus를 지우고 query/result delegate를 정리한다.
 - `SetInteractionSuppressed(true)`는 active hold를 transient failure 없이 한 번 cancel하고 current target/query를 지우며 suppress 중 trace와 public attempt의 mutation을 막는다.
@@ -81,13 +107,13 @@ Interaction은 cleaning progress, towel count/machine, customer routine, facilit
 - `IsHandEmpty`, `GetHeldKey`, 기존 key commit과 `OnHeldKeyChanged`를 호환 API로 유지한다.
 - generic held object 조회/change delegate와 physical equipment take/release API를 추가한다.
 - inventory array, stack, slot, selected hotbar와 item swap을 만들지 않는다.
-- 빈손일 때만 key/mop/basket을 받을 수 있고 자동 swap하지 않는다.
+- 빈손일 때만 key/mop/basket/monkey wrench를 받을 수 있고 자동 swap하지 않는다.
 - key는 대응하는 `ABathhouseKeyHookActor` 또는 승인된 customer/counter transaction으로만 release한다.
-- key의 임의 바닥 drop과 모든 carryable의 임시 선반 보관은 현재 범위 밖이다. mop/basket의 G world drop은 아래 공통 계약으로 처리한다.
-- key/mop/basket을 camera 하위 `HeldKeyAnchor`에 부착하고 held 중 world collision을 끈다.
+- key의 임의 바닥 drop과 모든 carryable의 임시 선반 보관은 현재 범위 밖이다. mop/basket/monkey wrench의 G world drop은 아래 공통 계약으로 처리한다.
+- key/mop/basket/monkey wrench를 camera 하위 `HeldKeyAnchor`에 부착하고 held 중 world collision을 끈다.
 - 기존 serialized `HeldKeyAnchor`는 모든 physical carryable의 공용 기준점으로 사용하며 rename하지 않는다.
 - 아이템별 위치·회전 보정은 `IPhysicalCarryable::GetHeldTransform()`에서 조회하며 공용 anchor transform에 합쳐 저장하지 않는다.
-- G release는 `IPhysicalCarryable`이 허용한 mop/basket만 처리하며 key는 held 상태를 유지하고 실패한다.
+- G release는 `IPhysicalCarryable`이 허용한 mop/basket/monkey wrench만 처리하며 key는 held 상태를 유지하고 실패한다. active equipment use가 있으면 domain cancel을 먼저 한 번 완료한 후 drop commit을 시도한다.
 - free drop 전에 carryable root primitive의 월드 AABB로 held 위치부터 기존 목표 위치까지 box sweep을 수행한다.
 - 기본 sweep channel은 `ECC_Visibility`이고 carry owner와 대상 actor를 무시한다. actor 원점과 bounds 중심 차이는 `BoundsOffset`으로 보정한다.
 - blocking hit는 shape 중심인 `Hit.Location`과 clearance로 player 쪽 안전 위치를 계산한다. start penetration에서 투척 목표 쪽으로 진행하는 MTD는 벽 통과 후보이므로 거부하고, 나머지 후보만 segment 제한 후 동일 shape/channel overlap으로 재검증한다.
@@ -112,11 +138,13 @@ Cash는 carry 대상이 아니며 Economy System의 즉시 획득 interaction으
 
 free drop을 허용하는 구현의 physical primitive는 actor root여야 한다. Detach, actor 위치 변경, physics 활성화와 impulse 적용은 `UPlayerCarryComponent`만 수행하며 concrete carryable은 이 동작을 반복하지 않는다.
 
-Key는 기존 state transaction을 계속 정본으로 사용하며 G free drop을 거부한다. Wet mop과 towel basket은 world pickup과 G drop을 허용한다.
+Key는 기존 state transaction을 계속 정본으로 사용하며 G free drop을 거부한다. Wet mop, towel basket과 monkey wrench는 world pickup과 G drop을 허용한다.
 
-`GetHeldTransform()`의 기본 반환값은 Identity다. `ABathhouseKeyActor`, `AWetMopActor`, `ATowelBasketActor`가 각각 `EditDefaultsOnly`, `BlueprintReadOnly` `HeldTransform`을 소유하고 player-held 부착 경로에서만 사용한다. key hook, counter return slot과 customer assignment에는 적용하지 않는다.
+`GetHeldTransform()`의 기본 반환값은 Identity다. `ABathhouseKeyActor`, `AWetMopActor`, `ATowelBasketActor`, `AMonkeyWrenchActor`가 각각 `EditDefaultsOnly`, `BlueprintReadOnly` `HeldTransform`을 소유하고 player-held 부착 경로에서만 사용한다. key hook, counter return slot과 customer assignment에는 적용하지 않는다.
 
 이번 계약에서 `HeldTransform`의 authoritative 값은 location과 rotation이며 scale은 `(1,1,1)`로 유지한다. 물건의 월드 물리 크기와 drop bounds를 held presentation 때문에 바꾸지 않는다. 새 공통 carry Actor 또는 `UPhysicalCarryableComponent`는 만들지 않으며 기존 Actor가 interface 계약을 직접 구현한다.
+
+`UHeldEquipmentMotionComponent`는 carryable 공통화가 아닌 표현 도우미다. current relative transform을 baseline으로 저장하고 one-shot/hold-loop curve offset을 적용하며 end/cancel/drop에서 baseline을 복구한다. carry reference, pickup/drop transaction와 domain progress를 소유하지 않는다.
 
 ## `ABathhouseKeyActor`
 
@@ -163,8 +191,9 @@ Technical recovery는 transition 전 실제 `StateOwner`를 snapshot하고 optio
 
 - `UPlayerInteractionComponent`
 - `UPlayerCarryComponent`
+- `UPlayerEquipmentUseComponent`
 - first-person camera 하위 `HeldKeyAnchor`
-- existing instant primary 호환을 유지하면서 E Started/Completed/Canceled, F Started와 G Started를 Interaction/Carry intent API에 전달한다.
+- existing instant primary 호환을 유지하면서 E Started/Completed/Canceled, F Started, G Started와 LMB Started/Triggered/Completed/Canceled를 Interaction/Equipment/Carry intent API에 전달한다.
 - computer session이 input을 capture하면 해당 session이 E lifecycle을 소비하고 Interaction에는 전달하지 않는다.
 
 Character는 focus 규칙과 key transaction을 직접 구현하지 않는다. PlayerController는 mapping context 등록·해제 책임을 유지한다.
@@ -176,12 +205,14 @@ Blueprint 조회·표현 API:
 - `UPlayerInteractionComponent::GetCurrentInteractionQuery`
 - `UPlayerInteractionComponent::TryInteract`
 - primary begin/end, secondary attempt와 equipment drop attempt API
+- equipment-use begin/update/end/cancel API와 C++ result integration
 - `UPlayerInteractionComponent::OnInteractionQueryChanged`는 Blueprint 표시 갱신 계약이다.
 - `UPlayerInteractionComponent::OnInteractionAttemptFinishedNative`는 C++ 전용 실행 결과 계약이며 BlueprintAssignable로 노출하지 않는다.
 - `UPlayerInteractionComponent::SetInteractionSuppressed`, `IsInteractionSuppressed`는 외부 focus owner가 사용하는 C++ 전용 계약이며 Blueprint에 노출하지 않는다.
 - `UPlayerCarryComponent::IsHandEmpty`
 - `UPlayerCarryComponent::GetHeldKey`
 - generic held object와 held kind 조회, `OnHeldObjectChanged`
+- combined equipment-use query/result의 optional LMB action/failure/mode/progress
 - `ABathhouseKeyActor::OnKeyStateChanged`
 - `ABathhouseKeyActor::OnHeldPresentationChanged`
 
@@ -190,11 +221,12 @@ Editor authoring 값:
 - `AFirstPersonCharacter::InteractAction`
 - `AFirstPersonCharacter::SecondaryInteractAction`
 - `AFirstPersonCharacter::DropCarryAction`
+- `AFirstPersonCharacter::PrimaryUseAction`
 - trace 거리와 collision channel
 - `HeldKeyAnchor` transform
-- key, wet mop, towel basket Blueprint class default의 개별 `HeldTransform`
+- key, wet mop, towel basket, monkey wrench Blueprint class default의 개별 `HeldTransform`
 - `UPlayerCarryComponent`의 `DropSweepChannel`, `DropSweepClearance`
-- wet mop/towel basket의 기존 `ThrowSpawnDistance`, `ThrowImpulseStrength`
+- wet mop/towel basket/monkey wrench의 `ThrowSpawnDistance`, `ThrowImpulseStrength`
 - key actor mesh/number presentation
 - key hook의 번호와 key actor 연결
 
@@ -202,18 +234,19 @@ Editor authoring 값:
 
 - Interaction -> Engine actor/component/collision
 - Interaction -> Facility registry의 번호 검증 API
-- Cleaning -> Interaction public hold/carry 계약
+- Cleaning -> Interaction public query/equipment-use/motion/carry 계약
+- Combat -> Interaction public carry/equipment-use/motion 계약
 - Towel -> Interaction public intent/carry 계약
 - Character -> Interaction
 - Computer -> Interaction public query/carry/suppression 계약
 - UI -> Interaction
 - Interaction은 Computer concrete class에 의존하지 않는다.
-- Interaction은 Customer와 UI concrete class에 의존하지 않는다.
+- Interaction은 Combat/Cleaning/Customer/UI concrete class에 의존하지 않는다.
 
 ## Manual Review Points
 
 - 어떤 경로에서도 player가 두 key를 동시에 들지 않는지 확인한다.
-- 어떤 경로에서도 key/mop/basket을 둘 이상 동시에 들지 않는지 확인한다.
+- 어떤 경로에서도 key/mop/basket/monkey wrench를 둘 이상 동시에 들지 않는지 확인한다.
 - E hold cancel과 F/G attempt가 기존 primary result를 중복 방송하지 않는지 확인한다.
 - key의 기존 state transition과 GetHeldKey/OnHeldKeyChanged 계약이 generic carry 확장 뒤에도 유지되는지 확인한다.
 - query가 상태를 바꾸지 않고 execute가 조건을 재검증하는지 확인한다.
@@ -223,9 +256,11 @@ Editor authoring 값:
 - player/customer 비정상 종료 시 key가 원래 hook으로 복구되는지 확인한다.
 - key number가 HUD text가 아니라 first-person 3D key에 표시되는지 확인한다.
 - mop/basket drop이 같은 carry component commit 경로를 사용하고 concrete actor가 직접 위치·physics·impulse를 적용하지 않는지 확인한다.
-- Identity `HeldTransform`이 기존 anchor 부착을 보존하고, 세 아이템의 서로 다른 location/rotation이 player-held 상태에만 적용되는지 확인한다.
+- Identity `HeldTransform`이 기존 anchor 부착을 보존하고, 네 아이템의 서로 다른 location/rotation이 player-held 상태에만 적용되는지 확인한다.
 - held transform이 hook/counter/world drop transform과 physical bounds scale을 오염시키지 않는지 확인한다.
 - suppression 시작이 hold를 한 번만 cancel하고 query/prompt를 지우며, 해제 직후 최신 target을 다시 조회하는지 확인한다.
+- LMB use press owner가 Computer/Equipment 사이에서 섞이지 않고 active use가 release/cancel/drop/EndPlay에 한 번만 종료되는지 확인한다.
+- equipment query/result가 E/F row를 덮어쓰지 않고 empty hand/invalid target의 정확한 실패 이유를 제공하는지 확인한다.
 - suppress 중 E/F/G 직접 호출도 domain mutation이나 stale attempt feedback을 만들지 않는지 확인한다.
 - 벽, 비스듬한 면과 모서리에서 swept AABB가 벽 내부나 너머에 배치되지 않는지 확인한다.
 - start penetration 또는 안전 공간 없음 실패가 held attachment, carrier와 presentation을 보존하고 빈 방향 재시도를 허용하는지 확인한다.

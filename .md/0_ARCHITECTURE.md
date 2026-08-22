@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-16(KST) world-space computer monitor focus와 sample click native 구현 기준
-- 상태: Cleaning/Towel/Customer 확장과 Computer focus/sample screen은 native 구현 및 automation 완료, Content/Editor 통합 대기
+- 기준일: 2026-08-22(KST) 범용 LMB 장비 사용, Combat·Customer Recovery 구현 target 기준
+- 상태: Cleaning/Towel/Customer/Computer 기존 native 구현을 보존하며 Combat, LMB mop 사용과 customer soft interruption/restart는 아키텍처 확정·C++ 구현 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -24,6 +24,9 @@
   - Cleaning
   - Towel
   - Computer
+- 구현 target 하위 시스템:
+  - Combat
+  - Customer Recovery
 - `Content`는 Blueprint 참조 검증 범위로만 다룬다. C++ 시스템 책임의 정본은 Source 하위 문서에 둔다.
 - `Config/DefaultEngine.ini`는 GameMode/Pawn/Controller 연결 또는 Core Redirect가 필요한 rename 호환 경로로만 문서화한다.
 
@@ -40,6 +43,8 @@
 - [TowelSystem.md](Architecture/TowelSystem.md): towel circulation, atomic transfer, overflow와 processing machine
 - [TowelPresentationSystem.md](Architecture/TowelPresentationSystem.md): towel quantity mesh profile과 Stack/Pile/Slot world presentation
 - [ComputerSystem.md](Architecture/ComputerSystem.md): world-space monitor, player focus/input session과 sample click UI
+- [CombatSystem.md](Architecture/CombatSystem.md): 범용 LMB 장비 사용, 몽키스패너 공격과 health
+- [CustomerRecoverySystem.md](Architecture/CustomerRecoverySystem.md): customer 래그돌, routine soft interruption과 native Task restart
 - [CoreSystem.md](Architecture/CoreSystem.md): 공통 문서 규칙, 모듈 경계, Source/Content/Config 경계, Core Redirect
 
 ## Source 구조
@@ -56,6 +61,7 @@ Source/BathhouseSim/
     UI/
     Cleaning/
     Towel/
+    Combat/            # target
   Private/
     Character/
     Camera/
@@ -66,6 +72,7 @@ Source/BathhouseSim/
     UI/
     Cleaning/
     Towel/
+    Combat/            # target
     Tests/
 ```
 
@@ -81,9 +88,11 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
   - Economy: player money와 cash claim 책임
   - Customer: StateTree routine과 customer session 책임
   - UI: interaction query의 local HUD 표현 책임
-  - Cleaning: zone/stain registry, 물 얼룩 spawn/hold cleaning과 wet mop 책임
+  - Cleaning: zone/stain registry, 물 얼룩 spawn/equipment-use cleaning과 wet mop 책임
   - Towel: 수건 재고/전송, 설비, overflow, 처리 기계와 recovery ledger 책임
   - Computer: 월드 monitor, focus camera, 사용권과 player computer-use session 책임
+  - Combat: 몽키스패너, camera-based melee attack과 공용 health 책임
+  - Customer Recovery: Customer Source 내 knockdown, soft interruption과 restartable Task 책임
   - Core: 모듈/redirect/문서 경계 책임
 
 ## 시스템 간 책임 흐름
@@ -95,8 +104,8 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Camera는 owner의 이동 상태, sprint 상태, falling/landing 상태를 읽고 camera shake 재생/중단을 결정한다.
 - Camera는 player camera manager를 통해 상하 시야각 제한 기본값을 제공하고, Blueprint 파생 class에서 값을 조정할 수 있게 한다.
 - Camera는 비로컬 플레이어에서 Tick interval 조정과 shake 중단으로 비용을 줄인다.
-- Character는 Interact 입력을 Interaction에 전달하고 carry/held key component를 조립한다.
-- Interaction은 camera trace와 key/wet mop/towel basket 중 physical actor 하나의 held state를 소유한다. 공용 held anchor는 기준점만 제공하고 각 Actor는 `IPhysicalCarryable` 계약의 local `HeldTransform`을 직접 authoring한다.
+- Character는 E/F/G와 범용 LMB `PrimaryUseAction`을 Interaction에 의도로 전달하고 carry/equipment-use component를 조립한다. Computer focus중 LMB는 monitor pointer가, 일반 상태에서는 held equipment가 소유한다.
+- Interaction은 camera trace와 key/wet mop/towel basket/monkey wrench 중 physical actor 하나의 held state, 범용 equipment-use routing과 held motion 표현을 소유한다. 공용 held anchor는 기준점만 제공하고 각 Actor는 `IPhysicalCarryable` 계약의 local `HeldTransform`을 직접 authoring한다.
 - Facility는 다중 use slot과 check-in/checkout 독립 FIFO queue를 소유한다.
 - Economy는 PlayerState wallet을 소유하고 cash claim을 한 번만 반영한다.
 - Customer StateTree는 routine을 조율하고 session/queue/facility/key/wallet API에 실행을 위임한다.
@@ -106,6 +115,9 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - UI는 Interaction query를 표시하고 domain 상태를 직접 판단하거나 변경하지 않는다.
 - Computer는 빈손 primary interaction으로 진입하고 world-space monitor를 유지한 채 player별 camera/input session만 전환한다. 포커스아웃은 widget을 파괴하지 않아 actor lifetime 동안 마지막 화면 상태를 유지한다.
 - Cleaning은 zone 기반 water stain spawn, spawn별 material/yaw/XY scale variation과 wet mop hold-cleaning state를 소유한다.
+- Combat은 LMB Started 단발 몽키스패너 swing, camera-based multi shape trace와 공용 health/depleted event를 소유한다. 무기 World Mesh는 authoritative 피격 판정이 아니다.
+- Cleaning의 wet mop은 LMB Hold중 target 유무와 관계없이 mopping state/motion을 유지하고 유효한 정면 water stain에만 제거 progress를 commit한다.
+- Customer Recovery는 health 0을 death가 아닌 일시 래그돌로 처리한다. session 타이머·자원·예약과 StateTree hierarchy를 보존하고, 기립 후 C++ restart serial을 통해 미완료 국소 행동만 처음부터 재시작한다.
 - Towel은 homogeneous count, atomic transfer, used-bin overflow와 washer/dryer state를 소유한다.
 - Towel Presentation은 inventory snapshot을 읽어 clean stack/used bin/basket의 Stack과 기존 washer/dryer의 Pile을 표시한다. Stack/Pile/Slot은 transient CallInEditor preview를 제공하며 Slot은 gameplay actor에 연결하지 않는다.
 - 사용 수건통 내부는 container 단위 E/F interaction이고, overflow world towel만 개별 E interaction이다.
@@ -123,6 +135,7 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Camera -> Engine Camera/CameraShake
 - Camera -> Engine PlayerCameraManager
 - Interaction -> Facility validation
+- Combat -> Interaction
 - Economy -> Interaction
 - Customer -> Facility
 - Customer -> Interaction
@@ -136,6 +149,10 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Towel -> Facility
 - Towel Presentation -> Towel
 - Customer -> Towel
+- Customer -> Combat
+- Customer Recovery -> Combat
+- Customer Recovery -> Facility
+- Customer Recovery -> UE GameplayStateTree/AI/Navigation/Physics
 - Core -> Engine module boundary
 
 의존 방향은 Unreal 컴포넌트 조합을 반영한다. 새 기능을 추가할 때는 "상태 오너"와 "입력/표시 라우터"를 먼저 구분한다.
@@ -158,9 +175,9 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - UCLASS/USTRUCT/UENUM rename 또는 삭제는 Core Redirect, Editor 재시작, Blueprint compile/save, post-migration scan까지 한 세트로 계획한다.
 - 새 시스템, 새 의존 방향, Blueprint/API 계약 변경은 이 문서와 관련 `.md/Architecture/*System.md`를 함께 갱신한다.
 - Content asset 수정이나 resave가 필요한 변경은 별도 사용자 지시와 Editor 검증 계획 없이는 진행하지 않는다.
-- Player carry는 inventory/hotbar가 아닌 key/wet mop/towel basket 중 physical actor 하나만 허용한다. key의 hook/customer transaction과 cash 비소지 계약은 유지한다.
-- physical carryable 공통 Actor/Component를 만들지 않고 `IPhysicalCarryable` 계약을 유지한다. `HeldTransform`은 key/mop/basket 각 Actor의 class default authoring 값이다.
-- E는 primary, F는 secondary, G는 droppable equipment release intent다. Character는 intent만 routing하고 domain mutation은 상태 owner가 수행한다.
+- Player carry는 inventory/hotbar가 아닌 key/wet mop/towel basket/monkey wrench 중 physical actor 하나만 허용한다. key의 hook/customer transaction과 cash 비소지 계약은 유지한다.
+- physical carryable 공통 Actor/Component를 만들지 않고 `IPhysicalCarryable` 계약을 유지한다. `HeldTransform`은 key/mop/basket/monkey wrench 각 Actor의 class default authoring 값이다.
+- E는 world primary, F는 world secondary, G는 droppable equipment release, LMB는 computer click 또는 held equipment primary-use intent다. Character는 intent만 routing하고 domain mutation은 상태 owner가 수행한다.
 - 모든 towel endpoint 이동은 source 감소와 destination 증가를 단일 native transaction으로 commit한다.
 - Customer routine의 gameplay 상태 변경은 native C++ API를 통해 수행하고 StateTree/Blueprint asset에 domain mutation을 두지 않는다.
 - 컴퓨터 사용은 game을 pause하거나 fullscreen viewport UI를 열지 않는다. Character는 입력 의도만 분기하고 Computer component가 view/input session lifecycle을 소유하며 screen Widget은 domain gameplay 상태를 소유하지 않는다.
@@ -174,3 +191,4 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Towel Stack/Pile/Slot native presentation은 collision-free `TowelPresentationVisual` reflected 계약으로 구현되었다. 기존 `BP_Washer`/`BP_Dryer`의 inherited Pile authoring과 profile 지정은 Editor 후속 단계이며 신규 machine이나 drying-rack gameplay actor는 만들지 않는다.
 - per-item `HeldTransform`, seeded water-stain visual variation, Stack/Pile/Slot Editor preview와 collision-independent Bath snap은 Source와 native automation까지 구현되었다. `HeldTransform`/stain Blueprint authoring, inherited towel preview와 blocked Bath Editor 통합 검증은 후속 단계다.
 - `ABathhouseComputerActor`, `UPlayerComputerUseComponent`, `UComputerSampleScreenWidget`, interaction suppression과 click input은 Source와 focused automation까지 구현되었다. Computer Blueprint/WBP, click InputAction/IMC assignment와 level 배치는 Editor 후속 단계다.
+- Combat Source, `PrimaryUseAction` 호환 이관, LMB mop use, equipment prompt row, customer knockdown/soft interruption과 restartable MoveTo는 구현 대기 target이다. 구현 단계에서 Source와 automation을 완성하고, `IA_PrimaryUse`, `IMC_FirstPerson`, wrench/customer Blueprint, `WBP_InteractionPrompt`와 `ST_CustomerRoutine` 교체는 코드 리뷰 후 Editor 단계로 인계한다.

@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath ActionPoint의 blocking collision 여부와 무관한 unswept snap, collision-state 보존과 cached ApproachPoint 복귀는 Source와 automation에 구현되었고 Editor 통합 검증만 남았다.
+이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath collision-independent snap은 구현되었다. health 0 래그돌, soft interruption과 native Task restart는 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)의 구현 target이다.
 
 ## Source Scope
 
@@ -45,6 +45,7 @@ Source/BathhouseSim/Private/Tests/
 - 완료·timeout·기술 실패의 대칭 cleanup
 - clean towel token 획득·사용·반납과 shortage fallback
 - customer session satisfaction와 towel cleanup
+- Combat health component 조립과 Customer Recovery soft-interruption 통합
 
 Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, player carry, wallet과 UI 상태를 소유하지 않는다.
 
@@ -54,7 +55,7 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 |---|---|
 | 현재 routine state와 transition | `ST_CustomerRoutine` StateTree |
 | key number, key reference, timer와 runtime handles | `UCustomerSessionComponent` |
-| navigation request | `FStateTreeMoveToTask`와 AIController |
+| navigation request | 현재 `FStateTreeMoveToTask`, target `FCustomerRestartableMoveToTask`와 AIController |
 | queue | `ABathhouseCounterActor` |
 | facility reservation/occupancy | `UBathhouseFacilitySlotComponent` |
 | Bath approach/action snap 상태와 복구 | `UCustomerSessionComponent` |
@@ -64,6 +65,8 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 | timed activity 실행 | native Customer StateTree Task |
 | customer-held towel token과 satisfaction | `UCustomerSessionComponent` |
 | towel count, overflow와 transfer | Towel System |
+| health/depleted | Combat `UHealthComponent` |
+| ragdoll/soft interruption/restart serial | Customer Recovery components |
 
 ## `UCustomerRoutineDefinition`
 
@@ -105,6 +108,7 @@ Bath timer가 만료되면 session은 `Customer.Event.BathStayExpired` event를 
 - customer Pawn의 composition root다.
 - private `CustomerSession` default subobject로 `UCustomerSessionComponent`를 생성하고 외부 C++에는 `GetCustomerSession()` 접근만 제공한다.
 - private `CustomerMontagePlayback` default subobject로 montage lifecycle을 조립하며 gameplay session state와 분리한다.
+- target `Health`, `CustomerKnockdown`, `CustomerRoutineInterruption` private default subobject를 조립하고 각 책임을 getter로만 노출한다.
 - `CustomerSession`은 `VisibleAnywhere`, `BlueprintReadOnly`, `AllowPrivateAccess` 계약으로 Blueprint와 StateTree의 읽기 binding을 유지한다.
 - check-in 중 `IPlayerInteractable`을 구현하고 session에 query/execute를 위임한다.
 - logical activity 변경을 Blueprint 표현 event로 전달한다.
@@ -151,6 +155,7 @@ Native C++이 소유하는 것:
 - queue/facility/key/wallet API 호출
 - gameplay event 발행
 - montage 후보 검증, 단일 선택과 실제 playback 종료 판정
+- target soft interruption serial, restartable MoveTo와 기존 Task local restart
 
 Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 않는다.
 
@@ -159,7 +164,7 @@ Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 �
 - queue join/leave와 front 도착 대기
 - check-in key 대기와 timeout 시작·취소
 - facility/slot 선택·예약·release
-- built-in `FStateTreeMoveToTask`에 목적지 binding 제공
+- 현재 built-in `FStateTreeMoveToTask`에 목적지 binding 제공, target은 동일 binding의 native restartable MoveTo로 교체
 - Bath action/approach point의 collision-independent snap과 movement mode 복구
 - logical activity begin, finish와 timer-only fallback
 - 후보 중 하나를 한 번 선택해 실제 종료를 기다리는 one-shot montage
@@ -171,7 +176,7 @@ Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 �
 
 조건은 session과 owner API를 읽기만 하고 상태를 바꾸지 않는다.
 
-Queue removal은 session membership와 wait/service guard를 먼저 지운 뒤 counter에서 dequeue한다. Counter의 동기 lane broadcast는 남은 customer에게 계속 전달하지만, 이미 떠나는 customer와 active check-in wait/checkout offer에는 `QueueChanged` StateTree event를 보내지 않는다. Check-in wait 시작은 idempotent하여 StateTree reselect가 기존 timeout을 다시 시작하지 않는다.
+Queue removal은 session membership와 wait/service guard를 먼저 지운 뒤 counter에서 dequeue한다. Counter의 동기 lane broadcast는 남은 customer에게 계속 전달하지만, 이미 떠나는 customer와 active check-in wait/checkout offer에는 `QueueChanged` StateTree event를 보내지 않는다. Check-in wait 시작은 idempotent하여 StateTree reselect가 기존 timeout을 다시 시작하지 않는다. Knockdown soft pause는 StateTree reselect/exit가 아니며 queue, facility와 checkout cleanup을 호출하지 않는다.
 
 ## Full Routine Flow
 
@@ -231,7 +236,7 @@ animation을 사용하는 논리 행동은 다음 순서를 사용한다.
 7. Bath면 발바닥 approach point에 같은 capsule 높이 변환을 적용해 복귀
 8. slot release
 
-후보가 하나면 random 호출 없이 그 montage를 사용하고 후보가 없거나 재생할 수 없으면 Task가 실패한다. Loop Task는 실행 중 후보를 다시 선택하지 않는다. StateTree interruption은 token owner의 montage만 blend-out하고 session cleanup을 실행한다. animation이 없는 상태는 기존 timer-only activity를 사용할 수 있다.
+후보가 하나면 random 호출 없이 그 montage를 사용하고 후보가 없거나 재생할 수 없으면 Task가 실패한다. Loop Task는 정상 실행중 후보를 다시 선택하지 않는다. 정상 StateTree exit은 token owner의 montage를 blend-out하고 session cleanup을 실행한다. Knockdown soft interruption은 cleanup 없이 playback을 중지하고 기립 후 후보를 다시 선택해 local action을 처음부터 재시작한다. animation이 없는 상태는 기존 timer-only activity를 사용할 수 있다.
 
 ## Bath Snap Collision Policy
 
@@ -241,7 +246,7 @@ Bath ActionPoint와 ApproachPoint는 reservation-time cached 발바닥 transform
 
 Snap 중 capsule/Actor collision enabled 상태와 response는 변경하지 않는다. 요구사항은 placement 검사 무시이며 고객을 facility 사용 전체 동안 ghost actor로 바꾸지 않는다. movement는 기존처럼 `MOVE_None`으로 유지하므로 사용 중 CharacterMovement가 위치를 수정하지 않는다.
 
-ActionPoint에서 나올 때도 cached ApproachPoint로 unswept teleport하고 저장했던 movement mode를 복원한다. invalid owner/cache/component 또는 transform 적용 자체 실패만 technical failure다. release, StateTree interruption, technical abort와 EndPlay cleanup은 같은 return/restore 경로를 사용하며 반복 호출에 안전해야 한다.
+ActionPoint에서 나올 때도 cached ApproachPoint로 unswept teleport하고 저장했던 movement mode를 복원한다. invalid owner/cache/component 또는 transform 적용 자체 실패만 technical failure다. release, normal StateTree exit, technical abort와 EndPlay cleanup은 같은 return/restore 경로를 사용한다. Knockdown은 이 cleanup 경로를 사용하지 않고 reservation을 유지한 채 ragdoll 최종 위치에서 ApproachPoint로 다시 이동한다.
 
 ## Technical Abort
 
@@ -268,6 +273,7 @@ Check-in 외 gameplay timeout은 두지 않는다.
 - Customer -> Interaction
 - Customer -> Economy
 - Customer -> Towel
+- Customer -> Combat health/damage public 계약
 - Customer -> UE 5.8 GameplayStateTree/AI/Navigation
 - Customer montage playback -> Engine Animation/AnimInstance
 - Customer는 UI concrete class에 의존하지 않는다.
@@ -290,3 +296,4 @@ Check-in 외 gameplay timeout은 두지 않는다.
 - clean towel shortage가 authorable wait 뒤 routine을 계속하고 satisfaction penalty를 한 번만 적용하는지 확인한다.
 - used bin full이 customer를 막지 않고 individual overflow/PendingSpill로 token을 보존하는지 확인한다.
 - customer StateTree exit/EndPlay에서 towel token owner가 중복되거나 사라지지 않는지 확인한다.
+- knockdown soft pause가 StateTree `ExitState()`를 발생시키지 않고 session timer/자원/예약을 보존하는지 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)의 수용 기준으로 확인한다.
