@@ -2,11 +2,11 @@
 
 ## Implementation Status
 
-이 문서는 단일 physical carry 계약을 사용하는 몽키스패너, 범용 LMB 장비 사용, 카메라 기준 근접 피격과 공용 체력의 구현 target을 정의한다. 현재 Source에는 해당 Combat 타입과 LMB 범용 장비 사용 계약이 없으며, 다음 C++ 구현 단계의 대상이다.
+이 문서는 단일 physical carry 계약을 사용하는 몽키스패너, 범용 LMB 장비 사용, 카메라 기준 근접 피격과 공용 체력의 현재 native 구현을 정의한다.
 
 고객 전용 래그돌, 기립과 루틴 재시작은 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)가 소유한다.
 
-## Target Source Scope
+## Source Scope
 
 ```text
 Source/BathhouseSim/Public/Combat/
@@ -103,7 +103,7 @@ LMB `Started`가 공격을 한 번 시작한다. 공격중 추가 Started와 Hol
 - instigator/causer
 - damage amount
 - camera-based origin, normalized direction
-- impulse strength와 optional vertical impulse
+- 질량과 무관한 velocity-change impulse strength와 optional vertical impulse
 
 `UHealthComponent`는 `MaxHealth`, `CurrentHealth`, active/depleted guard와 health/depleted delegate를 소유한다. 음수 피해, 중복 depleted broadcast와 max를 넘는 회복을 허용하지 않는다.
 

@@ -9,6 +9,7 @@
 class IPlayerInteractable;
 class UCameraComponent;
 class UPlayerCarryComponent;
+class UPlayerEquipmentUseComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInteractionQueryChanged, const FPlayerInteractionQuery&, Query);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnInteractionAttemptFinishedNative, const FPlayerInteractionResult&);
@@ -26,6 +27,7 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void Configure(UCameraComponent* InCamera, UPlayerCarryComponent* InCarryComponent);
+	void ConfigureEquipmentUse(UPlayerEquipmentUseComponent* InEquipmentUseComponent);
 	void SetInteractionSuppressed(bool bSuppressed);
 	bool IsInteractionSuppressed() const { return bInteractionSuppressed; }
 
@@ -51,6 +53,8 @@ public:
 
 	void RefreshInteractionQuery();
 	void ClearInteractionQuery();
+	bool GetCurrentFocusHit(FHitResult& OutHit) const;
+	FPlayerInteractionResult ReportExternalInteractionAttempt(const FPlayerInteractionResult& Result);
 
 	UPROPERTY(BlueprintAssignable, Category = "Interaction")
 	FOnInteractionQueryChanged OnInteractionQueryChanged;
@@ -70,6 +74,7 @@ private:
 	friend class FBathhouseComputerSessionTest;
 
 	bool BuildInteraction(FPlayerInteractionContext& OutContext, IPlayerInteractable*& OutInteractable, UObject*& OutTargetObject) const;
+	bool TraceFocus(FHitResult& OutHit) const;
 	FPlayerInteractionResult FinishInteractionAttempt(const FPlayerInteractionResult& Result);
 	void TickActiveHold(float DeltaTime);
 	void CancelActiveHold(
@@ -84,6 +89,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UPlayerCarryComponent> CarryComponent = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPlayerEquipmentUseComponent> EquipmentUseComponent = nullptr;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UObject> CurrentTarget = nullptr;

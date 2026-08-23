@@ -379,18 +379,12 @@ bool FBathhouseComputerSessionTest::RunTest(const FString& Parameters)
 	FPlayerInteractionContext SuppressionContext;
 	SuppressionContext.Interactor = SuppressionPawn;
 	SuppressionContext.CarryComponent = SuppressionCarry;
-	FText HoldFailure;
-	TestTrue(TEXT("Suppression setup begins a cleaning hold"),
-		SuppressionStain->BeginHoldInteraction(SuppressionContext, HoldFailure));
-	SuppressionStain->UpdateHoldInteraction(SuppressionContext, 0.5f);
 	SuppressionInteraction->ActiveHoldTarget = SuppressionStain;
 	SuppressionInteraction->ActiveHoldContext = SuppressionContext;
-	SuppressionInteraction->ActiveHoldProgress = SuppressionStain->GetCleaningProgress();
+	SuppressionInteraction->ActiveHoldProgress = 0.5f;
 	SuppressionInteraction->bPrimaryInputHeld = true;
 	SuppressionInteraction->CurrentTarget = SuppressionStain;
 	SuppressionInteraction->CurrentQuery = SuppressionStain->QueryInteraction(SuppressionContext);
-	UBathhouseCleaningCancelProbe* CancelProbe = NewObject<UBathhouseCleaningCancelProbe>();
-	CancelProbe->Bind(SuppressionStain);
 	UBathhouseInteractionQueryProbe* QueryProbe = NewObject<UBathhouseInteractionQueryProbe>();
 	QueryProbe->Bind(SuppressionInteraction);
 	int32 SuppressedAttemptCount = 0;
@@ -398,7 +392,6 @@ bool FBathhouseComputerSessionTest::RunTest(const FString& Parameters)
 		[&SuppressedAttemptCount](const FPlayerInteractionResult&) { ++SuppressedAttemptCount; });
 	SuppressionInteraction->SetInteractionSuppressed(true);
 	SuppressionInteraction->SetInteractionSuppressed(true);
-	TestEqual(TEXT("Suppression cancels the active hold exactly once"), CancelProbe->CancelCount, 1);
 	TestFalse(TEXT("Suppression clears the active hold"), SuppressionInteraction->IsPrimaryHoldActive());
 	TestFalse(TEXT("Suppression commits one empty query"), SuppressionInteraction->GetCurrentInteractionQuery().bVisible);
 	TestEqual(TEXT("Suppression broadcasts the empty query exactly once"), QueryProbe->BroadcastCount, 1);
@@ -418,7 +411,6 @@ bool FBathhouseComputerSessionTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Repeated suppression release does not refresh again"),
 		QueryProbe->BroadcastCount, QueryBroadcastCountAfterRefresh);
 	QueryProbe->Unbind();
-	CancelProbe->Unbind();
 
 	return true;
 }

@@ -3,6 +3,7 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Interaction/PlayerCarryComponent.h"
+#include "Interaction/PlayerEquipmentUseComponent.h"
 #include "Interaction/PlayerInteractable.h"
 
 UPlayerInteractionComponent::UPlayerInteractionComponent()
@@ -25,6 +26,7 @@ void UPlayerInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
 	OnInteractionAttemptFinishedNative.Clear();
 	Camera = nullptr;
 	CarryComponent = nullptr;
+	EquipmentUseComponent = nullptr;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -81,6 +83,12 @@ void UPlayerInteractionComponent::Configure(UCameraComponent* InCamera, UPlayerC
 	RefreshInteractionQuery();
 }
 
+void UPlayerInteractionComponent::ConfigureEquipmentUse(UPlayerEquipmentUseComponent* InEquipmentUseComponent)
+{
+	EquipmentUseComponent = InEquipmentUseComponent;
+	RefreshInteractionQuery();
+}
+
 void UPlayerInteractionComponent::SetInteractionSuppressed(const bool bSuppressed)
 {
 	if (bInteractionSuppressed == bSuppressed)
@@ -91,6 +99,10 @@ void UPlayerInteractionComponent::SetInteractionSuppressed(const bool bSuppresse
 	bInteractionSuppressed = bSuppressed;
 	if (bInteractionSuppressed)
 	{
+		if (EquipmentUseComponent)
+		{
+			EquipmentUseComponent->CancelEquipmentUse();
+		}
 		if (ActiveHoldTarget)
 		{
 			CancelActiveHold(false, FText::GetEmpty(), false);
@@ -256,16 +268,18 @@ void UPlayerInteractionComponent::RefreshInteractionQuery()
 	FPlayerInteractionContext Context;
 	IPlayerInteractable* Interactable = nullptr;
 	UObject* TargetObject = nullptr;
-	if (!BuildInteraction(Context, Interactable, TargetObject) || !Interactable)
+	FPlayerInteractionQuery Query;
+	if (BuildInteraction(Context, Interactable, TargetObject) && Interactable)
 	{
-		ClearInteractionQuery();
-		return;
+		Query = Interactable->QueryInteraction(Context);
+		if (TargetObject == ActiveHoldTarget)
+		{
+			Query.HoldProgress = ActiveHoldProgress;
+		}
 	}
-
-	FPlayerInteractionQuery Query = Interactable->QueryInteraction(Context);
-	if (TargetObject == ActiveHoldTarget)
+	if (EquipmentUseComponent)
 	{
-		Query.HoldProgress = ActiveHoldProgress;
+		Query = EquipmentUseComponent->MergeEquipmentQuery(Query);
 	}
 	CommitQuery(TargetObject, Query);
 }
@@ -282,16 +296,8 @@ bool UPlayerInteractionComponent::BuildInteraction(
 {
 	OutInteractable = nullptr;
 	OutTargetObject = nullptr;
-	if (bInteractionSuppressed || !Camera || !GetWorld() || !GetOwner())
-	{
-		return false;
-	}
-
-	const FVector Start = Camera->GetComponentLocation();
-	const FVector End = Start + Camera->GetForwardVector() * TraceDistance;
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PlayerInteraction), true, GetOwner());
 	FHitResult Hit;
-	if (!GetWorld()->LineTraceSingleByChannel(Hit, Start, End, TraceChannel, QueryParams))
+	if (!TraceFocus(Hit))
 	{
 		return false;
 	}
@@ -314,6 +320,30 @@ bool UPlayerInteractionComponent::BuildInteraction(
 	OutContext.HitComponent = Hit.GetComponent();
 	OutContext.HitResult = Hit;
 	return OutInteractable != nullptr;
+}
+
+bool UPlayerInteractionComponent::TraceFocus(FHitResult& OutHit) const
+{
+	OutHit = FHitResult();
+	if (bInteractionSuppressed || !Camera || !GetWorld() || !GetOwner())
+	{
+		return false;
+	}
+	const FVector Start = Camera->GetComponentLocation();
+	const FVector End = Start + Camera->GetForwardVector() * TraceDistance;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PlayerInteraction), true, GetOwner());
+	return GetWorld()->LineTraceSingleByChannel(OutHit, Start, End, TraceChannel, QueryParams);
+}
+
+bool UPlayerInteractionComponent::GetCurrentFocusHit(FHitResult& OutHit) const
+{
+	return TraceFocus(OutHit);
+}
+
+FPlayerInteractionResult UPlayerInteractionComponent::ReportExternalInteractionAttempt(
+	const FPlayerInteractionResult& Result)
+{
+	return FinishInteractionAttempt(Result);
 }
 
 FPlayerInteractionResult UPlayerInteractionComponent::FinishInteractionAttempt(const FPlayerInteractionResult& Result)

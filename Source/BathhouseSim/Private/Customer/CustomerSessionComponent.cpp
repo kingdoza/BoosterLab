@@ -232,6 +232,8 @@ void UCustomerSessionComponent::CancelCheckInWait()
 	{
 		World->GetTimerManager().ClearTimer(CheckInTimeoutHandle);
 	}
+	bPausedCheckInTimer = false;
+	PausedCheckInRemainingSeconds = 0.0f;
 }
 
 bool UCustomerSessionComponent::TryReserveFacility(const EBathhouseFacilityType FacilityType, const bool bExcludeLastBath)
@@ -316,6 +318,7 @@ bool UCustomerSessionComponent::SnapCurrentFacility(const ECustomerFacilitySnapT
 
 void UCustomerSessionComponent::ReleaseCurrentFacility()
 {
+	bFacilityUseSuspendedForKnockdown = false;
 	if (TowelUseHandle.HasToken()
 		&& TowelUseHandle.bUsed
 		&& Cast<AUsedTowelBinActor>(CurrentFacilityActor))
@@ -575,6 +578,8 @@ void UCustomerSessionComponent::CancelWaitingForCleanTowel()
 	}
 	bWaitingForCleanTowel = false;
 	TowelWaitStack = nullptr;
+	bPausedTowelWaitTimer = false;
+	PausedTowelWaitRemainingSeconds = 0.0f;
 }
 
 bool UCustomerSessionComponent::MarkTowelUsed()
@@ -699,9 +704,147 @@ bool UCustomerSessionComponent::StartBathStay()
 
 float UCustomerSessionComponent::GetRemainingBathStaySeconds() const
 {
+	if (bRoutineTimersPaused && bPausedBathStayTimer)
+	{
+		return PausedBathStayRemainingSeconds;
+	}
 	return bBathStayStarted && !bBathStayExpired && GetWorld()
 		? FMath::Max(0.0, BathStayEndTime - GetWorld()->GetTimeSeconds())
 		: 0.0f;
+}
+
+void UCustomerSessionComponent::PauseRoutineTimers()
+{
+	if (bRoutineTimersPaused || !GetWorld())
+	{
+		return;
+	}
+	bRoutineTimersPaused = true;
+	FTimerManager& Timers = GetWorld()->GetTimerManager();
+	auto CaptureAndClear = [&Timers](FTimerHandle& Handle, bool& bHadTimer, float& Remaining)
+	{
+		bHadTimer = Timers.IsTimerActive(Handle);
+		Remaining = bHadTimer ? FMath::Max(0.0f, Timers.GetTimerRemaining(Handle)) : 0.0f;
+		if (bHadTimer)
+		{
+			Timers.ClearTimer(Handle);
+		}
+	};
+	CaptureAndClear(CheckInTimeoutHandle, bPausedCheckInTimer, PausedCheckInRemainingSeconds);
+	CaptureAndClear(BathStayTimerHandle, bPausedBathStayTimer, PausedBathStayRemainingSeconds);
+	CaptureAndClear(TowelWaitTimerHandle, bPausedTowelWaitTimer, PausedTowelWaitRemainingSeconds);
+}
+
+void UCustomerSessionComponent::ResumeRoutineTimers()
+{
+	if (!bRoutineTimersPaused || !GetWorld())
+	{
+		return;
+	}
+	bRoutineTimersPaused = false;
+	FTimerManager& Timers = GetWorld()->GetTimerManager();
+	if (bPausedCheckInTimer && bWaitingForCheckIn && !bCheckInTerminalCommitted)
+	{
+		Timers.SetTimer(
+			CheckInTimeoutHandle,
+			this,
+			&UCustomerSessionComponent::HandleCheckInTimeout,
+			FMath::Max(0.01f, PausedCheckInRemainingSeconds),
+			false);
+	}
+	if (bPausedBathStayTimer && bBathStayStarted && !bBathStayExpired)
+	{
+		const float Remaining = FMath::Max(0.01f, PausedBathStayRemainingSeconds);
+		BathStayEndTime = GetWorld()->GetTimeSeconds() + Remaining;
+		Timers.SetTimer(BathStayTimerHandle, this, &UCustomerSessionComponent::HandleBathStayExpired, Remaining, false);
+	}
+	if (bPausedTowelWaitTimer && bWaitingForCleanTowel && !TowelUseHandle.HasToken())
+	{
+		Timers.SetTimer(
+			TowelWaitTimerHandle,
+			this,
+			&UCustomerSessionComponent::HandleTowelWaitExpired,
+			FMath::Max(0.01f, PausedTowelWaitRemainingSeconds),
+			false);
+	}
+	bPausedCheckInTimer = false;
+	bPausedBathStayTimer = false;
+	bPausedTowelWaitTimer = false;
+	PausedCheckInRemainingSeconds = 0.0f;
+	PausedBathStayRemainingSeconds = 0.0f;
+	PausedTowelWaitRemainingSeconds = 0.0f;
+}
+
+bool UCustomerSessionComponent::SuspendCurrentFacilityUseForKnockdown()
+{
+	if (bFacilityUseSuspendedForKnockdown)
+	{
+		return true;
+	}
+	if (!CurrentFacilitySlot)
+	{
+		return false;
+	}
+	if (CurrentFacilitySlot->GetSlotState() != EBathhouseFacilitySlotState::Occupied)
+	{
+		return false;
+	}
+	if (!CurrentFacilitySlot->EndUse(GetOwner()))
+	{
+		return false;
+	}
+	if (bSnappedToFacilityActionPoint)
+	{
+		if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+		{
+			RestoreSavedMovementMode(*Character);
+		}
+		bSnappedToFacilityActionPoint = false;
+	}
+	bFacilityUseSuspendedForKnockdown = true;
+	return true;
+}
+
+bool UCustomerSessionComponent::ResumeCurrentFacilityUseAfterKnockdown()
+{
+	if (!bFacilityUseSuspendedForKnockdown)
+	{
+		return CurrentFacilitySlot != nullptr;
+	}
+	if (!CurrentFacilitySlot)
+	{
+		return false;
+	}
+	const bool bIsBath = CurrentFacilityActor
+		&& CurrentFacilityActor->GetFacilityType() == EBathhouseFacilityType::Bath;
+	if (bIsBath && !SnapCurrentFacility(ECustomerFacilitySnapTarget::ActionPoint))
+	{
+		return false;
+	}
+	if (!BeginUseCurrentFacility())
+	{
+		if (bIsBath)
+		{
+			SnapCurrentFacility(ECustomerFacilitySnapTarget::ApproachPoint);
+		}
+		return false;
+	}
+	bFacilityUseSuspendedForKnockdown = false;
+	return true;
+}
+
+float UCustomerSessionComponent::RestartCurrentActivity(const EBathhouseCustomerActivity Activity) const
+{
+	if (!RoutineDefinition || CurrentActivity != Activity)
+	{
+		return -1.0f;
+	}
+	float Duration = FMath::Max(0.0f, RoutineDefinition->GetActivityDuration(Activity));
+	if (Activity == EBathhouseCustomerActivity::BathDwell && bBathStayStarted)
+	{
+		Duration = FMath::Min(Duration, GetRemainingBathStaySeconds());
+	}
+	return Duration;
 }
 
 bool UCustomerSessionComponent::BeginCheckoutOffer()

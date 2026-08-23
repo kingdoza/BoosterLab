@@ -8,6 +8,8 @@
 
 class UCameraComponent;
 class UPlayerComputerUseComponent;
+class UPlayerEquipmentUseComponent;
+class UHeldEquipmentMotionComponent;
 class UFirstPersonCameraShakeComponent;
 class UFirstPersonMovementComponent;
 class UInputAction;
@@ -45,6 +47,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Computer")
 	UPlayerComputerUseComponent* GetPlayerComputerUse() const { return PlayerComputerUse; }
 
+	UFUNCTION(BlueprintPure, Category = "Interaction")
+	UPlayerEquipmentUseComponent* GetPlayerEquipmentUse() const { return PlayerEquipmentUse; }
+
 protected:
 	void MoveInput(const FInputActionValue& Value);
 	void LookInput(const FInputActionValue& Value);
@@ -54,6 +59,9 @@ protected:
 	void InteractEndInput();
 	void SecondaryInteractInput();
 	void DropCarryInput();
+	void PrimaryUseStartInput();
+	void PrimaryUseTriggeredInput();
+	void PrimaryUseEndInput();
 	void ComputerClickStartInput();
 	void ComputerClickEndInput();
 
@@ -94,6 +102,12 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Computer", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UPlayerComputerUseComponent> PlayerComputerUse;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UHeldEquipmentMotionComponent> HeldEquipmentMotion;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UPlayerEquipmentUseComponent> PlayerEquipmentUse;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> MoveAction;
 
@@ -116,6 +130,9 @@ protected:
 	TObjectPtr<UInputAction> DropCarryAction;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> PrimaryUseAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (DeprecatedProperty, DeprecationMessage = "Use PrimaryUseAction. This property remains as the IA_ComputerClick migration fallback."))
 	TObjectPtr<UInputAction> ComputerClickAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
@@ -129,7 +146,16 @@ protected:
 
 private:
 	friend class FBathhouseComputerSessionTest;
+	friend class FBathhouseEquipmentUseRoutingTest;
+
+	enum class EPrimaryUsePressOwner : uint8
+	{
+		None,
+		Computer,
+		Equipment
+	};
 
 	bool bComputerOwnsInteractPress = false;
 	bool bComputerOwnsPointerPress = false;
+	EPrimaryUsePressOwner PrimaryUsePressOwner = EPrimaryUsePressOwner::None;
 };

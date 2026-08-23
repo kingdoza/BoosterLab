@@ -47,6 +47,15 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> InteractionProgressBar = nullptr;
 
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> EquipmentActionNameText = nullptr;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> EquipmentFailureReasonText = nullptr;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UProgressBar> EquipmentProgressBar = nullptr;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction Prompt", meta = (ClampMin = "0.1", UIMin = "0.1"))
 	float FailureDisplayDurationSeconds = 1.5f;
 
@@ -67,6 +76,15 @@ protected:
 		bool bHoldVisible,
 		float HoldProgress);
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction Prompt")
+	void OnEquipmentUsePromptChanged(
+		bool bVisible,
+		bool bCanUse,
+		const FText& ActionName,
+		const FText& FailureReason,
+		bool bHoldVisible,
+		float Progress);
+
 private:
 	friend class FBathhouseInteractionPromptPresentationTest;
 
@@ -79,6 +97,7 @@ private:
 	void HandleInteractionAttemptFinished(const FPlayerInteractionResult& Result);
 	void HandlePrimaryTransientFailureExpired();
 	void HandleSecondaryTransientFailureExpired();
+	void HandleEquipmentTransientFailureExpired();
 	void BindInteraction();
 	void UnbindInteraction();
 	void PresentQuery(const FPlayerInteractionQuery& Query, bool bForceRefresh = false);
@@ -98,9 +117,13 @@ private:
 	UPROPERTY(Transient)
 	FText SecondaryTransientFailureReason;
 
+	UPROPERTY(Transient)
+	FText EquipmentTransientFailureReason;
+
 	FDelegateHandle InteractionResultHandle;
 	FTimerHandle PrimaryFailureTimerHandle;
 	FTimerHandle SecondaryFailureTimerHandle;
+	FTimerHandle EquipmentFailureTimerHandle;
 	bool bIsQueryBound = false;
 	bool bHasPresentedQuery = false;
 };

@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-물걸레를 이용한 E hold 물 얼룩 제거, bath/dressing floor의 무작위 얼룩 생성과 spawn별 seeded material/local yaw/XY scale variation Source는 구현되었다. 청소를 범용 LMB equipment Hold로 이관하고 target 유무와 관계없이 mopping state/motion을 유지하는 확장은 다음 구현 target이다.
+물걸레의 범용 LMB equipment Hold 청소, target 유무와 독립된 mopping state/motion, bath/dressing floor의 무작위 얼룩 생성과 spawn별 seeded material/local yaw/XY scale variation이 Source에 구현되어 있다. Water Stain은 E hold를 노출하지 않는다.
 
 이번 범위는 물 얼룩과 물걸레 하나만 구현한다. 다른 얼룩·청소 도구, 물통, 물걸레 세척, 내구도와 소모품은 제외한다.
 

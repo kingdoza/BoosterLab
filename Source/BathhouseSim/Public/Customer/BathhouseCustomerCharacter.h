@@ -11,6 +11,9 @@ class ABathhouseCustomerCharacter;
 class UCustomerMontagePlaybackComponent;
 class UCustomerRoutineDefinition;
 class UCustomerSessionComponent;
+class UCustomerKnockdownComponent;
+class UCustomerRoutineInterruptionComponent;
+class UHealthComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBathhouseCustomerFinished, ABathhouseCustomerCharacter*, Customer, EBathhouseCustomerDepartureReason, Reason);
 
@@ -40,6 +43,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Customer")
 	UCustomerMontagePlaybackComponent* GetCustomerMontagePlayback() const { return CustomerMontagePlayback; }
 
+	UFUNCTION(BlueprintPure, Category = "Customer|Combat")
+	UHealthComponent* GetHealth() const { return Health; }
+
+	UFUNCTION(BlueprintPure, Category = "Customer|Recovery")
+	UCustomerKnockdownComponent* GetCustomerKnockdown() const { return CustomerKnockdown; }
+
+	UFUNCTION(BlueprintPure, Category = "Customer|Recovery")
+	UCustomerRoutineInterruptionComponent* GetCustomerRoutineInterruption() const { return CustomerRoutineInterruption; }
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Customer|Presentation")
 	void OnActivityStarted(EBathhouseCustomerActivity ActivityType);
 
@@ -68,6 +80,15 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Customer", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCustomerMontagePlaybackComponent> CustomerMontagePlayback;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Customer|Combat", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UHealthComponent> Health;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Customer|Recovery", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCustomerKnockdownComponent> CustomerKnockdown;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Customer|Recovery", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCustomerRoutineInterruptionComponent> CustomerRoutineInterruption;
 
 	bool bFinishBroadcast = false;
 };

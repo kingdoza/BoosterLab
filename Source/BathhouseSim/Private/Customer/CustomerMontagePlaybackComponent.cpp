@@ -111,6 +111,11 @@ bool UCustomerMontagePlaybackComponent::IsPlaybackTokenCurrent(const uint64 Play
 		&& CurrentResult == ECustomerMontagePlaybackResult::Playing;
 }
 
+void UCustomerMontagePlaybackComponent::InterruptActivePlayback(const float BlendOutTime)
+{
+	InterruptCurrentPlayback(BlendOutTime);
+}
+
 uint64 UCustomerMontagePlaybackComponent::AllocatePlaybackToken()
 {
 	uint64 Token = NextPlaybackToken++;

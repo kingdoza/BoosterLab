@@ -28,6 +28,7 @@ public:
 	bool StopPlayback(uint64 PlaybackToken, float BlendOutTime);
 	ECustomerMontagePlaybackResult GetPlaybackResult(uint64 PlaybackToken) const;
 	bool IsPlaybackTokenCurrent(uint64 PlaybackToken) const;
+	void InterruptActivePlayback(float BlendOutTime);
 
 private:
 	friend class FBathhouseCustomerMontageTest;

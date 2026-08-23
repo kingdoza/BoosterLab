@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-22(KST) 범용 LMB 장비 사용, Combat·Customer Recovery 구현 target 기준
-- 상태: Cleaning/Towel/Customer/Computer 기존 native 구현을 보존하며 Combat, LMB mop 사용과 customer soft interruption/restart는 아키텍처 확정·C++ 구현 대기
+- 기준일: 2026-08-22(KST) 범용 LMB 장비 사용, Combat·Customer Recovery native 구현 기준
+- 상태: Cleaning/Towel/Customer/Computer 기존 native 구현을 보존하며 Combat, LMB mop 사용과 customer soft interruption/restart까지 Source와 native automation 구현 완료
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -24,7 +24,6 @@
   - Cleaning
   - Towel
   - Computer
-- 구현 target 하위 시스템:
   - Combat
   - Customer Recovery
 - `Content`는 Blueprint 참조 검증 범위로만 다룬다. C++ 시스템 책임의 정본은 Source 하위 문서에 둔다.
@@ -38,7 +37,7 @@
 - [FacilitySystem.md](Architecture/FacilitySystem.md): 다중 facility slot과 분리된 check-in/checkout queue
 - [EconomySystem.md](Architecture/EconomySystem.md): PlayerState wallet과 일회성 cash 획득
 - [CustomerSystem.md](Architecture/CustomerSystem.md): UE 5.8 StateTree customer routine, session과 cleanup
-- [UISystem.md](Architecture/UISystem.md): native Widget/Widget Blueprint 경계와 interaction prompt target
+- [UISystem.md](Architecture/UISystem.md): native Widget/Widget Blueprint 경계와 E/F/LMB interaction prompt 계약
 - [CleaningSystem.md](Architecture/CleaningSystem.md): water stain spawn, wet mop hold cleaning과 presentation
 - [TowelSystem.md](Architecture/TowelSystem.md): towel circulation, atomic transfer, overflow와 processing machine
 - [TowelPresentationSystem.md](Architecture/TowelPresentationSystem.md): towel quantity mesh profile과 Stack/Pile/Slot world presentation
@@ -61,7 +60,7 @@ Source/BathhouseSim/
     UI/
     Cleaning/
     Towel/
-    Combat/            # target
+    Combat/
   Private/
     Character/
     Camera/
@@ -72,7 +71,7 @@ Source/BathhouseSim/
     UI/
     Cleaning/
     Towel/
-    Combat/            # target
+    Combat/
     Tests/
 ```
 
@@ -184,11 +183,11 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 
 ## Implementation Boundary
 
-- 현재 Source에는 Core, Character, Camera, Interaction, Facility, Economy, Customer와 UI native class가 존재한다.
+- 현재 Source에는 Core, Character, Camera, Interaction, Facility, Economy, Customer, UI, Cleaning, Towel, Computer와 Combat native class가 존재한다.
 - `ST_CustomerRoutine`, Data Asset, Blueprint facility/key/customer/cash/UI와 Level 배치는 C++ 코드 리뷰 승인 후 Unreal 단계 target이다.
 - 현재 Source는 customer-owned montage playback component, Bath action/approach snap과 두 native montage StateTree Task까지 구현한다. AnimNotify, Motion Warping, 신발·의상 전환은 포함하지 않는다.
 - Cleaning/Towel Source, secondary/drop input, native prompt 확장과 customer towel StateTree Task/Condition은 구현되었다. InputAction/IMC, WBP hierarchy, Blueprint actor, facility 배치와 `ST_CustomerRoutine` asset 연결은 Unreal 후속 단계다.
 - Towel Stack/Pile/Slot native presentation은 collision-free `TowelPresentationVisual` reflected 계약으로 구현되었다. 기존 `BP_Washer`/`BP_Dryer`의 inherited Pile authoring과 profile 지정은 Editor 후속 단계이며 신규 machine이나 drying-rack gameplay actor는 만들지 않는다.
 - per-item `HeldTransform`, seeded water-stain visual variation, Stack/Pile/Slot Editor preview와 collision-independent Bath snap은 Source와 native automation까지 구현되었다. `HeldTransform`/stain Blueprint authoring, inherited towel preview와 blocked Bath Editor 통합 검증은 후속 단계다.
 - `ABathhouseComputerActor`, `UPlayerComputerUseComponent`, `UComputerSampleScreenWidget`, interaction suppression과 click input은 Source와 focused automation까지 구현되었다. Computer Blueprint/WBP, click InputAction/IMC assignment와 level 배치는 Editor 후속 단계다.
-- Combat Source, `PrimaryUseAction` 호환 이관, LMB mop use, equipment prompt row, customer knockdown/soft interruption과 restartable MoveTo는 구현 대기 target이다. 구현 단계에서 Source와 automation을 완성하고, `IA_PrimaryUse`, `IMC_FirstPerson`, wrench/customer Blueprint, `WBP_InteractionPrompt`와 `ST_CustomerRoutine` 교체는 코드 리뷰 후 Editor 단계로 인계한다.
+- Combat Source, `PrimaryUseAction` 호환 이관, LMB mop use, equipment prompt row, customer knockdown/soft interruption과 restartable MoveTo는 Source와 native automation까지 구현되었다. `IA_PrimaryUse`, `IMC_FirstPerson`, wrench/customer Blueprint, `WBP_InteractionPrompt`와 `ST_CustomerRoutine` 교체는 코드 리뷰 후 Editor 단계로 인계한다.

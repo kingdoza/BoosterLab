@@ -4,7 +4,7 @@
 
 UI System은 BathhouseSim의 native C++ Widget과 Widget Blueprint 사이의 공통 책임 경계를 정의한다.
 
-native UI Source는 primary/secondary action, 의도별 실패와 hold progress를 같은 interaction prompt widget에서 처리한다. world-space computer sample screen의 native base와 두 필수 BindWidget도 구현되어 있다. LMB equipment-use row·progress와 equipment intent failure 표시는 다음 구현 target이다.
+native UI Source는 primary/secondary/equipment action, 의도별 실패와 서로 독립적인 hold progress를 같은 interaction prompt widget에서 처리한다. world-space computer sample screen의 native base와 두 필수 BindWidget도 구현되어 있다. equipment용 필수 BindWidget 세 개의 실제 WBP 구성은 Editor 단계에 남아 있다.
 
 ```text
 Source/BathhouseSim/Public/UI/
@@ -114,7 +114,7 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 - query 실패 이유는 query가 유지되는 동안 지속 표시하고, 실행 실패와 대상 없음 결과는 기본 1.5초 동안 transient failure로 우선 표시한다.
 - `FailureDisplayDurationSeconds`는 `EditDefaultsOnly`, 최소 0.1초인 presentation authoring 값이다.
 - transient failure는 실패 result마다 timer를 재시작하며 성공 result, query 변경, context 해제, timer 만료와 widget destruct에서 지운다.
-- query가 없어도 transient failure가 있으면 root를 표시하고 target/action text는 비운다. root enabled 상태는 transient failure가 아니라 현재 visible primary/secondary 중 하나라도 실행 가능한지를 따른다.
+- query가 없어도 transient failure가 있으면 root를 표시하고 해당하지 않는 target/action text는 비운다. root enabled 상태는 transient failure가 아니라 현재 visible primary/secondary/equipment 중 하나라도 실행 가능한지를 따른다.
 - `PromptRoot`와 기존 primary bindings의 visibility/enabled/text, effective failure 우선순위와 timer는 C++이 갱신한다.
 - secondary row visibility/enabled/text, hold progress visibility/percent와 intent별 transient failure도 C++이 갱신한다.
 - equipment row visibility/enabled/text/progress와 equipment transient failure도 C++이 갱신한다. root enabled는 visible E/F/LMB 행동 중 하나라도 실행 가능한지로 판단한다.
@@ -154,7 +154,7 @@ Blueprint에서 동적으로 row를 생성하는 것은 표현 데이터 렌더�
 ## Dependencies
 
 - UI System은 필요한 gameplay domain의 public API에 의존할 수 있다.
-- 현재 interaction prompt UI와 equipment row target은 Interaction System에만 의존한다.
+- 현재 interaction prompt UI와 equipment row는 Interaction System에만 의존한다.
 - computer sample widget은 UMG에만 의존하고 gameplay domain mutation을 수행하지 않는다.
 - UI는 Cleaning/Towel concrete class를 판별하지 않고 확장된 Interaction query/result만 소비한다.
 - gameplay domain은 구체 Widget class에 의존하지 않는다. 필요하면 event, interface 또는 presentation data 경계를 사용한다.

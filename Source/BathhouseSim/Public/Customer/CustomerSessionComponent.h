@@ -69,6 +69,14 @@ public:
 	bool StartBathStay();
 	bool IsBathStayExpired() const { return bBathStayExpired; }
 	float GetRemainingBathStaySeconds() const;
+	void PauseRoutineTimers();
+	void ResumeRoutineTimers();
+	bool AreRoutineTimersPaused() const { return bRoutineTimersPaused; }
+
+	bool SuspendCurrentFacilityUseForKnockdown();
+	bool ResumeCurrentFacilityUseAfterKnockdown();
+	bool IsCurrentFacilityUseSuspendedForKnockdown() const { return bFacilityUseSuspendedForKnockdown; }
+	float RestartCurrentActivity(EBathhouseCustomerActivity Activity) const;
 
 	bool TryPlaceCheckoutKey();
 	bool TryCreateCashOffer(TSubclassOf<ABathhouseCashPaymentActor> CashClass);
@@ -183,6 +191,9 @@ private:
 	FTimerHandle CheckInTimeoutHandle;
 	FTimerHandle BathStayTimerHandle;
 	FTimerHandle TowelWaitTimerHandle;
+	float PausedCheckInRemainingSeconds = 0.0f;
+	float PausedBathStayRemainingSeconds = 0.0f;
+	float PausedTowelWaitRemainingSeconds = 0.0f;
 	FDelegateHandle FacilityAvailabilityHandle;
 	FDelegateHandle QueueChangedHandle;
 	FTransform CachedFacilityApproachTransform;
@@ -204,5 +215,10 @@ private:
 	bool bTowelShortagePenaltyCommitted = false;
 	bool bFinished = false;
 	bool bCleanupInProgress = false;
+	bool bRoutineTimersPaused = false;
+	bool bPausedCheckInTimer = false;
+	bool bPausedBathStayTimer = false;
+	bool bPausedTowelWaitTimer = false;
+	bool bFacilityUseSuspendedForKnockdown = false;
 	float Satisfaction = 100.0f;
 };

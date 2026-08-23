@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "Interaction/BathhouseKeyActor.h"
 #include "Interaction/PhysicalCarryable.h"
+#include "Interaction/PlayerEquipmentUseComponent.h"
 
 #define LOCTEXT_NAMESPACE "PlayerCarryComponent"
 
@@ -15,6 +16,10 @@ UPlayerCarryComponent::UPlayerCarryComponent()
 
 void UPlayerCarryComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (EquipmentUseComponent)
+	{
+		EquipmentUseComponent->CancelEquipmentUse();
+	}
 	AActor* PreviousHeldObject = HeldObject.Get();
 	if (ABathhouseKeyActor* HeldKey = Cast<ABathhouseKeyActor>(PreviousHeldObject))
 	{
@@ -27,9 +32,15 @@ void UPlayerCarryComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	HeldObject = nullptr;
 	HeldAnchor = nullptr;
+	EquipmentUseComponent = nullptr;
 	OnHeldKeyChanged.Clear();
 	OnHeldObjectChanged.Clear();
 	Super::EndPlay(EndPlayReason);
+}
+
+void UPlayerCarryComponent::ConfigureEquipmentUse(UPlayerEquipmentUseComponent* InEquipmentUse)
+{
+	EquipmentUseComponent = InEquipmentUse;
 }
 
 void UPlayerCarryComponent::ConfigureHeldAnchor(USceneComponent* InHeldAnchor)
@@ -99,6 +110,10 @@ FPlayerInteractionResult UPlayerCarryComponent::TryReleaseHeldEquipment(
 	const FVector& ViewOrigin,
 	const FVector& ThrowDirection)
 {
+	if (EquipmentUseComponent)
+	{
+		EquipmentUseComponent->CancelEquipmentUse();
+	}
 	if (bPhysicalDropCommitInProgress)
 	{
 		return FPlayerInteractionResult::Failed(
@@ -335,6 +350,10 @@ bool UPlayerCarryComponent::ResolvePhysicalDropLocation(
 
 void UPlayerCarryComponent::NotifyHeldActorEnding(AActor* Object)
 {
+	if (HeldObject == Object && EquipmentUseComponent)
+	{
+		EquipmentUseComponent->CancelEquipmentUse();
+	}
 	ClearHeldObject(Object);
 }
 

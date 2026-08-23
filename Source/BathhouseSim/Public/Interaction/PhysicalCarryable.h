@@ -14,7 +14,8 @@ enum class EPhysicalCarryKind : uint8
 	None,
 	Key,
 	WetMop,
-	TowelBasket
+	TowelBasket,
+	MonkeyWrench
 };
 
 UINTERFACE(MinimalAPI, meta = (CannotImplementInterfaceInBlueprint))

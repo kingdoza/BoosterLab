@@ -2,11 +2,11 @@
 
 ## Implementation Status
 
-이 문서는 customer health depleted 후 래그돌, 설정 시간 뒤 제자리 즉시 기립과 C++ 루틴 실행 계층의 soft interruption/restart target을 정의한다. 현재 Source와 `ST_CustomerRoutine`에는 해당 계약이 없으며, 다음 C++과 Editor 단계에서 구현한다.
+이 문서는 customer health depleted 후 래그돌, 설정 시간 뒤 제자리 즉시 기립과 C++ 루틴 실행 계층의 soft interruption/restart 구현을 정의한다. Source와 native automation은 구현되었고, `ST_CustomerRoutine`의 MoveTo 교체와 Blueprint physics authoring은 Editor 단계에 남아 있다.
 
 Soft interruption은 StateTree 종료, technical abort 또는 customer death가 아니다. [CustomerSystem.md](CustomerSystem.md)의 정상·timeout·technical cleanup과 구분한다.
 
-## Target Source Scope
+## Source Scope
 
 ```text
 Source/BathhouseSim/Public/Customer/
@@ -68,7 +68,7 @@ health가 0이 되면 `UCustomerKnockdownComponent`가 다음을 수행한다.
 3. AI movement, customer-owned montage와 CharacterMovement 중단
 4. capsule/mesh collision, movement mode와 mesh relative transform snapshot
 5. Skeletal Mesh ragdoll collision/physics 전환
-6. configured root bone physics body에 damage direction + vertical impulse 적용
+6. configured root bone physics body에 damage direction + vertical impulse를 질량과 무관한 velocity change로 적용
 7. authorable knockdown duration timer 시작
 
 기립 전 추가 damage와 impulse는 무시하고 recovery timer를 다시 시작하지 않는다.
@@ -136,6 +136,7 @@ Bath local dwell은 새로 시작하지만 total bath stay 잔여 시간을 넘�
 - knockdown중 request/tick을 중지
 - recovery 후 현재 destination을 다시 resolve하고 새 path request 시작
 - old request completion/callback이 새 request를 성공/실패로 변경하지 못하도록 request token guard
+- replacement에 의해 token이 superseded된 Task는 자신의 request와 local token을 정리하고 `Failed`로 기존 retry/cleanup 계약에 이관하며 무기한 `Running`하지 않음
 - navigation 실패는 기존 retry/technical-abort 계약으로 전달
 
 `ST_CustomerRoutine`에는 행동별 checkpoint state나 recovery transition을 추가하지 않고 기존 MoveTo Task만 동일 binding의 restartable native Task로 교체한다.
@@ -194,7 +195,7 @@ Blueprint는 health, recovery timer, physics state, session timer, reservation�
 ## Manual Review Points
 
 - nonlethal damage는 StateTree를 중단하지 않고 health 0만 knockdown을 한 번 시작하는지 확인한다.
-- root physics body에 카메라 방향 impulse가 적용되고 없으면 validation이 실패하는지 확인한다.
+- root physics body에 카메라 방향 impulse가 질량과 무관한 velocity change로 적용되고 body가 없으면 validation이 실패하는지 확인한다.
 - knockdown중 추가 damage/impulse와 timer reset이 없는지 확인한다.
 - final ragdoll XY에서 즉시 기립하고 configured ratio로 health를 회복하는지 확인한다.
 - check-in/bath/towel wait는 남은 시간을 재개하고 local activity/montage는 처음부터 재시작하는지 확인한다.

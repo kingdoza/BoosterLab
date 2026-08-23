@@ -10,6 +10,7 @@ class ABathhouseCashPaymentActor;
 class ABathhouseCustomerCharacter;
 class UAnimMontage;
 class UCustomerSessionComponent;
+class UAITask_MoveTo;
 
 namespace BathhouseCustomerMontageTasks
 {
@@ -221,6 +222,12 @@ struct FPlayCustomerMontageOnceTaskInstanceData
 	TObjectPtr<UAnimMontage> SelectedMontage = nullptr;
 
 	uint64 PlaybackToken = 0;
+	uint64 InterruptionSerial = 0;
+	uint64 RecoveryOperationToken = 0;
+	bool bRecoveringFacilityUse = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAITask_MoveTo> RecoveryMoveTask = nullptr;
 };
 
 USTRUCT(meta = (DisplayName = "Play Customer Montage Once", Category = "Bathhouse|Customer"))
@@ -271,6 +278,12 @@ struct FPlaySelectedMontageLoopForDurationTaskInstanceData
 
 	float RemainingDuration = 0.0f;
 	uint64 PlaybackToken = 0;
+	uint64 InterruptionSerial = 0;
+	uint64 RecoveryOperationToken = 0;
+	bool bRecoveringFacilityUse = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAITask_MoveTo> RecoveryMoveTask = nullptr;
 };
 
 USTRUCT(meta = (DisplayName = "Play Selected Montage Loop For Duration", Category = "Bathhouse|Customer"))
@@ -327,6 +340,12 @@ struct FCustomerActivityTaskInstanceData
 
 	float RemainingTime = 0.0f;
 	bool bCompleted = false;
+	bool bRecoveringFacilityUse = false;
+	uint64 InterruptionSerial = 0;
+	uint64 RecoveryOperationToken = 0;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAITask_MoveTo> RecoveryMoveTask = nullptr;
 };
 
 USTRUCT(meta = (DisplayName = "Timed Customer Activity", Category = "Bathhouse|Customer"))
@@ -339,6 +358,10 @@ struct BATHHOUSESIM_API FCustomerActivityTask : public FStateTreeTaskCommonBase
 	virtual EStateTreeRunStatus EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
 	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, float DeltaTime) const override;
 	virtual void ExitState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
+
+private:
+	static bool StartFacilityRecoveryMove(FInstanceDataType& Data);
+	static void CancelFacilityRecoveryMove(FInstanceDataType& Data);
 };
 
 USTRUCT()
@@ -373,6 +396,7 @@ struct FCustomerCheckoutOfferTaskInstanceData
 
 	float RetryRemaining = 0.0f;
 	bool bCompleted = false;
+	uint64 InterruptionSerial = 0;
 };
 
 USTRUCT(meta = (DisplayName = "Offer Checkout Key And Cash", Category = "Bathhouse|Customer"))
@@ -385,6 +409,56 @@ struct BATHHOUSESIM_API FCustomerCheckoutOfferTask : public FStateTreeTaskCommon
 	virtual EStateTreeRunStatus EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
 	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, float DeltaTime) const override;
 	virtual void ExitState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
+};
+
+USTRUCT()
+struct FCustomerRestartableMoveToTaskInstanceData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = Context)
+	TObjectPtr<ABathhouseCustomerCharacter> Customer = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = Input)
+	FVector Destination = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, Category = Parameter, meta = (ClampMin = "0.0"))
+	float AcceptanceRadius = 35.0f;
+
+	UPROPERTY(EditAnywhere, Category = Parameter)
+	bool bAllowPartialPath = true;
+
+	UPROPERTY(EditAnywhere, Category = Parameter)
+	bool bProjectGoalOnNavigation = true;
+
+	UPROPERTY(EditAnywhere, Category = Output)
+	bool bMoveSucceeded = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAITask_MoveTo> MoveTask = nullptr;
+
+	uint64 InterruptionSerial = 0;
+	uint64 OperationToken = 0;
+};
+
+USTRUCT(meta = (DisplayName = "Restartable Customer Move To", Category = "Bathhouse|Customer"))
+struct BATHHOUSESIM_API FCustomerRestartableMoveToTask : public FStateTreeTaskCommonBase
+{
+	GENERATED_BODY()
+
+	using FInstanceDataType = FCustomerRestartableMoveToTaskInstanceData;
+	FCustomerRestartableMoveToTask();
+	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+	virtual EStateTreeRunStatus EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
+	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, float DeltaTime) const override;
+	virtual void ExitState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
+
+private:
+	friend class FBathhouseCustomerRecoveryFacilityAndOperationTest;
+
+	static bool StartMove(FInstanceDataType& Data);
+	static void CancelMove(FInstanceDataType& Data);
+	static EStateTreeRunStatus InvalidateSupersededOperation(FInstanceDataType& Data);
 };
 
 USTRUCT()

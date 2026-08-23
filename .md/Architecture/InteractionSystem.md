@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`과 Computer focus suppression까지 Source에 구현되었다. monkey wrench carry, 범용 LMB equipment-use, held motion과 equipment prompt intent는 다음 구현 target이다.
+이 문서는 현재 구현된 primary/secondary/hold interaction intent, key/wet mop/towel basket/monkey wrench 단일 physical carry 계약과 공통 물리 드랍 트랜잭션을 정의한다. 아이템별 `HeldTransform`, Computer focus suppression, 범용 LMB equipment-use, held motion과 equipment prompt intent가 Source에 구현되어 있다.
 
 ## Source Scope
 
@@ -11,19 +11,19 @@ Source/BathhouseSim/Public/Interaction/
   InteractionTypes.h
   PlayerInteractable.h
   PhysicalCarryable.h
-  HeldEquipmentUsable.h              # target
+  HeldEquipmentUsable.h
   PlayerInteractionComponent.h
   PlayerCarryComponent.h
-  PlayerEquipmentUseComponent.h      # target
-  HeldEquipmentMotionComponent.h     # target
+  PlayerEquipmentUseComponent.h
+  HeldEquipmentMotionComponent.h
   BathhouseKeyActor.h
   BathhouseKeyHookActor.h
 
 Source/BathhouseSim/Private/Interaction/
   PlayerInteractionComponent.cpp
   PlayerCarryComponent.cpp
-  PlayerEquipmentUseComponent.cpp    # target
-  HeldEquipmentMotionComponent.cpp   # target
+  PlayerEquipmentUseComponent.cpp
+  HeldEquipmentMotionComponent.cpp
   BathhouseKeyActor.cpp
   BathhouseKeyHookActor.cpp
 
@@ -31,6 +31,7 @@ Source/BathhouseSim/Private/Tests/
   BathhouseDomainTests.cpp  # single-key carry와 interaction attempt result coverage
   CleaningTowelAutomationTests.cpp  # mop/basket carry, hold cleaning과 key G rejection coverage
   ComputerAutomationTests.cpp  # suppression, computer focus/input/pointer/cleanup coverage
+  CombatRecoveryAutomationTests.cpp  # equipment routing, health, melee와 soft interruption coverage
 ```
 
 ## Responsibilities
@@ -59,7 +60,7 @@ Interaction은 cleaning progress, attack/damage/health, towel count/machine, cus
 - 기존 `bCanInteract`, `ActionName`, `FailureReason`은 primary 의미를 유지한다.
 - target은 optional secondary 표시/가능 여부, action name과 failure reason을 추가로 반환할 수 있다.
 - primary는 `Instant` 또는 `Hold` activation mode를 선언할 수 있다. 기존 target의 default는 `Instant`다.
-- secondary는 이번 target에서 Started 한 번의 instant 실행만 사용한다.
+- secondary는 현재 계약에서 Started 한 번의 instant 실행만 사용한다.
 - 기존 `ExecuteInteraction(Context)`는 primary API로 유지하고 optional secondary execute와 hold begin/update/cancel 계약을 추가한다.
 
 `FPlayerInteractionContext`는 interactor, `UPlayerCarryComponent`, hit actor/component와 hit 정보를 가진다. `FPlayerInteractionQuery`와 결과 문구는 localization 가능한 `FText`를 사용한다.
@@ -118,7 +119,7 @@ Equipment row 합성은 현재 held Actor가 `IHeldEquipmentUsable`이면 해당
 - 기본 sweep channel은 `ECC_Visibility`이고 carry owner와 대상 actor를 무시한다. actor 원점과 bounds 중심 차이는 `BoundsOffset`으로 보정한다.
 - blocking hit는 shape 중심인 `Hit.Location`과 clearance로 player 쪽 안전 위치를 계산한다. start penetration에서 투척 목표 쪽으로 진행하는 MTD는 벽 통과 후보이므로 거부하고, 나머지 후보만 segment 제한 후 동일 shape/channel overlap으로 재검증한다.
 - 안전 위치 계산이 실패하면 attachment, `HeldObject`, `Carrier`, collision/physics와 presentation을 바꾸지 않는다.
-- 안전 위치가 정해진 뒤 detach, 위치 적용, collision/physics 활성화, 장비별 impulse와 held reference 해제를 한 commit 경로에서 수행한다.
+- 안전 위치가 정해진 뒤 detach, 위치 적용, collision/physics 활성화, 장비별 impulse와 held reference 해제를 한 commit 경로에서 수행한다. `ThrowImpulseStrength`는 물체 질량과 무관한 velocity-change impulse로 해석한다.
 - 위치 적용 또는 physics 활성화 실패 시 이전 transform, collision과 held anchor 부착을 복원한다.
 - carrier EndPlay에서 key는 기존 hook recovery, equipment는 last safe/initial transform recovery를 사용한다.
 

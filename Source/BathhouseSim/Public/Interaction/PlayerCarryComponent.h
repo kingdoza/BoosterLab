@@ -9,6 +9,7 @@
 
 class ABathhouseKeyActor;
 class UPrimitiveComponent;
+class UPlayerEquipmentUseComponent;
 class USceneComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHeldKeyChanged, ABathhouseKeyActor*, HeldKey);
@@ -25,6 +26,7 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	void ConfigureHeldAnchor(USceneComponent* InHeldAnchor);
+	void ConfigureEquipmentUse(UPlayerEquipmentUseComponent* InEquipmentUse);
 
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	bool IsHandEmpty() const { return HeldObject == nullptr; }
@@ -78,6 +80,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> HeldAnchor = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPlayerEquipmentUseComponent> EquipmentUseComponent = nullptr;
 
 	bool bPhysicalDropCommitInProgress = false;
 };

@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-1인칭 이동, sprint, camera, Interaction/Carry 조립, E primary, F secondary, G equipment release와 Computer focus/click 입력 routing은 현재 Source에 구현되어 있다. 기존 `ComputerClickAction`을 범용 `PrimaryUseAction` LMB로 호환 이관하고 world equipment use와 computer pointer를 모드별로 routing하는 확장은 구현 target이다.
+1인칭 이동, sprint, camera, Interaction/Carry 조립, E primary, F secondary, G equipment release와 LMB `PrimaryUseAction`의 Computer pointer/held equipment 배타적 routing이 현재 Source에 구현되어 있다. 기존 `ComputerClickAction`은 Editor 이관을 위한 deprecated fallback으로 보존한다.
 
 ## Responsibilities
 

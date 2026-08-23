@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath collision-independent snap은 구현되었다. health 0 래그돌, soft interruption과 native Task restart는 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)의 구현 target이다.
+이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath collision-independent snap, health 0 래그돌, soft interruption과 native Task restart가 구현되었으며 상세 계약은 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)에 둔다.
 
 ## Source Scope
 
@@ -55,7 +55,7 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 |---|---|
 | 현재 routine state와 transition | `ST_CustomerRoutine` StateTree |
 | key number, key reference, timer와 runtime handles | `UCustomerSessionComponent` |
-| navigation request | 현재 `FStateTreeMoveToTask`, target `FCustomerRestartableMoveToTask`와 AIController |
+| navigation request | native `FCustomerRestartableMoveToTask`와 AIController; Content StateTree 교체 전 asset은 기존 Task 사용 |
 | queue | `ABathhouseCounterActor` |
 | facility reservation/occupancy | `UBathhouseFacilitySlotComponent` |
 | Bath approach/action snap 상태와 복구 | `UCustomerSessionComponent` |
@@ -108,7 +108,7 @@ Bath timer가 만료되면 session은 `Customer.Event.BathStayExpired` event를 
 - customer Pawn의 composition root다.
 - private `CustomerSession` default subobject로 `UCustomerSessionComponent`를 생성하고 외부 C++에는 `GetCustomerSession()` 접근만 제공한다.
 - private `CustomerMontagePlayback` default subobject로 montage lifecycle을 조립하며 gameplay session state와 분리한다.
-- target `Health`, `CustomerKnockdown`, `CustomerRoutineInterruption` private default subobject를 조립하고 각 책임을 getter로만 노출한다.
+- `Health`, `CustomerKnockdown`, `CustomerRoutineInterruption` private default subobject를 조립하고 각 책임을 getter로만 노출한다.
 - `CustomerSession`은 `VisibleAnywhere`, `BlueprintReadOnly`, `AllowPrivateAccess` 계약으로 Blueprint와 StateTree의 읽기 binding을 유지한다.
 - check-in 중 `IPlayerInteractable`을 구현하고 session에 query/execute를 위임한다.
 - logical activity 변경을 Blueprint 표현 event로 전달한다.
@@ -155,7 +155,7 @@ Native C++이 소유하는 것:
 - queue/facility/key/wallet API 호출
 - gameplay event 발행
 - montage 후보 검증, 단일 선택과 실제 playback 종료 판정
-- target soft interruption serial, restartable MoveTo와 기존 Task local restart
+- soft interruption serial, restartable MoveTo와 기존 Task local restart
 
 Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 않는다.
 
@@ -164,7 +164,7 @@ Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 �
 - queue join/leave와 front 도착 대기
 - check-in key 대기와 timeout 시작·취소
 - facility/slot 선택·예약·release
-- 현재 built-in `FStateTreeMoveToTask`에 목적지 binding 제공, target은 동일 binding의 native restartable MoveTo로 교체
+- native `FCustomerRestartableMoveToTask`는 기존 목적지 binding을 수용하며, `ST_CustomerRoutine` asset의 built-in `FStateTreeMoveToTask` 교체는 Editor 단계에서 수행
 - Bath action/approach point의 collision-independent snap과 movement mode 복구
 - logical activity begin, finish와 timer-only fallback
 - 후보 중 하나를 한 번 선택해 실제 종료를 기다리는 one-shot montage

@@ -704,71 +704,40 @@ bool FBathhouseCleaningInteractionTest::RunTest(const FString& Parameters)
 	Context.Interactor = CarrierOwner;
 	Context.CarryComponent = Carry;
 	const FPlayerInteractionQuery HoldQuery = Stain->QueryInteraction(Context);
-	TestEqual(TEXT("Water stain uses Hold activation"),
-		HoldQuery.PrimaryActivationMode, EPlayerInteractionActivationMode::Hold);
-	TestTrue(TEXT("Held wet mop enables stain cleaning"), HoldQuery.bCanInteract);
+	TestFalse(TEXT("Water stain no longer advertises an E interaction"), HoldQuery.bVisible);
+	TestTrue(TEXT("Water stain advertises one disabled LMB requirement row"), HoldQuery.bEquipmentUseVisible);
+	TestFalse(TEXT("The focus fallback cannot execute equipment use"), HoldQuery.bCanEquipmentUse);
+	TestEqual(TEXT("Water stain equipment fallback uses Hold activation"),
+		HoldQuery.EquipmentActivationMode, EPlayerInteractionActivationMode::Hold);
 	FText HoldFailure;
-	TestTrue(TEXT("Hold cleaning begins"), Stain->BeginHoldInteraction(Context, HoldFailure));
-	const FPlayerHoldInteractionUpdate Partial = Stain->UpdateHoldInteraction(Context, 1.0f);
+	TestTrue(TEXT("Native mop cleaning begins"), Stain->BeginMopCleaning(CarrierOwner, HoldFailure));
+	const FHeldEquipmentUseUpdate Partial = Stain->UpdateMopCleaning(CarrierOwner, 1.0f);
 	TestEqual(TEXT("Partial cleaning remains running"), Partial.State, EPlayerHoldInteractionState::Running);
 	TestTrue(TEXT("Partial cleaning exposes bounded progress"), Partial.Progress > 0.0f && Partial.Progress < 1.0f);
-	Stain->CancelHoldInteraction(Context);
+	Stain->CancelMopCleaning(CarrierOwner);
 	TestEqual(TEXT("Release cancels progress back to zero"), Stain->GetCleaningProgress(), 0.0f);
 
-	APawn* ControlLossPawn = World->SpawnActor<APawn>();
-	UPlayerInteractionComponent* ControlLossInteraction = NewObject<UPlayerInteractionComponent>(
-		ControlLossPawn,
-		TEXT("ControlLossInteraction"));
-	ControlLossPawn->AddInstanceComponent(ControlLossInteraction);
-	ControlLossInteraction->RegisterComponent();
-	FPlayerInteractionContext ControlLossContext;
-	ControlLossContext.Interactor = ControlLossPawn;
-	ControlLossContext.CarryComponent = Carry;
-	TestTrue(TEXT("A fresh cleaner can begin before local-control loss"),
-		Stain->BeginHoldInteraction(ControlLossContext, HoldFailure));
-	const FPlayerHoldInteractionUpdate ControlLossPartial = Stain->UpdateHoldInteraction(ControlLossContext, 0.5f);
-	TestEqual(TEXT("Control-loss setup owns a partial stain hold"),
-		ControlLossPartial.State, EPlayerHoldInteractionState::Running);
-	ControlLossInteraction->ActiveHoldTarget = Stain;
-	ControlLossInteraction->ActiveHoldContext = ControlLossContext;
-	ControlLossInteraction->ActiveHoldProgress = ControlLossPartial.Progress;
-	ControlLossInteraction->bPrimaryInputHeld = true;
-	ControlLossInteraction->CurrentTarget = Stain;
-	ControlLossInteraction->CurrentQuery = Stain->QueryInteraction(ControlLossContext);
 	UBathhouseCleaningCancelProbe* CancelProbe = NewObject<UBathhouseCleaningCancelProbe>();
 	CancelProbe->Bind(Stain);
-	int32 ControlLossTerminalResultCount = 0;
-	ControlLossInteraction->OnInteractionAttemptFinishedNative.AddLambda(
-		[&ControlLossTerminalResultCount](const FPlayerInteractionResult& Result)
-		{
-			if (!Result.bSucceeded)
-			{
-				++ControlLossTerminalResultCount;
-			}
-		});
-	TestFalse(TEXT("The control-loss test pawn is not locally controlled"), ControlLossPawn->IsLocallyControlled());
-	ControlLossInteraction->TickComponent(0.1f, LEVELTICK_All, nullptr);
-	TestEqual(TEXT("Local-control loss cancels the stain exactly once"), CancelProbe->CancelCount, 1);
-	TestEqual(TEXT("Local-control loss emits one terminal failure result"),
-		ControlLossTerminalResultCount, 1);
-	TestEqual(TEXT("Local-control loss returns the stain to Idle"),
-		Stain->GetCleaningState(), EStainCleaningState::Idle);
-	TestEqual(TEXT("Local-control loss resets stain progress"), Stain->GetCleaningProgress(), 0.0f);
-	TestFalse(TEXT("Local-control loss clears the active hold target"),
-		ControlLossInteraction->IsPrimaryHoldActive());
-	TestFalse(TEXT("Local-control loss clears the primary input latch"),
-		ControlLossInteraction->bPrimaryInputHeld);
-	TestFalse(TEXT("Local-control loss clears the visible interaction query"),
-		ControlLossInteraction->GetCurrentInteractionQuery().bVisible);
-	ControlLossInteraction->TickComponent(0.1f, LEVELTICK_All, nullptr);
-	ControlLossInteraction->EndPrimaryInteraction();
-	TestEqual(TEXT("Later ticks and E release do not cancel the old hold again"), CancelProbe->CancelCount, 1);
-	TestEqual(TEXT("Later ticks and E release do not duplicate the terminal result"),
-		ControlLossTerminalResultCount, 1);
+	FHeldEquipmentUseContext MopUseContext;
+	MopUseContext.User = CarrierOwner;
+	MopUseContext.Equipment = Mop;
+	MopUseContext.CarryComponent = Carry;
+	TestTrue(TEXT("Mop begins mopping even without a focused stain"),
+		Mop->BeginEquipmentUse(MopUseContext).bSucceeded);
+	TestTrue(TEXT("No-target LMB still owns the mopping presentation"), Mop->IsMopping());
+	TestEqual(TEXT("No-target mopping remains running without progress"),
+		Mop->UpdateEquipmentUse(MopUseContext, 0.25f).State,
+		EPlayerHoldInteractionState::Running);
+	TestEqual(TEXT("No-target mopping does not mutate stain progress"), Stain->GetCleaningProgress(), 0.0f);
+	Mop->EndEquipmentUse(MopUseContext);
+	Mop->EndEquipmentUse(MopUseContext);
+	TestFalse(TEXT("LMB release clears mopping exactly once"), Mop->IsMopping());
+	TestEqual(TEXT("No-target release never cancels an unrelated stain"), CancelProbe->CancelCount, 0);
 	CancelProbe->Unbind();
 
-	TestTrue(TEXT("Cleaning can restart after cancellation"), Stain->BeginHoldInteraction(Context, HoldFailure));
-	const FPlayerHoldInteractionUpdate Complete = Stain->UpdateHoldInteraction(Context, 3.0f);
+	TestTrue(TEXT("Cleaning can restart after cancellation"), Stain->BeginMopCleaning(CarrierOwner, HoldFailure));
+	const FHeldEquipmentUseUpdate Complete = Stain->UpdateMopCleaning(CarrierOwner, 3.0f);
 	TestEqual(TEXT("A full hold completes exactly once"), Complete.State, EPlayerHoldInteractionState::Succeeded);
 	TestEqual(TEXT("Completed stain enters Removed"), Stain->GetCleaningState(), EStainCleaningState::Removed);
 
@@ -1126,6 +1095,20 @@ bool FBathhouseInteractionPromptPresentationTest::RunTest(const FString& Paramet
 	SecondaryOnlyQuery.bCanSecondaryInteract = false;
 	TestFalse(TEXT("A query with no executable action disables the native prompt root"),
 		UInteractionPromptWidget::IsPromptRootEnabled(SecondaryOnlyQuery));
+
+	FPlayerInteractionQuery EquipmentOnlyQuery;
+	EquipmentOnlyQuery.bEquipmentUseVisible = true;
+	EquipmentOnlyQuery.bCanEquipmentUse = true;
+	EquipmentOnlyQuery.EquipmentActivationMode = EPlayerInteractionActivationMode::Hold;
+	EquipmentOnlyQuery.EquipmentUseProgress = 0.5f;
+	TestTrue(TEXT("An executable LMB-only query enables the native prompt root"),
+		UInteractionPromptWidget::IsPromptRootEnabled(EquipmentOnlyQuery));
+	TestFalse(TEXT("An LMB-only query does not enable the legacy E hook"),
+		UInteractionPromptWidget::IsLegacyPrimaryEnabled(EquipmentOnlyQuery));
+	FPlayerInteractionQuery DifferentEquipmentProgress = EquipmentOnlyQuery;
+	DifferentEquipmentProgress.EquipmentUseProgress = 0.75f;
+	TestFalse(TEXT("Equipment progress participates in query equality"),
+		EquipmentOnlyQuery.Equals(DifferentEquipmentProgress));
 	return true;
 }
 

@@ -1,92 +1,82 @@
-# Implementation Rework Prompt — Towel Presentation Blueprint Contract
+# Implementation Rework Prompt — Equipment Context GC And Customer Recovery Verification
 
 ## Objective
 
-Fix the native towel presentation naming collision that currently breaks an existing Blueprint, then correct the review/Unreal handoff so it matches the actual C++ contract and cannot report a false-positive approval.
+Fix the retained equipment-use context so every UObject reference stored across frames participates in Unreal GC, then add native verification for the actual customer interruption/facility recovery orchestration required by the current architecture.
 
-Do not modify or resave `Content/`. Preserve inventory/transfer/machine authority, presentation revision behavior, transient ISM ownership, Stack/Pile/Slot layout behavior and existing gameplay lifecycles.
+Do not modify or resave `Content/`. Preserve the current input owner, single-carry/drop transaction, cleaning, combat, StateTree hierarchy, session transaction and Blueprint handoff contracts.
 
-## P0 — Existing `BP_CleanTowelStack` Cannot Compile
+## P1 — Retained Equipment Context Is Not Reflected
 
-Evidence from both the submitted full-automation log and an independent focused run:
-
-```text
-BP_CleanTowelStack.uasset: [Compiler] Internal Compiler Error:
-Tried to create a property StackVisual ... but another object
-(/Script/BathhouseSim.CleanTowelStackActor:StackVisual) already exists there.
-```
-
-The existing asset already serializes a Blueprint property/component symbol named `StackVisual`. The new reflected native member at `ACleanTowelStackActor::StackVisual` therefore collides while the Blueprint skeleton/generated class is created. Automation tests still return success because this compiler error occurs during project startup, outside the focused test result.
+`UPlayerEquipmentUseComponent` stores `FHeldEquipmentUseContext ActiveContext` from `BeginEquipmentUse()` until end/cancel, including the Hold path. `FHeldEquipmentUseContext` contains multiple `TObjectPtr` fields and an `FHitResult`, but the containing `ActiveContext` member is not a `UPROPERTY`. The inner reflected fields are therefore not traversed through this retained member by Unreal GC.
 
 Affected files:
 
-- `Source/BathhouseSim/Public/Towel/CleanTowelStackActor.h`
-- `Source/BathhouseSim/Private/Towel/CleanTowelStackActor.cpp`
-- the equivalent new native presentation member/default-subobject names in `UsedTowelBinActor`, `TowelBasketActor` and `TowelProcessingMachineActor` if a consistent contract rename is selected
-- `.md/0_ARCHITECTURE.md`
-- `.md/Architecture/TowelSystem.md`
-- `.md/Architecture/TowelPresentationSystem.md`
-- `.md/PROMPT_REVIEW.md`
-- `.md/PROMPT_UNREAL.md`
+- `Source/BathhouseSim/Public/Interaction/PlayerEquipmentUseComponent.h`
+- focused equipment-use automation if a GC regression test is added
 
 Required correction:
 
-1. Inspect the five target Blueprint assets read-only for every proposed reflected property and default-subobject name before choosing the final native names.
-2. Rename the newly introduced native member/default-subobject contract to collision-free, stable names. Apply the naming consistently where that improves the shared Stack/Pile contract; do not rename or delete any pre-existing reflected gameplay API.
-3. Update all C++ references and canonical documents to the exact final native names.
-4. Do not use a Core Redirect to conceal a live same-scope collision. These presentation members are new and have not passed Editor authoring; a redirect is unnecessary unless inspection proves a saved asset already references the discarded native name.
-5. Do not open and resave the broken Blueprint as a migration technique. The C++ contract must load the existing asset without the duplicate-property compiler error first.
+1. Make the retained context participate in reflection with the appropriate transient policy, or replace it with an explicitly safe retained representation that does not contain untracked UObject references.
+2. Keep `ActiveEquipment`, camera, carry, interaction and motion ownership unchanged unless a smaller representation makes an existing duplicate reference unnecessary.
+3. Preserve fresh context rebuilding during Hold updates and the exact End/Cancel behavior.
+4. Clear all retained state on success, failure, cancel, held Actor EndPlay and component EndPlay as today.
 
 Acceptance:
 
-- `BP_CleanTowelStack` loads and compiles without skeleton/generated-class duplicate-property errors.
-- The other four target Blueprints load without native member/default-subobject name collisions.
-- Each actor still owns exactly one intended native presentation component and binds only its own inventory in `BeginPlay`, then unbinds in `EndPlay`.
-- `Content/` remains unchanged.
+- UHT/Editor build succeeds.
+- No UObject-bearing context stored across frames is reachable only through an unreflected field.
+- LMB release, G drop, suppression and held Actor EndPlay still end/cancel exactly once.
+- A focused test may force GC during a held use and must complete/cancel without stale UObject access.
 
-## P1 — Verification Must Reject Blueprint Compiler Errors
+## P1 — Recovery Tests Bypass The Production Orchestration
 
-The submitted evidence reports focused `1 success` and full `17 success / 0 fail`, but the same full-run log contains two `LogBlueprint: Error` entries for `BP_CleanTowelStack`. Test result counts alone are therefore insufficient for this change.
+The new `SoftInterruptionSerialAndBathTimer` automation creates a plain `AActor`, attaches session/interruption components, calls `BeginSoftInterruption()`, and then manually calls `Session->PauseRoutineTimers()`/`ResumeRoutineTimers()`. Because the owner is not `ABathhouseCustomerCharacter`, this bypasses the production branch in `UCustomerRoutineInterruptionComponent` that owns automatic session pause/resume and facility suspension. The submitted suite also does not exercise `FCustomerRestartableMoveToTask`, facility `Occupied -> Reserved -> Occupied` recovery, or stale-token completion behavior.
 
-Required correction:
+Affected files:
 
-1. After the naming fix, run the UE 5.8 Editor target build with Editor/Live Coding closed.
-2. Run the focused towel presentation automation and the full `BathhouseSim` suite.
-3. Explicitly scan startup and automation logs for at least:
-   - `LogBlueprint: Error`
-   - `[Compiler] Internal Compiler Error`
-   - `another object ... already exists`
-   - missing native parent/property/default subobject warnings
-4. Load/compile the five target Blueprints in a read-only verification pass, or use an equivalent Blueprint compile commandlet that does not save assets.
-5. Report test counts and the independent Blueprint/compiler log scan. Do not describe invalid-slot and equal-revision fixture warnings as the only diagnostics unless the entire log confirms it.
-
-## P2 — Unreal Handoff Uses A Nonexistent Property Name
-
-`.md/PROMPT_UNREAL.md` tells the Editor agent to configure `PositionZJitter`, but `UTowelPileVisualComponent` exposes `MaxZJitter`.
+- `Source/BathhouseSim/Private/Tests/CombatRecoveryAutomationTests.cpp`
+- production files only if the new tests expose a defect
+- `.md/PROMPT_REVIEW.md`
 
 Required correction:
 
-- Replace the nonexistent name with the exact reflected C++ property name `MaxZJitter`.
-- Update every `StackVisual`/`PileVisual` reference in the handoff to the final collision-free native contract chosen for P0.
-- Keep the handoff limited to profile creation, inherited component layout/asset authoring and PIE verification. Do not add Blueprint inventory calculations or Event Graph ISM creation.
+1. Replace or supplement the manual timer test with an `ABathhouseCustomerCharacter`-based fixture so `BeginSoftInterruption()` and `EndSoftInterruption()` themselves prove automatic timer pause/resume.
+2. Add deterministic native coverage for facility suspension/resume: occupied use becomes reserved without losing its owner/cache, successful resume returns to occupied, and invalidated facility state fails into the existing cleanup/retry contract without duplicating a transaction.
+3. Add focused coverage for restart operation invalidation so an old completion cannot decide a replacement request and the current task does not remain `Running` forever solely because its token became stale. Use a transient StateTree/AI fixture or isolate the token/result gate without moving StateTree phase ownership out of the Task.
+4. Keep PhysicsAsset/root-body authoring and real `ST_CustomerRoutine` node migration in `.md/PROMPT_UNREAL.md`, but clearly distinguish those Editor-dependent checks from native tests actually executed.
+5. Update `.md/PROMPT_REVIEW.md` validation evidence to name the behaviors covered; do not use the total count of 22 as evidence for unexercised recovery paths.
+
+Acceptance:
+
+- The timer test contains no manual `PauseRoutineTimers()`/`ResumeRoutineTimers()` calls that duplicate the production interruption component.
+- Facility state/owner and stale-operation assertions pass in UE 5.8 automation.
+- Existing 22 tests remain green and the new focused tests also pass.
+- The headless log contains no unexpected native/Blueprint errors; the only allowed Blueprint compiler diagnostics before Editor migration remain the three unique missing bindings in `WBP_InteractionPrompt`.
+
+## Documentation And Editor Handoff
+
+- No architecture redesign is required. Keep the current responsibility split among equipment router, domain equipment Actors, session, interruption/knockdown components and native StateTree Tasks.
+- Update `.md/PROMPT_REVIEW.md` with the exact final test count, focused recovery assertions and compiler-log scan.
+- Change `.md/PROMPT_UNREAL.md` only if a C++ contract/property name changes. Preserve its layout/style/asset wiring and StateTree-node migration boundary.
+- Do not add Core Redirects unless a reflected symbol is actually renamed; the preferred GC correction does not require one.
 
 ## Regression Checks
 
 - `git diff --check`
-- no `Content/`, `Config/`, `.uproject` or `Build.cs` change
-- UE 5.8 `BathhouseSimEditor Win64 Development` build succeeds
-- `BathhouseSim.Towel.Presentation.StackPileSlotAndLifecycle`: success
-- full `BathhouseSim`: all tests succeed
-- target Blueprint load/compile log has zero compiler errors and zero duplicate-property diagnostics
-- profile selection, state swap, top removal, Slot clamp, unregister/re-register and EndPlay assertions remain covered
+- no `Content/`, `Config/`, `.uproject` or module dependency change
+- UE 5.8 `Build.bat BathhouseSimEditor Win64 Development` succeeds with Editor/Live Coding closed
+- full `BathhouseSim` automation succeeds
+- startup log scan reports exactly the expected three unique `WBP_InteractionPrompt` missing BindWidget names and no other `LogBlueprint: Error`
+- no active motion/use/request token, facility occupancy or routine timer remains after cancel, failure or EndPlay
 
 ## Review Resubmission
 
-Regenerate `.md/PROMPT_REVIEW.md` and `.md/PROMPT_UNREAL.md` for this exact task. Include:
+Regenerate `.md/PROMPT_REVIEW.md` for this exact task and report:
 
-- the final collision-free reflected property/default-subobject names
-- read-only asset-symbol inspection result
-- Blueprint compile/load result for all five target assets
-- build/test counts plus compiler-error log scan
-- Core Redirect decision and why it is safe
-- confirmation that `Content/` was not changed or resaved
+- the retained-context GC policy chosen
+- production-path timer/facility interruption assertions
+- stale-token/replacement-request assertions
+- build and automation counts
+- independent Blueprint/compiler error scan
+- confirmation that `Content/` and `Config/` were not changed

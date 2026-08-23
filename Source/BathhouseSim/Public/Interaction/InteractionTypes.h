@@ -13,7 +13,8 @@ enum class EPlayerInteractionIntent : uint8
 {
 	Primary,
 	Secondary,
-	DropCarry
+	DropCarry,
+	EquipmentUse
 };
 
 UENUM(BlueprintType)
@@ -100,6 +101,24 @@ struct BATHHOUSESIM_API FPlayerInteractionQuery
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
 	FText SecondaryFailureReason;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	bool bEquipmentUseVisible = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	bool bCanEquipmentUse = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FText EquipmentActionName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FText EquipmentFailureReason;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	EPlayerInteractionActivationMode EquipmentActivationMode = EPlayerInteractionActivationMode::Instant;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float EquipmentUseProgress = 0.0f;
+
 	bool Equals(const FPlayerInteractionQuery& Other) const
 	{
 		return bVisible == Other.bVisible
@@ -112,7 +131,13 @@ struct BATHHOUSESIM_API FPlayerInteractionQuery
 			&& bSecondaryVisible == Other.bSecondaryVisible
 			&& bCanSecondaryInteract == Other.bCanSecondaryInteract
 			&& SecondaryActionName.EqualTo(Other.SecondaryActionName)
-			&& SecondaryFailureReason.EqualTo(Other.SecondaryFailureReason);
+			&& SecondaryFailureReason.EqualTo(Other.SecondaryFailureReason)
+			&& bEquipmentUseVisible == Other.bEquipmentUseVisible
+			&& bCanEquipmentUse == Other.bCanEquipmentUse
+			&& EquipmentActionName.EqualTo(Other.EquipmentActionName)
+			&& EquipmentFailureReason.EqualTo(Other.EquipmentFailureReason)
+			&& EquipmentActivationMode == Other.EquipmentActivationMode
+			&& FMath::IsNearlyEqual(EquipmentUseProgress, Other.EquipmentUseProgress);
 	}
 };
 

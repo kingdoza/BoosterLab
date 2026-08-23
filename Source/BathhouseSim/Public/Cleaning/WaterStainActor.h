@@ -4,6 +4,7 @@
 #include "Cleaning/CleaningTypes.h"
 #include "GameFramework/Actor.h"
 #include "Interaction/PlayerInteractable.h"
+#include "Interaction/HeldEquipmentUsable.h"
 #include "WaterStainActor.generated.h"
 
 class AStainSpawnZoneActor;
@@ -28,11 +29,6 @@ public:
 
 	virtual FPlayerInteractionQuery QueryInteraction(const FPlayerInteractionContext& Context) const override;
 	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
-	virtual bool BeginHoldInteraction(const FPlayerInteractionContext& Context, FText& OutFailureReason) override;
-	virtual FPlayerHoldInteractionUpdate UpdateHoldInteraction(
-		const FPlayerInteractionContext& Context,
-		float DeltaTime) override;
-	virtual void CancelHoldInteraction(const FPlayerInteractionContext& Context) override;
 
 #if WITH_EDITOR
 	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
@@ -47,6 +43,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Cleaning")
 	float GetCleaningProgress() const;
+	bool QueryMopCleaning(AActor* Cleaner, FText& OutFailureReason, float& OutProgress) const;
+	bool BeginMopCleaning(AActor* Cleaner, FText& OutFailureReason);
+	FHeldEquipmentUseUpdate UpdateMopCleaning(AActor* Cleaner, float DeltaTime);
+	void CancelMopCleaning(AActor* Cleaner);
 
 	UPROPERTY(BlueprintAssignable, Category = "Cleaning|Presentation")
 	FOnStainCleaningStarted OnCleaningStarted;
@@ -91,7 +91,6 @@ protected:
 private:
 	friend class FBathhouseCleaningInteractionTest;
 
-	bool HasRequiredMop(const FPlayerInteractionContext& Context) const;
 	void ResetCleaning(bool bNotify);
 	void CompleteCleaning();
 	void ResolveAndApplyVisualVariation();

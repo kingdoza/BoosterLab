@@ -14,6 +14,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputActionValue.h"
 #include "Interaction/PlayerCarryComponent.h"
+#include "Interaction/HeldEquipmentMotionComponent.h"
+#include "Interaction/PlayerEquipmentUseComponent.h"
 #include "Interaction/PlayerInteractionComponent.h"
 
 AFirstPersonCharacter::AFirstPersonCharacter(const FObjectInitializer& ObjectInitializer)
@@ -35,6 +37,11 @@ AFirstPersonCharacter::AFirstPersonCharacter(const FObjectInitializer& ObjectIni
 	PlayerCarry->ConfigureHeldAnchor(HeldKeyAnchor);
 	PlayerInteraction = CreateDefaultSubobject<UPlayerInteractionComponent>(TEXT("PlayerInteraction"));
 	PlayerInteraction->Configure(FirstPersonCamera, PlayerCarry);
+	HeldEquipmentMotion = CreateDefaultSubobject<UHeldEquipmentMotionComponent>(TEXT("HeldEquipmentMotion"));
+	PlayerEquipmentUse = CreateDefaultSubobject<UPlayerEquipmentUseComponent>(TEXT("PlayerEquipmentUse"));
+	PlayerEquipmentUse->Configure(FirstPersonCamera, PlayerCarry, PlayerInteraction, HeldEquipmentMotion);
+	PlayerInteraction->ConfigureEquipmentUse(PlayerEquipmentUse);
+	PlayerCarry->ConfigureEquipmentUse(PlayerEquipmentUse);
 	ComputerWidgetInteraction = CreateDefaultSubobject<UWidgetInteractionComponent>(TEXT("ComputerWidgetInteraction"));
 	ComputerWidgetInteraction->SetupAttachment(FirstPersonCamera);
 	ComputerWidgetInteraction->InteractionSource = EWidgetInteractionSource::Mouse;
@@ -127,23 +134,29 @@ void AFirstPersonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 			&AFirstPersonCharacter::DropCarryInput);
 	}
 
-	if (ComputerClickAction)
+	UInputAction* BoundPrimaryUseAction = PrimaryUseAction ? PrimaryUseAction.Get() : ComputerClickAction.Get();
+	if (BoundPrimaryUseAction)
 	{
 		EnhancedInputComponent->BindAction(
-			ComputerClickAction,
+			BoundPrimaryUseAction,
 			ETriggerEvent::Started,
 			this,
-			&AFirstPersonCharacter::ComputerClickStartInput);
+			&AFirstPersonCharacter::PrimaryUseStartInput);
 		EnhancedInputComponent->BindAction(
-			ComputerClickAction,
+			BoundPrimaryUseAction,
+			ETriggerEvent::Triggered,
+			this,
+			&AFirstPersonCharacter::PrimaryUseTriggeredInput);
+		EnhancedInputComponent->BindAction(
+			BoundPrimaryUseAction,
 			ETriggerEvent::Completed,
 			this,
-			&AFirstPersonCharacter::ComputerClickEndInput);
+			&AFirstPersonCharacter::PrimaryUseEndInput);
 		EnhancedInputComponent->BindAction(
-			ComputerClickAction,
+			BoundPrimaryUseAction,
 			ETriggerEvent::Canceled,
 			this,
-			&AFirstPersonCharacter::ComputerClickEndInput);
+			&AFirstPersonCharacter::PrimaryUseEndInput);
 	}
 }
 
@@ -252,23 +265,61 @@ void AFirstPersonCharacter::DropCarryInput()
 	}
 }
 
+void AFirstPersonCharacter::PrimaryUseStartInput()
+{
+	if (PrimaryUsePressOwner != EPrimaryUsePressOwner::None)
+	{
+		return;
+	}
+	if (PlayerComputerUse && PlayerComputerUse->IsCapturingInput())
+	{
+		PrimaryUsePressOwner = EPrimaryUsePressOwner::Computer;
+		bComputerOwnsPointerPress = PlayerComputerUse->PressPointer();
+		return;
+	}
+	PrimaryUsePressOwner = EPrimaryUsePressOwner::Equipment;
+	if (PlayerEquipmentUse)
+	{
+		PlayerEquipmentUse->BeginEquipmentUse();
+	}
+}
+
+void AFirstPersonCharacter::PrimaryUseTriggeredInput()
+{
+	if (PrimaryUsePressOwner == EPrimaryUsePressOwner::Equipment && PlayerEquipmentUse)
+	{
+		PlayerEquipmentUse->UpdateEquipmentUse(GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+	}
+}
+
+void AFirstPersonCharacter::PrimaryUseEndInput()
+
+{
+	const EPrimaryUsePressOwner PreviousOwner = PrimaryUsePressOwner;
+	PrimaryUsePressOwner = EPrimaryUsePressOwner::None;
+	if (PreviousOwner == EPrimaryUsePressOwner::Computer)
+	{
+		if (bComputerOwnsPointerPress && PlayerComputerUse)
+		{
+			PlayerComputerUse->ReleasePointer();
+		}
+		bComputerOwnsPointerPress = false;
+		return;
+	}
+	if (PreviousOwner == EPrimaryUsePressOwner::Equipment && PlayerEquipmentUse)
+	{
+		PlayerEquipmentUse->EndEquipmentUse();
+	}
+}
+
 void AFirstPersonCharacter::ComputerClickStartInput()
 {
-	bComputerOwnsPointerPress = PlayerComputerUse && PlayerComputerUse->PressPointer();
+	PrimaryUseStartInput();
 }
 
 void AFirstPersonCharacter::ComputerClickEndInput()
 {
-	if (!bComputerOwnsPointerPress)
-	{
-		return;
-	}
-
-	bComputerOwnsPointerPress = false;
-	if (PlayerComputerUse)
-	{
-		PlayerComputerUse->ReleasePointer();
-	}
+	PrimaryUseEndInput();
 }
 
 void AFirstPersonCharacter::DoMove(float Right, float Forward)

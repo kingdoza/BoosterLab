@@ -2,6 +2,9 @@
 
 #include "Customer/BathhouseCustomerAIController.h"
 #include "Customer/CustomerMontagePlaybackComponent.h"
+#include "Combat/HealthComponent.h"
+#include "Customer/CustomerKnockdownComponent.h"
+#include "Customer/CustomerRoutineInterruptionComponent.h"
 #include "Customer/CustomerSessionComponent.h"
 #include "Customer/CustomerRoutineDefinition.h"
 #include "Facility/BathhouseCounterActor.h"
@@ -11,6 +14,9 @@ ABathhouseCustomerCharacter::ABathhouseCustomerCharacter()
 	PrimaryActorTick.bCanEverTick = false;
 	CustomerSession = CreateDefaultSubobject<UCustomerSessionComponent>(TEXT("CustomerSession"));
 	CustomerMontagePlayback = CreateDefaultSubobject<UCustomerMontagePlaybackComponent>(TEXT("CustomerMontagePlayback"));
+	Health = CreateDefaultSubobject<UHealthComponent>(TEXT("Health"));
+	CustomerKnockdown = CreateDefaultSubobject<UCustomerKnockdownComponent>(TEXT("CustomerKnockdown"));
+	CustomerRoutineInterruption = CreateDefaultSubobject<UCustomerRoutineInterruptionComponent>(TEXT("CustomerRoutineInterruption"));
 	AIControllerClass = ABathhouseCustomerAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 }

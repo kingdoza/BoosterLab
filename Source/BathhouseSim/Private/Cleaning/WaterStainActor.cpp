@@ -2,10 +2,8 @@
 
 #include "Cleaning/CleaningWorldSubsystem.h"
 #include "Cleaning/StainSpawnZoneActor.h"
-#include "Cleaning/WetMopActor.h"
 #include "Components/SceneComponent.h"
 #include "Components/SphereComponent.h"
-#include "Interaction/PlayerCarryComponent.h"
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
 #endif
@@ -133,44 +131,59 @@ FPlayerInteractionQuery AWaterStainActor::QueryInteraction(const FPlayerInteract
 	{
 		return Query;
 	}
-	Query.bVisible = true;
+	Query.bVisible = false;
 	Query.TargetName = LOCTEXT("WaterStain", "물 얼룩");
-	Query.ActionName = LOCTEXT("CleanWaterStain", "물걸레질");
-	Query.PrimaryActivationMode = EPlayerInteractionActivationMode::Hold;
-	Query.HoldProgress = GetCleaningProgress();
-	const bool bCleanerAvailable = !ActiveCleaner || ActiveCleaner == Context.Interactor;
-	Query.bCanInteract = HasRequiredMop(Context) && bCleanerAvailable;
-	if (!HasRequiredMop(Context))
-	{
-		Query.FailureReason = LOCTEXT("WetMopRequired", "물걸레가 필요합니다.");
-	}
-	else if (!bCleanerAvailable)
-	{
-		Query.FailureReason = LOCTEXT("AlreadyCleaning", "다른 사람이 청소 중입니다.");
-	}
+	Query.bEquipmentUseVisible = true;
+	Query.bCanEquipmentUse = false;
+	Query.EquipmentActionName = LOCTEXT("CleanWaterStain", "물걸레질");
+	Query.EquipmentFailureReason = LOCTEXT("WetMopRequired", "물걸레가 필요합니다.");
+	Query.EquipmentActivationMode = EPlayerInteractionActivationMode::Hold;
+	Query.EquipmentUseProgress = GetCleaningProgress();
 	return Query;
 }
 
 FPlayerInteractionResult AWaterStainActor::ExecuteInteraction(const FPlayerInteractionContext& Context)
 {
-	return FPlayerInteractionResult::Failed(LOCTEXT("HoldRequired", "길게 눌러 청소해야 합니다."));
+	return FPlayerInteractionResult::Failed(LOCTEXT("UseMopInput", "물걸레를 들고 마우스 왼쪽 버튼을 길게 누르세요."));
 }
 
-bool AWaterStainActor::BeginHoldInteraction(
-	const FPlayerInteractionContext& Context,
-	FText& OutFailureReason)
+bool AWaterStainActor::QueryMopCleaning(
+	AActor* Cleaner,
+	FText& OutFailureReason,
+	float& OutProgress) const
 {
-	const FPlayerInteractionQuery Query = QueryInteraction(Context);
-	if (!Query.bCanInteract || !IsValid(Context.Interactor))
+	OutFailureReason = FText::GetEmpty();
+	OutProgress = GetCleaningProgress();
+	if (CleaningState == EStainCleaningState::Removed || bTerminalCommitted)
 	{
-		OutFailureReason = Query.FailureReason;
+		OutFailureReason = LOCTEXT("StainAlreadyRemoved", "이미 제거된 물 얼룩입니다.");
 		return false;
 	}
-	if (CleaningState == EStainCleaningState::Cleaning && ActiveCleaner == Context.Interactor)
+	if (!IsValid(Cleaner))
+	{
+		OutFailureReason = LOCTEXT("InvalidCleaner", "청소 주체를 확인할 수 없습니다.");
+		return false;
+	}
+	if (ActiveCleaner && ActiveCleaner != Cleaner)
+	{
+		OutFailureReason = LOCTEXT("AlreadyCleaning", "다른 사람이 청소 중입니다.");
+		return false;
+	}
+	return true;
+}
+
+bool AWaterStainActor::BeginMopCleaning(AActor* Cleaner, FText& OutFailureReason)
+{
+	float Progress = 0.0f;
+	if (!QueryMopCleaning(Cleaner, OutFailureReason, Progress))
+	{
+		return false;
+	}
+	if (CleaningState == EStainCleaningState::Cleaning && ActiveCleaner == Cleaner)
 	{
 		return true;
 	}
-	ActiveCleaner = Context.Interactor;
+	ActiveCleaner = Cleaner;
 	CleaningElapsedSeconds = 0.0f;
 	CleaningState = EStainCleaningState::Cleaning;
 	OnCleaningStarted.Broadcast(ActiveCleaner);
@@ -178,14 +191,11 @@ bool AWaterStainActor::BeginHoldInteraction(
 	return true;
 }
 
-FPlayerHoldInteractionUpdate AWaterStainActor::UpdateHoldInteraction(
-	const FPlayerInteractionContext& Context,
-	const float DeltaTime)
+FHeldEquipmentUseUpdate AWaterStainActor::UpdateMopCleaning(AActor* Cleaner, const float DeltaTime)
 {
-	FPlayerHoldInteractionUpdate Update;
+	FHeldEquipmentUseUpdate Update;
 	if (CleaningState != EStainCleaningState::Cleaning
-		|| ActiveCleaner != Context.Interactor
-		|| !HasRequiredMop(Context))
+		|| ActiveCleaner != Cleaner)
 	{
 		ResetCleaning(true);
 		Update.FailureReason = LOCTEXT("CleaningInvalidated", "청소 조건이 유지되지 않았습니다.");
@@ -205,9 +215,9 @@ FPlayerHoldInteractionUpdate AWaterStainActor::UpdateHoldInteraction(
 	return Update;
 }
 
-void AWaterStainActor::CancelHoldInteraction(const FPlayerInteractionContext& Context)
+void AWaterStainActor::CancelMopCleaning(AActor* Cleaner)
 {
-	if (CleaningState == EStainCleaningState::Cleaning && ActiveCleaner == Context.Interactor)
+	if (CleaningState == EStainCleaningState::Cleaning && ActiveCleaner == Cleaner)
 	{
 		ResetCleaning(true);
 	}
@@ -218,11 +228,6 @@ float AWaterStainActor::GetCleaningProgress() const
 	return CleaningState == EStainCleaningState::Removed
 		? 1.0f
 		: FMath::Clamp(CleaningElapsedSeconds / FMath::Max(0.1f, RemovalDurationSeconds), 0.0f, 1.0f);
-}
-
-bool AWaterStainActor::HasRequiredMop(const FPlayerInteractionContext& Context) const
-{
-	return Context.CarryComponent && Cast<AWetMopActor>(Context.CarryComponent->GetHeldObject()) != nullptr;
 }
 
 void AWaterStainActor::ResetCleaning(const bool bNotify)
