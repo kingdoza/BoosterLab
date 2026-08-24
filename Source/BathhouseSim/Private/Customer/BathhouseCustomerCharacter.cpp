@@ -36,11 +36,20 @@ void ABathhouseCustomerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReas
 
 FPlayerInteractionQuery ABathhouseCustomerCharacter::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
+	if (CustomerKnockdown && CustomerKnockdown->IsKnockedDown())
+	{
+		return FPlayerInteractionQuery();
+	}
 	return CustomerSession ? CustomerSession->QueryCheckInInteraction(Context) : FPlayerInteractionQuery();
 }
 
 FPlayerInteractionResult ABathhouseCustomerCharacter::ExecuteInteraction(const FPlayerInteractionContext& Context)
 {
+	if (CustomerKnockdown && CustomerKnockdown->IsKnockedDown())
+	{
+		return FPlayerInteractionResult::Failed(
+			NSLOCTEXT("BathhouseCustomer", "KnockedDownInteraction", "쓰러진 손님과는 상호작용할 수 없습니다."));
+	}
 	return CustomerSession
 		? CustomerSession->ExecuteCheckInInteraction(Context)
 		: FPlayerInteractionResult::Failed(NSLOCTEXT("BathhouseCustomer", "MissingSession", "손님 상태를 확인할 수 없습니다."));

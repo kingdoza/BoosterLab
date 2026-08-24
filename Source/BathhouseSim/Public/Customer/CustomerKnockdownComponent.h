@@ -8,6 +8,8 @@
 #include "CustomerKnockdownComponent.generated.h"
 
 class UHealthComponent;
+class UCapsuleComponent;
+class USkeletalMeshComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCustomerKnockdownPresentationEvent);
 
@@ -60,6 +62,7 @@ private:
 	void HandleHealthDepleted(const FCombatDamageContext& DamageContext);
 
 	void RecoverCustomer();
+	void RestoreCollisionState(USkeletalMeshComponent& Mesh, UCapsuleComponent& Capsule);
 	bool HasConfiguredRootBody(FString* OutError = nullptr) const;
 
 	UPROPERTY(Transient)
@@ -72,6 +75,8 @@ private:
 	FName SavedMeshCollisionProfile;
 	TEnumAsByte<ECollisionEnabled::Type> SavedCapsuleCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
 	TEnumAsByte<ECollisionEnabled::Type> SavedMeshCollisionEnabled = ECollisionEnabled::QueryOnly;
+	TEnumAsByte<ECollisionChannel> SavedMeshCollisionObjectType = ECC_Pawn;
+	FCollisionResponseContainer SavedMeshCollisionResponses;
 	TEnumAsByte<EMovementMode> SavedMovementMode = MOVE_Walking;
 	uint8 SavedCustomMovementMode = 0;
 	FTimerHandle RecoveryTimerHandle;

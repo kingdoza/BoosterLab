@@ -1,42 +1,80 @@
-# Unreal Prompt — Mass-Independent Authored Impulses
+# Unreal Prompt — Verify Knockdown Check-In Interaction Recovery
 
-## 작업 상태
+## Status And Scope
 
-- Content 변경 불필요
-- Source build 또는 Live Coding 반영 확인만 필요
-- 사용자 visible UE 5.8 Editor를 재사용하고 별도 background Editor를 실행하지 않는다.
+Editor asset changes are not required. This stage is read-only compile/reload and PIE verification of the native fix.
 
-## 변경하지 않는 에셋
+Do not modify or resave Blueprint, StateTree, level, PhysicsAsset or collision preset assets for this task.
 
-- `/Game/Bathhouse/Blueprints/Combat/BP_MonkeyWrench`
+## Native Contract Under Verification
+
+- Knocked-down customers return no check-in interaction query and reject direct interaction execution.
+- `UCustomerKnockdownComponent` restores the skeletal mesh's pre-knockdown collision object type, full response container and enabled state.
+- Recovery does not leave the mesh with Ragdoll's `Visibility = Ignore` response.
+- Check-in queue/session/timer and StateTree soft pause resume in place.
+
+## Exact Assets To Inspect Without Saving
+
 - `/Game/Bathhouse/Blueprints/Customer/BP_BathhouseCustomer`
-- `/Game/Bathhouse/Physics/PA_BathhouseCustomer`
-- `/Game/Bathhouse/Curves/Equipment/CV_MonkeyWrench_Rotation`
-- `/Game/Maps/DefaultMap`
+- `/Game/Bathhouse/AI/ST_CustomerRoutine`
+- the existing gameplay level used for check-in testing
 
-Blueprint property 값, PhysicsAsset 질량/damping/constraint와 Curve key를 수정하거나 저장하지 않는다.
+No property, component, graph, binding or asset connection should be changed.
 
-## Native Contract
+## Preflight
 
-- `MeleeAttack.ImpulseStrength`와 `VerticalImpulse`의 합성값은 customer root body에 mass-independent velocity change로 적용된다.
-- wet mop/towel basket/monkey wrench의 `ThrowImpulseStrength`도 기존과 같이 mass-independent velocity change다.
-- 수치 기본값과 reflected property 계약은 변경되지 않았다.
+1. Use the existing single UE 5.8 Editor session for `C:/UnrealProjects/BathhouseSim/BathhouseSim.uproject`, or start one only if none exists.
+2. Confirm no second Editor or commandlet owns project packages.
+3. Confirm PIE is stopped before inspection.
+4. Record the initial dirty package list and preserve the existing user-modified `BP_MonkeyWrench` package.
+5. Confirm the newly built native module is loaded; restart the Editor once if it was already open with an older DLL.
 
-## Editor Verification
+## Read-Only Contract Inspection
 
-1. 사용자가 연 UE 5.8 Editor에서 Live Coding을 실행하거나 Editor를 정상 재시작한다.
-2. compile error가 없는지 확인한다.
-3. PIE에서 질량이 다른 ragdoll body가 같은 authored 공격 Strength에 대해 동일한 초기 속도 변화 경향을 보이는지 확인한다.
-4. 몽키스패너 G 드랍과 wet mop/towel basket G 드랍이 기존과 같이 동작하는지 확인한다.
-5. Content/Map package를 저장하지 않는다.
+On the `BP_BathhouseCustomer` Class Default Object, confirm without editing:
 
-## 수용 기준
+- Capsule collision ignores the player's `Visibility` interaction trace as currently authored.
+- Character Mesh normally blocks `Visibility` and is query-enabled.
+- `CustomerKnockdown.RagdollCollisionProfileName` remains `Ragdoll`.
+- `KnockdownDurationSeconds` remains the authored value.
 
-- C++ compile 성공.
-- customer knockdown과 common equipment drop의 Strength 경로가 모두 질량 독립적이다.
-- root-body validation, soft interruption, 4초 recovery와 G drop sweep에 회귀가 없다.
-- 예상 밖 Content/map dirty package가 없다.
+Do not replace the Custom mesh collision settings with a new preset as a workaround; native recovery now restores them exactly.
 
-## 미적용 범위
+## PIE Verification
 
-몽키스패너 rotation curve는 이번 코드 수정 대상이 아니다. 추천 key는 완료 보고에서 제공하고 사용자가 별도 요청할 때만 Editor에서 변경한다.
+1. Start PIE and allow one customer to reach the front of the check-in queue.
+2. Hold a valid key and aim at the standing customer.
+3. Confirm the `키 전달하기` prompt is visible before damage.
+4. Knock the customer down without transferring the key.
+5. While the customer is ragdolled:
+   - confirm the key interaction prompt is absent;
+   - confirm interaction input cannot transfer the key.
+6. Wait for native recovery.
+7. Aim at the recovered customer at its actual recovered position.
+8. Confirm the `키 전달하기` prompt appears again.
+9. Transfer the valid key and confirm the transaction succeeds once.
+10. Confirm the customer continues the existing routine and the queue advances normally.
+
+## Log Acceptance
+
+- No `CustomerKnockdown` missing physics/root-body error.
+- No check-in technical abort or unexpected timeout caused by the knockdown duration.
+- No StateTree stop/restart or destructive `ExitState` behavior.
+- No collision restoration warning, Blueprint runtime error or access violation.
+
+## Save And Dirty Policy
+
+- Save no assets for this verification.
+- Do not use Save All.
+- Stop PIE and confirm no new dirty Content, map or external actor package was created.
+- Preserve the pre-existing dirty `BP_MonkeyWrench` package without saving or resetting it.
+
+## Acceptance Result
+
+Pass only when all three presentation states are observed in order:
+
+1. standing check-in customer: prompt visible;
+2. knocked-down customer: prompt absent and interaction rejected;
+3. recovered customer: prompt visible and key transfer succeeds.
+
+If the recovered prompt is still absent, report the runtime mesh collision profile, object type, collision enabled state, Visibility response, `IsKnockedDown`, `IsWaitingForCheckIn` and `IsQueueFront` values without editing assets.

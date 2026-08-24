@@ -80,6 +80,8 @@ void UCustomerKnockdownComponent::HandleHealthDepleted(const FCombatDamageContex
 	SavedMeshCollisionProfile = Mesh->GetCollisionProfileName();
 	SavedCapsuleCollisionEnabled = Capsule->GetCollisionEnabled();
 	SavedMeshCollisionEnabled = Mesh->GetCollisionEnabled();
+	SavedMeshCollisionObjectType = Mesh->GetCollisionObjectType();
+	SavedMeshCollisionResponses = Mesh->GetCollisionResponseToChannels();
 	SavedMovementMode = Movement->MovementMode;
 	SavedCustomMovementMode = Movement->CustomMovementMode;
 
@@ -159,11 +161,8 @@ void UCustomerKnockdownComponent::RecoverCustomer()
 
 	Mesh->SetSimulatePhysics(false);
 	Mesh->SetAllBodiesSimulatePhysics(false);
-	Mesh->SetCollisionProfileName(SavedMeshCollisionProfile);
-	Mesh->SetCollisionEnabled(SavedMeshCollisionEnabled);
+	RestoreCollisionState(*Mesh, *Capsule);
 	Mesh->SetRelativeTransform(SavedMeshRelativeTransform);
-	Capsule->SetCollisionProfileName(SavedCapsuleCollisionProfile);
-	Capsule->SetCollisionEnabled(SavedCapsuleCollisionEnabled);
 	Customer->SetActorLocationAndRotation(
 		RecoveryLocation,
 		SavedActorTransform.Rotator(),
@@ -182,6 +181,24 @@ void UCustomerKnockdownComponent::RecoverCustomer()
 		Interruption->EndSoftInterruption();
 	}
 	OnCustomerRecovered.Broadcast();
+}
+
+void UCustomerKnockdownComponent::RestoreCollisionState(
+	USkeletalMeshComponent& Mesh,
+	UCapsuleComponent& Capsule)
+{
+	Mesh.SetCollisionProfileName(SavedMeshCollisionProfile);
+	if (Mesh.GetCollisionObjectType() != SavedMeshCollisionObjectType)
+	{
+		Mesh.SetCollisionObjectType(SavedMeshCollisionObjectType);
+	}
+	if (Mesh.GetCollisionResponseToChannels() != SavedMeshCollisionResponses)
+	{
+		Mesh.SetCollisionResponseToChannels(SavedMeshCollisionResponses);
+	}
+	Mesh.SetCollisionEnabled(SavedMeshCollisionEnabled);
+	Capsule.SetCollisionProfileName(SavedCapsuleCollisionProfile);
+	Capsule.SetCollisionEnabled(SavedCapsuleCollisionEnabled);
 }
 
 bool UCustomerKnockdownComponent::HasConfiguredRootBody(FString* OutError) const

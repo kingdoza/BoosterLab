@@ -9,9 +9,12 @@
 #include "Combat/MeleeAttackComponent.h"
 #include "Combat/MonkeyWrenchActor.h"
 #include "Components/SceneComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Customer/BathhouseCustomerCharacter.h"
+#include "Customer/CustomerKnockdownComponent.h"
 #include "Customer/CustomerRoutineDefinition.h"
 #include "Customer/CustomerRoutineInterruptionComponent.h"
 #include "Customer/CustomerSessionComponent.h"
@@ -22,6 +25,7 @@
 #include "EnhancedInputComponent.h"
 #include "Facility/BathhouseFacilityActor.h"
 #include "Facility/BathhouseFacilitySlotComponent.h"
+#include "Facility/BathhouseCounterActor.h"
 #include "InputAction.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Interaction/PlayerEquipmentUseComponent.h"
@@ -382,6 +386,89 @@ bool FBathhouseCustomerInterruptionTest::RunTest(const FString& Parameters)
 	World->Tick(LEVELTICK_All, 0.25f);
 	TestTrue(TEXT("Resumed total bath timer continues from saved remaining time"),
 		Session->GetRemainingBathStaySeconds() < BeforePause);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FBathhouseCustomerKnockdownTest,
+	"BathhouseSim.CustomerRecovery.CollisionAndCheckInInteractionRestore",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBathhouseCustomerKnockdownTest::RunTest(const FString& Parameters)
+{
+	FScopedCombatAutomationWorld TestWorld(TEXT("KnockdownCollisionAutomationWorld"));
+	UWorld* World = TestWorld.Get();
+	if (!World)
+	{
+		AddError(TEXT("Failed to create the knockdown collision automation world."));
+		return false;
+	}
+
+	ABathhouseCustomerCharacter* Customer = SpawnRecoveryTestCustomer(World);
+	ABathhouseCounterActor* Counter = World->SpawnActor<ABathhouseCounterActor>();
+	BeginCombatTestActor(Counter);
+	if (!Customer || !Counter)
+	{
+		AddError(TEXT("Failed to spawn the check-in recovery fixture."));
+		return false;
+	}
+
+	UCustomerRoutineDefinition* Definition = NewObject<UCustomerRoutineDefinition>();
+	UCustomerSessionComponent* Session = Customer->GetCustomerSession();
+	UCustomerKnockdownComponent* Knockdown = Customer->GetCustomerKnockdown();
+	UCapsuleComponent* Capsule = Customer->GetCapsuleComponent();
+	USkeletalMeshComponent* Mesh = Customer->GetMesh();
+	Session->InitializeSession(Definition, Counter);
+	TestTrue(TEXT("The customer joins the check-in queue"), Session->JoinQueue(EBathhouseCounterLane::CheckIn));
+	Session->BeginWaitingForCheckIn();
+
+	const FPlayerInteractionContext InteractionContext;
+	TestTrue(TEXT("A standing front customer exposes the check-in prompt"),
+		Customer->QueryInteraction(InteractionContext).bVisible);
+	Knockdown->bKnockedDown = true;
+	TestFalse(TEXT("A knocked-down customer hides the check-in prompt"),
+		Customer->QueryInteraction(InteractionContext).bVisible);
+	const FPlayerInteractionResult KnockedDownResult = Customer->ExecuteInteraction(InteractionContext);
+	TestFalse(TEXT("A direct interaction attempt cannot bypass the knockdown guard"), KnockedDownResult.bSucceeded);
+	TestTrue(TEXT("The knockdown guard returns its explicit failure reason"),
+		KnockedDownResult.FailureReason.ToString().Contains(TEXT("쓰러진 손님")));
+
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Mesh->SetCollisionObjectType(ECC_Pawn);
+	Mesh->SetCollisionResponseToAllChannels(ECR_Block);
+	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	Mesh->SetCollisionResponseToChannel(ECC_Vehicle, ECR_Ignore);
+	Capsule->SetCollisionProfileName(TEXT("Pawn"));
+	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+	Knockdown->SavedCapsuleCollisionProfile = Capsule->GetCollisionProfileName();
+	Knockdown->SavedMeshCollisionProfile = Mesh->GetCollisionProfileName();
+	Knockdown->SavedCapsuleCollisionEnabled = Capsule->GetCollisionEnabled();
+	Knockdown->SavedMeshCollisionEnabled = Mesh->GetCollisionEnabled();
+	Knockdown->SavedMeshCollisionObjectType = Mesh->GetCollisionObjectType();
+	Knockdown->SavedMeshCollisionResponses = Mesh->GetCollisionResponseToChannels();
+
+	Mesh->SetCollisionProfileName(TEXT("Ragdoll"));
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TestEqual(TEXT("Ragdoll suppresses the interaction trace"),
+		Mesh->GetCollisionResponseToChannel(ECC_Visibility), ECR_Ignore);
+
+	Knockdown->RestoreCollisionState(*Mesh, *Capsule);
+	TestEqual(TEXT("Recovery restores the custom mesh profile"), Mesh->GetCollisionProfileName(), FName(TEXT("Custom")));
+	TestEqual(TEXT("Recovery restores mesh query collision"),
+		Mesh->GetCollisionEnabled(), ECollisionEnabled::QueryOnly);
+	TestEqual(TEXT("Recovery restores the mesh object type"), Mesh->GetCollisionObjectType(), ECC_Pawn);
+	TestEqual(TEXT("Recovery restores the interaction trace response"),
+		Mesh->GetCollisionResponseToChannel(ECC_Visibility), ECR_Block);
+	TestEqual(TEXT("Recovery preserves the authored pawn response"),
+		Mesh->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
+	TestEqual(TEXT("Recovery restores capsule collision"),
+		Capsule->GetCollisionEnabled(), ECollisionEnabled::QueryAndPhysics);
+
+	Knockdown->bKnockedDown = false;
+	TestTrue(TEXT("The recovered customer exposes the check-in prompt again"),
+		Customer->QueryInteraction(InteractionContext).bVisible);
 	return true;
 }
 
