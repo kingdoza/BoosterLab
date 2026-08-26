@@ -3,6 +3,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Interaction/PlayerCarryComponent.h"
+#include "Interaction/PhysicalCarryFixedSlot.h"
 #include "Towel/TowelCirculationSubsystem.h"
 #include "Towel/TowelInventoryComponent.h"
 #include "Towel/Presentation/TowelStackVisualComponent.h"
@@ -18,6 +19,8 @@ ATowelBasketActor::ATowelBasketActor()
 	WorldMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WorldMesh"));
 	SetRootComponent(WorldMesh);
 	WorldMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+	WorldMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	WorldMesh->SetUseCCD(true);
 	Inventory = CreateDefaultSubobject<UTowelInventoryComponent>(TEXT("TowelInventory"));
 	Inventory->ConfigureDefaults(ETowelState::None, 0, 10);
 	TowelPresentationVisual = CreateDefaultSubobject<UTowelStackVisualComponent>(TEXT("TowelPresentationVisual"));
@@ -34,7 +37,16 @@ void ATowelBasketActor::BeginPlay()
 
 void ATowelBasketActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bEndingPlay = true;
 	TowelPresentationVisual->UnbindInventorySource();
+	if (AActor* SlotActor = FixedSlot.Get())
+	{
+		if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(SlotActor))
+		{
+			Slot->NotifyAssignedPhysicalCarryItemEnding(*this);
+		}
+	}
+	FixedSlot.Reset();
 	if (Carrier)
 	{
 		Carrier->NotifyHeldActorEnding(this);
@@ -61,7 +73,7 @@ void ATowelBasketActor::FellOutOfWorld(const UDamageType& DamageType)
 FPlayerInteractionQuery ATowelBasketActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
 	FPlayerInteractionQuery Query;
-	if (Carrier)
+	if (Carrier || IsStoredInAssignedPhysicalCarryFixedSlot())
 	{
 		return Query;
 	}
@@ -98,6 +110,11 @@ FTransform ATowelBasketActor::GetHeldTransform() const
 
 bool ATowelBasketActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
+	if (IsStoredInAssignedPhysicalCarryFixedSlot())
+	{
+		OutFailureReason = LOCTEXT("TakeFromSlotRequired", "수건 바구니는 전용 슬롯에서 가져와야 합니다.");
+		return false;
+	}
 	if (Carrier || !Carry.IsHandEmpty())
 	{
 		OutFailureReason = LOCTEXT("HandOccupied", "이미 다른 물건을 들고 있습니다.");
@@ -121,7 +138,6 @@ bool ATowelBasketActor::HandleTakenBy(UPlayerCarryComponent& Carry, USceneCompon
 		AttachToComponent(HeldAnchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 		ApplyHeldTransform();
 	}
-	OnHeldPresentationChanged.Broadcast(true);
 	return true;
 }
 
@@ -130,12 +146,117 @@ UPrimitiveComponent* ATowelBasketActor::GetPhysicalCarryPrimitive() const
 	return WorldMesh;
 }
 
-void ATowelBasketActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry)
+bool ATowelBasketActor::CanFreeDrop(FText& OutFailureReason) const
 {
-	ensureMsgf(Carrier == &Carry, TEXT("Towel basket drop committed by a carry component that does not own it."));
+	if (!Carrier || Carrier->GetHeldObject() != this)
+	{
+		OutFailureReason = LOCTEXT("BasketNotHeldForDrop", "수건 바구니를 들고 있어야 내려놓을 수 있습니다.");
+		return false;
+	}
+	return true;
+}
+
+bool ATowelBasketActor::TryBindPhysicalCarryFixedSlot(AActor& SlotActor, FText& OutFailureReason)
+{
+	if (bFixedSlotBindingConflict)
+	{
+		OutFailureReason = LOCTEXT("SlotBindingConflict", "수건 바구니가 여러 슬롯에 연결되어 있습니다.");
+		return false;
+	}
+	IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(&SlotActor);
+	if (!Slot || Slot->GetAssignedPhysicalCarryItem() != this)
+	{
+		OutFailureReason = LOCTEXT("InvalidSlotBinding", "수건 바구니와 슬롯 연결이 올바르지 않습니다.");
+		return false;
+	}
+	if (FixedSlot.IsValid() && FixedSlot.Get() != &SlotActor)
+	{
+		OutFailureReason = LOCTEXT("DuplicateSlotBinding", "수건 바구니가 여러 슬롯에 연결되어 있습니다.");
+		return false;
+	}
+	FixedSlot = &SlotActor;
+	return true;
+}
+
+void ATowelBasketActor::ClearPhysicalCarryFixedSlotBinding(AActor& ExpectedSlot)
+{
+	if (FixedSlot.Get() == &ExpectedSlot)
+	{
+		FixedSlot.Reset();
+	}
+}
+
+bool ATowelBasketActor::IsStoredInAssignedPhysicalCarryFixedSlot() const
+{
+	const IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(FixedSlot.Get());
+	return Slot && Slot->GetStoredPhysicalCarryItem() == this;
+}
+
+bool ATowelBasketActor::NotifyTakenFromFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || Carrier)
+	{
+		return false;
+	}
+	Carrier = &Carry;
+	return true;
+}
+
+bool ATowelBasketActor::NotifyStoredInFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || Carrier != &Carry)
+	{
+		return false;
+	}
 	Carrier = nullptr;
 	LastSafeTransform = GetActorTransform();
-	OnHeldPresentationChanged.Broadcast(false);
+	return true;
+}
+
+bool ATowelBasketActor::NotifyRecoveredToFixedSlotCommitted(AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || bEndingPlay)
+	{
+		return false;
+	}
+	if (Carrier && Carrier->GetHeldObject() == this)
+	{
+		return false;
+	}
+	Carrier = nullptr;
+	LastSafeTransform = GetActorTransform();
+	return true;
+}
+
+void ATowelBasketActor::NotifyFixedSlotDestroyed(AActor& SlotActor)
+{
+	if (FixedSlot.Get() == &SlotActor)
+	{
+		FixedSlot.Reset();
+		Carrier = nullptr;
+		LastSafeTransform = GetActorTransform();
+	}
+}
+
+bool ATowelBasketActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry)
+{
+	if (Carrier != &Carry)
+	{
+		return false;
+	}
+	Carrier = nullptr;
+	LastSafeTransform = GetActorTransform();
+	return true;
+}
+
+void ATowelBasketActor::PublishPhysicalCarryCommit(const EPhysicalCarryCommitTransition Transition)
+{
+	OnHeldPresentationChanged.Broadcast(
+		Transition == EPhysicalCarryCommitTransition::TakenIntoHand);
 }
 
 void ATowelBasketActor::RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry)
@@ -144,26 +265,34 @@ void ATowelBasketActor::RecoverPhysicalCarryable(UPlayerCarryComponent* Previous
 	{
 		return;
 	}
-	const bool bWasHeld = Carrier != nullptr;
-	if (Carrier)
+	if (Carrier && Carrier->GetHeldObject() == this
+		&& Carrier->RecoverHeldPhysicalObject(this))
 	{
-		Carrier->CommitReleasePhysicalObject(this);
+		return;
+	}
+	if (AActor* SlotActor = FixedSlot.Get())
+	{
+		if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(SlotActor))
+		{
+			if (Slot->TryRecoverAssignedPhysicalCarryItem(*this))
+			{
+				return;
+			}
+		}
 	}
 	Carrier = nullptr;
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetWorldPhysics(false);
-	SetActorTransform(LastSafeTransform.Equals(FTransform::Identity) ? InitialTransform : LastSafeTransform);
+	SetActorTransform(LastSafeTransform);
 	SetWorldPhysics(true);
-	if (bWasHeld)
-	{
-		OnHeldPresentationChanged.Broadcast(false);
-	}
 }
 
 void ATowelBasketActor::SetWorldPhysics(const bool bEnabled)
 {
 	if (bEnabled)
 	{
+		WorldMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		WorldMesh->SetUseCCD(true);
 		WorldMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		WorldMesh->SetSimulatePhysics(true);
 	}

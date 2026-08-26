@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-물걸레의 범용 LMB equipment Hold 청소, target 유무와 독립된 mopping state/motion, bath/dressing floor의 무작위 얼룩 생성과 spawn별 seeded material/local yaw/XY scale variation이 Source에 구현되어 있다. Water Stain은 E hold를 노출하지 않는다.
+물걸레의 범용 LMB equipment Hold 청소, target 유무와 독립된 mopping state/motion, bath/dressing floor의 무작위 얼룩 생성과 spawn별 seeded material/local yaw/XY scale variation이 Source에 구현되어 있다. 물걸레의 exact fixed slot, held-position free drop과 fixed-slot 우선 recovery도 [PhysicalCarrySystem.md](PhysicalCarrySystem.md)에 따라 구현되어 있다.
 
 이번 범위는 물 얼룩과 물걸레 하나만 구현한다. 다른 얼룩·청소 도구, 물통, 물걸레 세척, 내구도와 소모품은 제외한다.
 
@@ -53,7 +53,7 @@ Cleaning은 player 입력 mapping, carry slot, UI 상태와 고객 routine을 �
 | 물걸레 world/held presentation·mopping state | `AWetMopActor` |
 | LMB Hold lifecycle과 camera context | `UPlayerEquipmentUseComponent` |
 | 물걸레 loop transform 표현 | `UHeldEquipmentMotionComponent` |
-| 단일 소지 reference와 G drop | `UPlayerCarryComponent` |
+| 단일 소지, fixed-slot와 G drop transaction | `UPlayerCarryComponent` |
 
 ## Types
 
@@ -126,9 +126,9 @@ Native는 `StainVisualRoot`에 local yaw/scale을 적용하고 유효 material�
 - 빈손 player가 E로 획득
 - 다른 key/mop/basket/monkey wrench 소지 중이면 정확한 실패 이유 반환
 - held 중 world collision/physics 비활성화와 공용 held anchor 부착
-- G로 camera forward 방향의 authorable impulse를 받아 world에 복귀
-- key와 달리 hook/holder domain state를 만들지 않음
-- falling out of world 또는 carrier EndPlay 시 last safe transform, 없으면 initial transform으로 복구
+- G로 actual held pose에서 질량 무시 약한 velocity change를 받아 world에 복귀
+- exact assigned equipment slot에 E로 take/store하며 cleaning state와 분리
+- falling out of world 또는 carrier EndPlay 시 fixed slot 우선, 불가능하면 last-safe transform으로 복구
 - `IHeldEquipmentUsable`의 Hold mode를 구현하고 LMB중 `bIsMopping=true`를 유지
 - active use 시 target이 없어도 `UHeldEquipmentMotionComponent`의 loop curve를 계속 재생
 - LMB release/cancel/drop/EndPlay에서 mopping state, active stain lock과 motion baseline을 한 번 정리
@@ -164,7 +164,7 @@ Editor authoring:
 - zone bounds, kind, weight, 구역 제한, floor filter와 clearance
 - stain 제거 시간, decal/mesh/collision
 - stain material 후보, yaw 범위와 X/Y scale 범위
-- mop mesh/collision, held presentation과 throw impulse
+- mop mesh/collision, held presentation, fixed slot과 약한 forward/upward release velocity
 - mop loop position/rotation curve, motion period와 optional blend/reset value
 
 Blueprint 표현 event:
@@ -181,7 +181,7 @@ Blueprint는 material, decal, particle, sound와 animation만 담당한다. prog
 
 ## Dependencies
 
-- Cleaning -> Interaction의 query/equipment-use/motion/carry public 계약
+- Cleaning -> Interaction/Physical Carry의 query/equipment-use/motion/carry public 계약
 - Cleaning -> Engine collision/timer/world subsystem
 - Character -> Interaction 입력 routing
 - UI -> Interaction 표시 데이터
@@ -193,7 +193,7 @@ Blueprint는 material, decal, particle, sound와 animation만 담당한다. prog
 - invalid/null material 후보: 제외하고 유효 후보가 없으면 기존 Blueprint 기본 material 유지
 - 뒤집힌 scale/yaw 범위: 작은 값과 큰 값을 정규화하되 non-positive scale은 validation 경고와 안전값 clamp
 - mop 없음/다른 소지품: hold 시작 전 실패
-- cleaning 중 G drop: equipment use/stain progress/motion cancel 후 mop world drop
+- cleaning 중 E store 또는 G drop: equipment use/stain progress/motion cancel 후 atomic placement
 - stain EndPlay: active hold와 subsystem reference 정리
 - mop EndPlay: carry reference 정리, active cleaning cancel
 - player EndPlay: stain cleaner lock 해제, mop 안전 복구
@@ -208,4 +208,5 @@ Blueprint는 material, decal, particle, sound와 animation만 담당한다. prog
 - 유효한 stain에만 progress가 올라가고 focus 이탈은 stain만 취소하며 LMB release/drop은 전체 use를 종료하는지 확인한다.
 - 물걸레 없이 prompt 실패 이유가 지속·실행 결과 양쪽에서 정확한지 확인한다.
 - Blueprint 표현을 중단해도 C++ cleaning state와 active stain count가 일치하는지 확인한다.
+- fixed-slot store/take가 stain progress를 만들지 않고 drop/store cancel 뒤 다음 mopping이 정상인지 확인한다.
 - 다른 stain/tool type이 이번 구현에 추가되지 않았는지 확인한다.

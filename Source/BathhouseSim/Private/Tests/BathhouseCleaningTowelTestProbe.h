@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Cleaning/WetMopActor.h"
 #include "Interaction/InteractionTypes.h"
 #include "Towel/TowelTypes.h"
 #include "UObject/Object.h"
@@ -11,6 +12,76 @@ class AWaterStainActor;
 class AWetMopActor;
 class UPlayerCarryComponent;
 class UPlayerInteractionComponent;
+class APhysicalCarryFixedSlotActor;
+
+UCLASS(Transient, NotBlueprintable)
+class ABathhousePhysicalCarryFailureProbeActor : public AWetMopActor
+{
+	GENERATED_BODY()
+
+public:
+	enum class EFailurePoint : uint8
+	{
+		None,
+		FixedTake,
+		FixedStore,
+		FreeDrop
+	};
+
+	void SetFailurePoint(const EFailurePoint InFailurePoint) { FailurePoint = InFailurePoint; }
+
+	virtual bool NotifyTakenFromFixedSlotCommitted(
+		UPlayerCarryComponent& Carry,
+		AActor& SlotActor) override;
+	virtual bool NotifyStoredInFixedSlotCommitted(
+		UPlayerCarryComponent& Carry,
+		AActor& SlotActor) override;
+	virtual bool NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry) override;
+
+private:
+	EFailurePoint FailurePoint = EFailurePoint::None;
+};
+
+UCLASS(Transient, NotBlueprintable)
+class UBathhousePhysicalCarryCommitProbe : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	void Bind(
+		AWetMopActor* InMop,
+		UPlayerCarryComponent* InCarry,
+		APhysicalCarryFixedSlotActor* InSlot = nullptr);
+	void Unbind();
+	void ResetCounts();
+
+	bool bAttemptLowLevelReleaseWhenHeld = false;
+	bool bDestroyItemOnHeldPresentation = false;
+	int32 ItemPresentationCount = 0;
+	int32 CarryPresentationCount = 0;
+	int32 SlotPresentationCount = 0;
+	int32 LowLevelReleaseAttemptCount = 0;
+	bool bLowLevelReleaseSucceeded = false;
+
+private:
+	UFUNCTION()
+	void HandleItemPresentationChanged(bool bIsHeld);
+
+	UFUNCTION()
+	void HandleCarryPresentationChanged(AActor* HeldObject);
+
+	UFUNCTION()
+	void HandleSlotPresentationChanged(bool bIsOccupied);
+
+	UPROPERTY(Transient)
+	TObjectPtr<AWetMopActor> Mop = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPlayerCarryComponent> Carry = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<APhysicalCarryFixedSlotActor> Slot = nullptr;
+};
 
 UCLASS(Transient, NotBlueprintable)
 class UBathhouseTowelAtomicCommitProbe : public UObject

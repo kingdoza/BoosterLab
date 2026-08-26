@@ -1,9 +1,11 @@
 #include "Interaction/BathhouseKeyActor.h"
 
+#include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Facility/BathhouseCounterActor.h"
 #include "Interaction/BathhouseKeyHookActor.h"
+#include "Interaction/PhysicalCarryFixedSlot.h"
 #include "Interaction/PlayerCarryComponent.h"
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
@@ -14,16 +16,26 @@
 ABathhouseKeyActor::ABathhouseKeyActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	KeyPhysicsRoot = CreateDefaultSubobject<UBoxComponent>(TEXT("KeyPhysicsRoot"));
+	SetRootComponent(KeyPhysicsRoot);
+	KeyPhysicsRoot->SetBoxExtent(FVector(8.0f, 4.0f, 2.0f));
+	KeyPhysicsRoot->SetCollisionProfileName(TEXT("PhysicsActor"));
+	KeyPhysicsRoot->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	KeyPhysicsRoot->SetUseCCD(true);
+	KeyPhysicsRoot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
-	SetRootComponent(SceneRoot);
+	SceneRoot->SetupAttachment(KeyPhysicsRoot);
 	WorldMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WorldMesh"));
 	WorldMesh->SetupAttachment(SceneRoot);
-	WorldMesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+	WorldMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ABathhouseKeyActor::BeginPlay()
 {
 	Super::BeginPlay();
+	InitialTransform = GetActorTransform();
+	LastSafeTransform = InitialTransform;
 	if (KeyHook)
 	{
 		InitializeAtHook(KeyHook);
@@ -32,6 +44,15 @@ void ABathhouseKeyActor::BeginPlay()
 
 void ABathhouseKeyActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bEndingPlay = true;
+	if (AActor* SlotActor = FixedSlot.Get())
+	{
+		if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(SlotActor))
+		{
+			Slot->NotifyAssignedPhysicalCarryItemEnding(*this);
+		}
+	}
+	FixedSlot.Reset();
 	if (UPlayerCarryComponent* Carry = Cast<UPlayerCarryComponent>(StateOwner.Get()))
 	{
 		Carry->CommitReleaseKey(this);
@@ -46,10 +67,15 @@ void ABathhouseKeyActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+void ABathhouseKeyActor::FellOutOfWorld(const UDamageType& DamageType)
+{
+	RecoverPhysicalCarryable(Cast<UPlayerCarryComponent>(StateOwner.Get()));
+}
+
 FPlayerInteractionQuery ABathhouseKeyActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
 	FPlayerInteractionQuery Query;
-	if (KeyState != EBathhouseKeyState::OnCounter)
+	if (KeyState != EBathhouseKeyState::OnCounter && KeyState != EBathhouseKeyState::DroppedInWorld)
 	{
 		return Query;
 	}
@@ -60,7 +86,7 @@ FPlayerInteractionQuery ABathhouseKeyActor::QueryInteraction(const FPlayerIntera
 	Query.bCanInteract = Context.CarryComponent && Context.CarryComponent->IsHandEmpty();
 	if (!Query.bCanInteract)
 	{
-		Query.FailureReason = LOCTEXT("HandOccupied", "이미 다른 키를 들고 있습니다.");
+		Query.FailureReason = LOCTEXT("HandOccupied", "이미 다른 물건을 들고 있습니다.");
 	}
 	return Query;
 }
@@ -71,6 +97,13 @@ FPlayerInteractionResult ABathhouseKeyActor::ExecuteInteraction(const FPlayerInt
 	if (!Query.bCanInteract || !Context.CarryComponent)
 	{
 		return FPlayerInteractionResult::Failed(Query.FailureReason);
+	}
+	if (KeyState == EBathhouseKeyState::DroppedInWorld)
+	{
+		FText FailureReason;
+		return Context.CarryComponent->TryTakePhysicalObject(this, FailureReason)
+			? FPlayerInteractionResult::Succeeded()
+			: FPlayerInteractionResult::Failed(FailureReason);
 	}
 	return TryTakeFromCounter(*Context.CarryComponent)
 		? FPlayerInteractionResult::Succeeded()
@@ -91,23 +124,176 @@ FTransform ABathhouseKeyActor::GetHeldTransform() const
 
 bool ABathhouseKeyActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
-	OutFailureReason = LOCTEXT("KeyTransactionRequired", "키는 키걸이 또는 카운터에서 가져와야 합니다.");
-	return false;
+	if (KeyState != EBathhouseKeyState::DroppedInWorld)
+	{
+		OutFailureReason = LOCTEXT("KeyTransactionRequired", "키는 키걸이, 카운터 또는 월드 드랍 위치에서 가져와야 합니다.");
+		return false;
+	}
+	if (!Carry.IsHandEmpty())
+	{
+		OutFailureReason = LOCTEXT("HandOccupied", "이미 다른 물건을 들고 있습니다.");
+		return false;
+	}
+	return true;
 }
 
 bool ABathhouseKeyActor::HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor)
 {
-	return KeyState == EBathhouseKeyState::HeldByPlayer;
+	if (KeyState != EBathhouseKeyState::DroppedInWorld || !IsValid(HeldAnchor))
+	{
+		return false;
+	}
+	LastSafeTransform = GetActorTransform();
+	CommitState(EBathhouseKeyState::HeldByPlayer, &Carry, true);
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SetWorldPhysics(false);
+	AttachToComponent(HeldAnchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	ApplyHeldTransform();
+	SetActorHiddenInGame(false);
+	return true;
 }
 
 bool ABathhouseKeyActor::CanFreeDrop(FText& OutFailureReason) const
 {
-	OutFailureReason = LOCTEXT("KeyHookOnly", "키는 원래 키걸이에만 반환할 수 있습니다.");
-	return false;
+	const UPlayerCarryComponent* Carry = Cast<UPlayerCarryComponent>(StateOwner.Get());
+	if (KeyState != EBathhouseKeyState::HeldByPlayer || !Carry || Carry->GetHeldObject() != this)
+	{
+		OutFailureReason = LOCTEXT("KeyNotHeldForDrop", "키를 들고 있어야 내려놓을 수 있습니다.");
+		return false;
+	}
+	return true;
+}
+
+UPrimitiveComponent* ABathhouseKeyActor::GetPhysicalCarryPrimitive() const
+{
+	return KeyPhysicsRoot;
+}
+
+bool ABathhouseKeyActor::TryBindPhysicalCarryFixedSlot(AActor& SlotActor, FText& OutFailureReason)
+{
+	if (bFixedSlotBindingConflict)
+	{
+		OutFailureReason = LOCTEXT("SlotBindingConflict", "키가 여러 고정 슬롯에 연결되어 있습니다.");
+		return false;
+	}
+	IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(&SlotActor);
+	if (!Slot || Slot->GetAssignedPhysicalCarryItem() != this)
+	{
+		OutFailureReason = LOCTEXT("InvalidSlotBinding", "키와 키걸이 연결이 올바르지 않습니다.");
+		return false;
+	}
+	if (FixedSlot.IsValid() && FixedSlot.Get() != &SlotActor)
+	{
+		OutFailureReason = LOCTEXT("DuplicateSlotBinding", "키가 여러 고정 슬롯에 연결되어 있습니다.");
+		return false;
+	}
+	FixedSlot = &SlotActor;
+	return true;
+}
+
+void ABathhouseKeyActor::ClearPhysicalCarryFixedSlotBinding(AActor& ExpectedSlot)
+{
+	if (FixedSlot.Get() == &ExpectedSlot)
+	{
+		FixedSlot.Reset();
+	}
+}
+
+bool ABathhouseKeyActor::IsStoredInAssignedPhysicalCarryFixedSlot() const
+{
+	const IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(FixedSlot.Get());
+	return Slot && Slot->GetStoredPhysicalCarryItem() == this;
+}
+
+bool ABathhouseKeyActor::NotifyTakenFromFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || KeyState != EBathhouseKeyState::AtHook || StateOwner != &SlotActor)
+	{
+		return false;
+	}
+	CommitState(EBathhouseKeyState::HeldByPlayer, &Carry, true);
+	SetActorHiddenInGame(false);
+	return true;
+}
+
+bool ABathhouseKeyActor::NotifyStoredInFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || KeyState != EBathhouseKeyState::HeldByPlayer || StateOwner != &Carry)
+	{
+		return false;
+	}
+	CommitState(EBathhouseKeyState::AtHook, &SlotActor, true);
+	LastSafeTransform = GetActorTransform();
+	SetWorldPresentation(true, false);
+	return true;
+}
+
+bool ABathhouseKeyActor::NotifyRecoveredToFixedSlotCommitted(AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || bEndingPlay)
+	{
+		return false;
+	}
+	if (UPlayerCarryComponent* Carry = Cast<UPlayerCarryComponent>(StateOwner.Get()))
+	{
+		if (Carry->GetHeldObject() == this)
+		{
+			return false;
+		}
+	}
+	CommitState(EBathhouseKeyState::AtHook, &SlotActor, true);
+	LastSafeTransform = GetActorTransform();
+	SetWorldPresentation(true, false);
+	return true;
+}
+
+void ABathhouseKeyActor::NotifyFixedSlotDestroyed(AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor)
+	{
+		return;
+	}
+	FixedSlot.Reset();
+	KeyHook = nullptr;
+	CommitState(EBathhouseKeyState::DroppedInWorld, nullptr);
+	LastSafeTransform = GetActorTransform();
+}
+
+bool ABathhouseKeyActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry)
+{
+	if (KeyState != EBathhouseKeyState::HeldByPlayer || StateOwner != &Carry)
+	{
+		return false;
+	}
+	CommitState(EBathhouseKeyState::DroppedInWorld, nullptr, true);
+	LastSafeTransform = GetActorTransform();
+	return true;
+}
+
+void ABathhouseKeyActor::PublishPhysicalCarryCommit(const EPhysicalCarryCommitTransition Transition)
+{
+	(void)Transition;
+	if (!bHasDeferredStatePublication)
+	{
+		return;
+	}
+	const EBathhouseKeyState PreviousState = DeferredPreviousState;
+	const EBathhouseKeyState NewState = DeferredNewState;
+	bHasDeferredStatePublication = false;
+	BroadcastStateTransition(PreviousState, NewState);
 }
 
 void ABathhouseKeyActor::RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry)
 {
+	if (PreviousCarry && PreviousCarry->GetHeldObject() == this
+		&& PreviousCarry->RecoverHeldPhysicalObject(this))
+	{
+		return;
+	}
 	RecoverToHook(PreviousCarry);
 }
 
@@ -121,53 +307,37 @@ bool ABathhouseKeyActor::InitializeAtHook(ABathhouseKeyHookActor* InHook)
 	{
 		return false;
 	}
+	if (!InHook->KeyActor && !GetWorld() && !InHook->GetWorld())
+	{
+		// Preserve native transient/unit construction compatibility. Runtime worlds
+		// still require the exact reflected KeyActor assignment and validation.
+		InHook->KeyActor = this;
+		InHook->bRuntimeOperational = true;
+		InHook->bSlotOccupied = true;
+	}
 	KeyHook = InHook;
+	FText FailureReason;
+	if (!TryBindPhysicalCarryFixedSlot(*InHook, FailureReason))
+	{
+		return false;
+	}
 	if (KeyState == EBathhouseKeyState::AtHook || KeyState == EBathhouseKeyState::Recovering)
 	{
 		CommitState(EBathhouseKeyState::AtHook, InHook);
 		AttachAtHook();
 		return true;
 	}
-	return KeyHook == InHook;
+	return FixedSlot.Get() == InHook;
 }
 
 bool ABathhouseKeyActor::TryTakeFromHook(UPlayerCarryComponent& Carry, ABathhouseKeyHookActor& Hook)
 {
-	if (KeyState != EBathhouseKeyState::AtHook || KeyHook != &Hook || StateOwner != &Hook || !Carry.IsHandEmpty()
-		|| !Hook.IsNumberTopologyValid())
-	{
-		return false;
-	}
-	if (!Carry.CommitTakeKey(this))
-	{
-		return false;
-	}
-
-	CommitState(EBathhouseKeyState::HeldByPlayer, &Carry);
-	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-	if (USceneComponent* Anchor = Carry.GetHeldAnchor())
-	{
-		AttachToComponent(Anchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		ApplyHeldTransform();
-	}
-	SetActorHiddenInGame(false);
-	SetWorldPresentation(true, false);
-	return true;
+	return Carry.TryTakeFromFixedSlot(&Hook).bSucceeded;
 }
 
 bool ABathhouseKeyActor::TryReturnToHook(UPlayerCarryComponent& Carry, ABathhouseKeyHookActor& Hook)
 {
-	if (KeyState != EBathhouseKeyState::HeldByPlayer || StateOwner != &Carry || KeyHook != &Hook)
-	{
-		return false;
-	}
-	if (!Carry.CommitReleaseKey(this))
-	{
-		return false;
-	}
-	CommitState(EBathhouseKeyState::AtHook, &Hook);
-	AttachAtHook();
-	return true;
+	return Carry.TryStoreHeldObjectInFixedSlot(&Hook).bSucceeded;
 }
 
 bool ABathhouseKeyActor::TryAssignToCustomer(UPlayerCarryComponent& Carry, AActor& Customer)
@@ -228,36 +398,33 @@ bool ABathhouseKeyActor::TryTakeFromCounter(UPlayerCarryComponent& Carry)
 	CounterReturnSlotIndex = INDEX_NONE;
 	CommitState(EBathhouseKeyState::HeldByPlayer, &Carry);
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SetWorldPhysics(false);
 	if (USceneComponent* Anchor = Carry.GetHeldAnchor())
 	{
 		AttachToComponent(Anchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 		ApplyHeldTransform();
 	}
-	SetWorldPresentation(true, false);
+	SetActorHiddenInGame(false);
 	return true;
 }
 
 void ABathhouseKeyActor::RecoverToHook(UObject* ExpectedOwner)
 {
-	if (!KeyHook)
-	{
-		return;
-	}
-
 	UObject* PreviousOwner = StateOwner.Get();
 	if (ExpectedOwner && PreviousOwner != ExpectedOwner)
 	{
 		return;
 	}
-
-	if (KeyState == EBathhouseKeyState::AtHook && PreviousOwner == KeyHook && !CounterOwner)
+	if (KeyState == EBathhouseKeyState::AtHook && PreviousOwner == KeyHook
+		&& IsStoredInAssignedPhysicalCarryFixedSlot() && !CounterOwner)
 	{
 		AttachAtHook();
 		return;
 	}
 
 	CommitState(EBathhouseKeyState::Recovering, this);
-	if (UPlayerCarryComponent* Carry = Cast<UPlayerCarryComponent>(PreviousOwner))
+	if (UPlayerCarryComponent* Carry = Cast<UPlayerCarryComponent>(PreviousOwner);
+		Carry && Carry->GetHeldObject() == this)
 	{
 		Carry->CommitReleaseKey(this);
 	}
@@ -267,45 +434,108 @@ void ABathhouseKeyActor::RecoverToHook(UObject* ExpectedOwner)
 		CounterOwner = nullptr;
 		CounterReturnSlotIndex = INDEX_NONE;
 	}
-	CommitState(EBathhouseKeyState::AtHook, KeyHook);
-	AttachAtHook();
+	if (AActor* SlotActor = FixedSlot.Get())
+	{
+		if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(SlotActor))
+		{
+			if (Slot->TryRecoverAssignedPhysicalCarryItem(*this))
+			{
+				return;
+			}
+		}
+	}
+
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SetWorldPhysics(false);
+	SetActorTransform(LastSafeTransform);
+	SetWorldPhysics(true);
+	CommitState(EBathhouseKeyState::DroppedInWorld, nullptr);
 }
 
-bool ABathhouseKeyActor::CommitState(const EBathhouseKeyState NewState, UObject* NewOwner)
+bool ABathhouseKeyActor::CommitState(
+	const EBathhouseKeyState NewState,
+	UObject* NewOwner,
+	const bool bDeferPublication)
 {
 	const EBathhouseKeyState PreviousState = KeyState;
-	const bool bWasHeld = PreviousState == EBathhouseKeyState::HeldByPlayer;
 	KeyState = NewState;
 	StateOwner = NewOwner;
 	if (PreviousState != NewState)
 	{
-		OnKeyStateChanged.Broadcast(PreviousState, NewState);
-		const bool bIsHeld = NewState == EBathhouseKeyState::HeldByPlayer;
-		if (bWasHeld != bIsHeld)
+		const EBathhouseKeyState PublicationPreviousState = bHasDeferredStatePublication
+			? DeferredPreviousState
+			: PreviousState;
+		if (bDeferPublication)
 		{
-			OnHeldPresentationChanged.Broadcast(bIsHeld);
+			DeferredPreviousState = PublicationPreviousState;
+			DeferredNewState = NewState;
+			bHasDeferredStatePublication = true;
+		}
+		else
+		{
+			bHasDeferredStatePublication = false;
+			BroadcastStateTransition(PublicationPreviousState, NewState);
 		}
 	}
 	return true;
 }
 
+void ABathhouseKeyActor::BroadcastStateTransition(
+	const EBathhouseKeyState PreviousState,
+	const EBathhouseKeyState NewState)
+{
+	if (PreviousState == NewState)
+	{
+		return;
+	}
+	OnKeyStateChanged.Broadcast(PreviousState, NewState);
+	const bool bWasHeld = PreviousState == EBathhouseKeyState::HeldByPlayer;
+	const bool bIsHeld = NewState == EBathhouseKeyState::HeldByPlayer;
+	if (bWasHeld != bIsHeld)
+	{
+		OnHeldPresentationChanged.Broadcast(bIsHeld);
+	}
+}
+
 void ABathhouseKeyActor::AttachAtHook()
 {
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SetWorldPhysics(false);
 	if (KeyHook && KeyHook->GetKeyAnchor())
 	{
 		AttachToComponent(KeyHook->GetKeyAnchor(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	}
 	SetActorHiddenInGame(false);
-	SetWorldPresentation(true, false);
 }
 
 void ABathhouseKeyActor::SetWorldPresentation(const bool bVisible, const bool bCollisionEnabled)
 {
 	SetActorHiddenInGame(!bVisible);
-	if (WorldMesh)
+	if (KeyPhysicsRoot)
 	{
-		WorldMesh->SetCollisionEnabled(bCollisionEnabled ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+		KeyPhysicsRoot->SetSimulatePhysics(false);
+		KeyPhysicsRoot->SetCollisionEnabled(
+			bCollisionEnabled ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+	}
+}
+
+void ABathhouseKeyActor::SetWorldPhysics(const bool bEnabled)
+{
+	if (!KeyPhysicsRoot)
+	{
+		return;
+	}
+	if (bEnabled)
+	{
+		KeyPhysicsRoot->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		KeyPhysicsRoot->SetUseCCD(true);
+		KeyPhysicsRoot->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		KeyPhysicsRoot->SetSimulatePhysics(true);
+	}
+	else
+	{
+		KeyPhysicsRoot->SetSimulatePhysics(false);
+		KeyPhysicsRoot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 }
 
@@ -324,6 +554,11 @@ void ABathhouseKeyActor::ApplyHeldTransform()
 EDataValidationResult ABathhouseKeyActor::IsDataValid(FDataValidationContext& Context) const
 {
 	EDataValidationResult Result = Super::IsDataValid(Context);
+	if (!KeyPhysicsRoot || GetRootComponent() != KeyPhysicsRoot)
+	{
+		Context.AddError(LOCTEXT("InvalidPhysicsRoot", "KeyPhysicsRoot must remain the key Actor root component."));
+		Result = EDataValidationResult::Invalid;
+	}
 	if (!HeldTransform.GetScale3D().Equals(FVector::OneVector))
 	{
 		Context.AddWarning(LOCTEXT(

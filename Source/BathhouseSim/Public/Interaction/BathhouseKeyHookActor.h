@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Interaction/PhysicalCarryFixedSlot.h"
 #include "Interaction/PlayerInteractable.h"
 #include "BathhouseKeyHookActor.generated.h"
 
@@ -10,7 +11,10 @@ class UBoxComponent;
 class USceneComponent;
 
 UCLASS(Blueprintable)
-class BATHHOUSESIM_API ABathhouseKeyHookActor : public AActor, public IPlayerInteractable
+class BATHHOUSESIM_API ABathhouseKeyHookActor
+	: public AActor
+	, public IPlayerInteractable
+	, public IPhysicalCarryFixedSlot
 {
 	GENERATED_BODY()
 
@@ -22,6 +26,22 @@ public:
 
 	virtual FPlayerInteractionQuery QueryInteraction(const FPlayerInteractionContext& Context) const override;
 	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
+	virtual AActor* GetAssignedPhysicalCarryItem() const override;
+	virtual AActor* GetStoredPhysicalCarryItem() const override;
+	virtual USceneComponent* GetPhysicalCarryItemAnchor() const override { return KeyAnchor; }
+	virtual FText GetPhysicalCarrySlotDisplayName() const override;
+	virtual bool IsPhysicalCarrySlotOperational(FText* OutFailureReason = nullptr) const override;
+	virtual bool QueryTakePhysicalCarry(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const override;
+	virtual bool QueryStorePhysicalCarry(const UPlayerCarryComponent& Carry, const AActor& Item, FText& OutFailureReason) const override;
+	virtual bool ApplyPhysicalCarrySlotOccupancy(AActor& ExpectedItem, bool bOccupied) override;
+	virtual void NotifyPhysicalCarrySlotOccupancyCommitted() override;
+	virtual bool TryRecoverAssignedPhysicalCarryItem(AActor& ExpectedItem) override;
+	virtual void NotifyAssignedPhysicalCarryItemEnding(AActor& ExpectedItem) override;
+	virtual void DisablePhysicalCarrySlot(const FText& FailureReason) override;
+
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 
 	UFUNCTION(BlueprintPure, Category = "Bathhouse Key")
 	int32 GetKeyNumber() const { return KeyNumber; }
@@ -32,8 +52,13 @@ public:
 	USceneComponent* GetKeyAnchor() const { return KeyAnchor; }
 	bool IsNumberTopologyValid(FText* OutFailureReason = nullptr) const;
 
+	UPROPERTY(BlueprintAssignable, Category = "Bathhouse Key|Presentation")
+	FOnPhysicalCarrySlotOccupancyChanged OnSlotOccupancyChanged;
+
 protected:
+	friend class ABathhouseKeyActor;
 	friend class FBathhousePhysicalCarryDropTest;
+	friend class FBathhousePhysicalCarryFixedSlotTest;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bathhouse Key")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -49,4 +74,13 @@ protected:
 
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Bathhouse Key")
 	TObjectPtr<ABathhouseKeyActor> KeyActor = nullptr;
+
+private:
+	bool InitializeRuntimeFixedSlot();
+	void ReleaseStoredKeyForEndPlay();
+
+	FText RuntimeFailureReason;
+	bool bSlotOccupied = false;
+	bool bRuntimeOperational = false;
+	bool bEndingPlay = false;
 };

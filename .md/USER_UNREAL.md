@@ -1,27 +1,22 @@
-# USER Unreal Work — Mass-Independent Impulse Live Coding
+# User Unreal Action — Open The Fresh UE 5.8 Editor
 
 ## 현재 상태
 
-- Source 수정 완료
-- Content 변경 없음
-- 사용자 visible UE 5.8 Editor PID `28488`에는 아직 새 코드가 반영되지 않음
+physical carry default CCD Source 구현, 정식 build와 focused/full native automation은 완료했다. Editor authoring preflight 시점에 `UnrealEditor` 프로세스와 Unreal MCP 연결이 없어 네 Blueprint의 serialized component template 확인·저장 및 PIE를 진행할 수 없다.
 
-## 필요한 조작
+## 사용자 작업
 
-현재 열린 Unreal Editor가 PIE 중이 아닌 상태에서 `Ctrl+Alt+F11`을 한 번 누른다.
+1. `C:\UnrealProjects\BathhouseSim\BathhouseSim.uproject`를 UE 5.8 Editor로 연다.
+2. 프로젝트 로딩과 asset scan이 끝날 때까지 기다린다.
+3. PIE/SIE는 시작하지 않은 상태로 Codex에 `열었음`이라고 알린다.
 
-Output Log에서 다음 중 하나를 확인한다.
+Restore Packages 창이 뜨면 이번 CCD 작업을 위해 자동 복구할 package는 없다. 기존 사용자 autosave의 복구 여부는 사용자가 판단하며, Codex가 임의 선택하지 않는다.
 
-- 성공: `LogLiveCoding`의 compile/patch success
-- 변경 없음: `No changes`
-- 실패: compile error 또는 patch failure
+## 이후 Codex 작업
 
-성공하면 에이전트에게 `라이브 코딩 완료`라고 알려 통합 검증을 재개한다.
+Codex는 사용자가 연 세션에만 연결해 다음을 수행한다.
 
-Live Coding이 시작되지 않으면 에디터를 정상 종료한 뒤 UE 5.8로 프로젝트를 다시 연다. 사용자 에셋을 묻는 저장 창이 뜨면 이번 Source 작업과 무관한 Content를 임의 저장하지 않는다.
-
-## 예상 동작
-
-- `MeleeAttack.ImpulseStrength`와 `VerticalImpulse`가 customer root body 질량과 무관한 속도 변화로 적용된다.
-- 장비 `ThrowImpulseStrength`는 기존과 같이 질량 독립적이다.
-- Blueprint, Curve, PhysicsAsset와 StateTree를 수정할 필요가 없다.
+- 네 native CDO와 Blueprint physical root의 CCD 값 확인
+- allowlist 네 Blueprint만 필요 시 `Use CCD=true` authoring/Compile/Data Validation/개별 Save
+- 저장 후 reload, dirty package 비교와 PIE drop 검증
+- 통합 리뷰 완료

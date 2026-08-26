@@ -2,9 +2,122 @@
 
 #include "Cleaning/WaterStainActor.h"
 #include "Cleaning/WetMopActor.h"
+#include "Interaction/PhysicalCarryFixedSlotActor.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Interaction/PlayerInteractionComponent.h"
 #include "Towel/TowelInventoryComponent.h"
+
+bool ABathhousePhysicalCarryFailureProbeActor::NotifyTakenFromFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	return FailurePoint != EFailurePoint::FixedTake
+		&& Super::NotifyTakenFromFixedSlotCommitted(Carry, SlotActor);
+}
+
+bool ABathhousePhysicalCarryFailureProbeActor::NotifyStoredInFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	return FailurePoint != EFailurePoint::FixedStore
+		&& Super::NotifyStoredInFixedSlotCommitted(Carry, SlotActor);
+}
+
+bool ABathhousePhysicalCarryFailureProbeActor::NotifyPhysicalDropCommitted(
+	UPlayerCarryComponent& Carry)
+{
+	return FailurePoint != EFailurePoint::FreeDrop
+		&& Super::NotifyPhysicalDropCommitted(Carry);
+}
+
+void UBathhousePhysicalCarryCommitProbe::Bind(
+	AWetMopActor* InMop,
+	UPlayerCarryComponent* InCarry,
+	APhysicalCarryFixedSlotActor* InSlot)
+{
+	Unbind();
+	Mop = InMop;
+	Carry = InCarry;
+	Slot = InSlot;
+	if (Mop)
+	{
+		Mop->OnHeldPresentationChanged.AddDynamic(
+			this,
+			&UBathhousePhysicalCarryCommitProbe::HandleItemPresentationChanged);
+	}
+	if (Carry)
+	{
+		Carry->OnHeldObjectChanged.AddDynamic(
+			this,
+			&UBathhousePhysicalCarryCommitProbe::HandleCarryPresentationChanged);
+	}
+	if (Slot)
+	{
+		Slot->OnSlotOccupancyChanged.AddDynamic(
+			this,
+			&UBathhousePhysicalCarryCommitProbe::HandleSlotPresentationChanged);
+	}
+}
+
+void UBathhousePhysicalCarryCommitProbe::Unbind()
+{
+	if (IsValid(Mop))
+	{
+		Mop->OnHeldPresentationChanged.RemoveDynamic(
+			this,
+			&UBathhousePhysicalCarryCommitProbe::HandleItemPresentationChanged);
+	}
+	if (IsValid(Carry))
+	{
+		Carry->OnHeldObjectChanged.RemoveDynamic(
+			this,
+			&UBathhousePhysicalCarryCommitProbe::HandleCarryPresentationChanged);
+	}
+	if (IsValid(Slot))
+	{
+		Slot->OnSlotOccupancyChanged.RemoveDynamic(
+			this,
+			&UBathhousePhysicalCarryCommitProbe::HandleSlotPresentationChanged);
+	}
+	Mop = nullptr;
+	Carry = nullptr;
+	Slot = nullptr;
+}
+
+void UBathhousePhysicalCarryCommitProbe::ResetCounts()
+{
+	ItemPresentationCount = 0;
+	CarryPresentationCount = 0;
+	SlotPresentationCount = 0;
+	LowLevelReleaseAttemptCount = 0;
+	bLowLevelReleaseSucceeded = false;
+}
+
+void UBathhousePhysicalCarryCommitProbe::HandleItemPresentationChanged(const bool bIsHeld)
+{
+	++ItemPresentationCount;
+	if (bIsHeld && bAttemptLowLevelReleaseWhenHeld && Carry && Mop)
+	{
+		++LowLevelReleaseAttemptCount;
+		bLowLevelReleaseSucceeded = Carry->CommitReleasePhysicalObject(Mop);
+	}
+	if (bIsHeld && bDestroyItemOnHeldPresentation && IsValid(Mop))
+	{
+		Mop->Destroy();
+	}
+}
+
+void UBathhousePhysicalCarryCommitProbe::HandleCarryPresentationChanged(AActor* HeldObject)
+{
+	(void)HeldObject;
+	++CarryPresentationCount;
+}
+
+void UBathhousePhysicalCarryCommitProbe::HandleSlotPresentationChanged(const bool bIsOccupied)
+{
+	(void)bIsOccupied;
+	++SlotPresentationCount;
+}
 
 void UBathhouseTowelAtomicCommitProbe::Bind(
 	UTowelInventoryComponent* InObserved,

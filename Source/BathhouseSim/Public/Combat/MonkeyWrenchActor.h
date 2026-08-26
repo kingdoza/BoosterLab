@@ -31,11 +31,22 @@ public:
 	virtual FTransform GetHeldTransform() const override;
 	virtual bool CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const override;
 	virtual bool HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor) override;
-	virtual bool CanFreeDrop(FText& OutFailureReason) const override { return true; }
+	virtual bool CanFreeDrop(FText& OutFailureReason) const override;
 	virtual UPrimitiveComponent* GetPhysicalCarryPrimitive() const override;
 	virtual float GetThrowSpawnDistance() const override { return ThrowSpawnDistance; }
 	virtual float GetThrowImpulseStrength() const override { return ThrowImpulseStrength; }
-	virtual void NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry) override;
+	virtual float GetUpwardThrowImpulseStrength() const override { return UpwardThrowImpulseStrength; }
+	virtual AActor* GetAssignedPhysicalCarryFixedSlot() const override { return FixedSlot.Get(); }
+	virtual bool TryBindPhysicalCarryFixedSlot(AActor& SlotActor, FText& OutFailureReason) override;
+	virtual void ClearPhysicalCarryFixedSlotBinding(AActor& ExpectedSlot) override;
+	virtual void NotifyPhysicalCarryFixedSlotBindingConflict() override { bFixedSlotBindingConflict = true; }
+	virtual bool IsStoredInAssignedPhysicalCarryFixedSlot() const override;
+	virtual bool NotifyTakenFromFixedSlotCommitted(UPlayerCarryComponent& Carry, AActor& SlotActor) override;
+	virtual bool NotifyStoredInFixedSlotCommitted(UPlayerCarryComponent& Carry, AActor& SlotActor) override;
+	virtual bool NotifyRecoveredToFixedSlotCommitted(AActor& SlotActor) override;
+	virtual void NotifyFixedSlotDestroyed(AActor& SlotActor) override;
+	virtual bool NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry) override;
+	virtual void PublishPhysicalCarryCommit(EPhysicalCarryCommitTransition Transition) override;
 	virtual void RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry) override;
 
 	virtual FHeldEquipmentUseQuery QueryEquipmentUse(const FHeldEquipmentUseContext& Context) const override;
@@ -62,21 +73,30 @@ protected:
 	TObjectPtr<UMeleeAttackComponent> MeleeAttack;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat|Carry", meta = (ClampMin = "0.0"))
-	float ThrowImpulseStrength = 650.0f;
+	float ThrowImpulseStrength = 120.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat|Carry", meta = (ClampMin = "0.0", DeprecatedProperty, DeprecationMessage = "Held-position free drop no longer uses a camera-origin spawn distance."))
+	float ThrowSpawnDistance = 75.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat|Carry", meta = (ClampMin = "0.0"))
-	float ThrowSpawnDistance = 75.0f;
+	float UpwardThrowImpulseStrength = 15.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Carry|Presentation")
 	FTransform HeldTransform = FTransform::Identity;
 
 private:
+	friend class FBathhousePhysicalCarryFixedSlotTest;
+
 	void ApplyHeldTransform();
 	void SetWorldPhysics(bool bEnabled);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UPlayerCarryComponent> Carrier = nullptr;
 
+	TWeakObjectPtr<AActor> FixedSlot;
+
 	FTransform InitialTransform;
 	FTransform LastSafeTransform;
+	bool bEndingPlay = false;
+	bool bFixedSlotBindingConflict = false;
 };

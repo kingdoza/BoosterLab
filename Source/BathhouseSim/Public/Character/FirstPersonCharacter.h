@@ -147,6 +147,7 @@ protected:
 private:
 	friend class FBathhouseComputerSessionTest;
 	friend class FBathhouseEquipmentUseRoutingTest;
+	friend class FBathhousePhysicalCarryFallRecoveryTest;
 
 	enum class EPrimaryUsePressOwner : uint8
 	{

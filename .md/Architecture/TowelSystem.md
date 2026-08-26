@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-clean stack부터 customer 사용, used bin/바닥 overflow, player basket, washer와 dryer를 거쳐 clean stack으로 돌아오는 수건 순환 Source와 기본 Blueprint class는 구현되었다. Stack/Pile runtime 연결과 gameplay actor에 연결하지 않은 Slot presentation component도 [TowelPresentationSystem.md](TowelPresentationSystem.md)에 따라 Source 구현되었으며 profile/layout Editor authoring이 남아 있다.
+clean stack부터 customer 사용, used bin/바닥 overflow, player basket, washer와 dryer를 거쳐 clean stack으로 돌아오는 수건 순환 Source와 기본 Blueprint class는 구현되었다. basket exact fixed slot과 held-position free drop도 [PhysicalCarrySystem.md](PhysicalCarrySystem.md)에 따라 구현되었으며 placement는 수건 inventory/revision을 변경하지 않는다.
 
 ## Source Scope
 
@@ -76,7 +76,7 @@ Towel은 player input mapping, customer StateTree hierarchy, facility reservatio
 | two-endpoint atomic mutation | `UTowelTransferSubsystem` |
 | customer token, spill pending/recovery ledger | `UTowelCirculationSubsystem` |
 | machine state/end time/conversion | `ATowelProcessingMachineActor` |
-| basket physical lifecycle | `ATowelBasketActor` + `UPlayerCarryComponent` |
+| basket held/fixed/free physical lifecycle | `ATowelBasketActor` + `UPlayerCarryComponent` |
 | customer-held towel handle | `UCustomerSessionComponent` |
 | visual count convergence | `UTowelQuantityVisualComponent` |
 
@@ -120,10 +120,11 @@ Primary E는 requested count 1, Secondary F는 가능한 최대 수량을 요청
 - 첫 towel이 들어오면 해당 state로 고정
 - 같은 state만 추가 가능
 - count가 다시 0이면 `None`
-- G로 camera forward 방향에 짧게 throw
-- throw/physics/EndPlay 중에도 contents는 actor inventory에 유지
+- exact assigned slot에 내용물과 관계없이 E로 take/store
+- G로 actual held pose에서 질량 무시 약한 velocity change를 받아 free world로 전환
+- slot/drop/physics/EndPlay 중에도 contents와 revision은 actor inventory에 유지
 
-다른 key/mop/basket을 들고 있으면 pickup하지 않는다. basket EndPlay가 정상 world shutdown이 아니라면 contents snapshot을 circulation recovery ledger에 한 번 이전한다.
+다른 key/mop/basket/wrench를 들고 있으면 pickup하지 않는다. fixed-slot placement는 towel transfer가 아니며 inventory delegate를 발생시키지 않는다. basket EndPlay가 정상 world shutdown이 아니라면 contents snapshot을 circulation recovery ledger에 한 번 이전한다.
 
 ## Clean Stack And Used Bin
 
@@ -249,7 +250,7 @@ Towel actor 표현 event:
 
 ## Dependencies
 
-- Towel -> Interaction의 intent/carry public 계약
+- Towel -> Interaction/Physical Carry의 intent/carry/fixed-slot public 계약
 - Towel -> Facility의 generic actor/slot registration
 - Customer -> Towel transaction/token API
 - UI -> Interaction prompt data
@@ -262,5 +263,6 @@ Towel actor 표현 event:
 - mixed state, full capacity, processing state와 repeated input이 양쪽 endpoint를 변경하지 않는지 확인한다.
 - bulk stack presentation 중단 뒤 C++ count와 visible count가 재동기화되는지 확인한다.
 - customer interruption과 actor EndPlay에서 token이 정확히 한 owner 또는 recovery ledger에 남는지 확인한다.
+- non-empty basket의 fixed-slot take/store와 G drop이 state/count/revision을 바꾸지 않는지 확인한다.
 - Stack/Pile/Slot 표현 변경이 inventory transfer, machine state와 recovery ledger를 변경하지 않는지 확인한다.
 - 다른 towel state/tool durability/consumable 기능이 이번 범위에 추가되지 않았는지 확인한다.

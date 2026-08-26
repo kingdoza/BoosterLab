@@ -259,9 +259,7 @@ void AFirstPersonCharacter::DropCarryInput()
 	}
 	if (PlayerInteraction && FirstPersonCamera)
 	{
-		PlayerInteraction->TryDropCarry(
-			FirstPersonCamera->GetComponentLocation(),
-			FirstPersonCamera->GetForwardVector());
+		PlayerInteraction->TryDropCarry(FirstPersonCamera->GetForwardVector());
 	}
 }
 

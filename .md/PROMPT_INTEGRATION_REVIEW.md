@@ -1,36 +1,43 @@
-# Mass-Independent Authored Impulses — Unreal Integration Review
+# Integration Review Prompt — Physical Carry Default CCD
 
-## 작업 상태
+## 상태
 
-- 상태: 부분 완료
-- 기준 작업서: `.md/PROMPT_UNREAL.md`
-- 코드 리뷰 결론: 코드 단계 승인
-- 검증 엔진/세션: 사용자 visible Unreal Engine 5.8 Editor PID `28488`
+부분 완료 — native 구현·build·automation·코드 리뷰는 완료했으나 Editor authoring preflight에서 사용자가 연 Unreal Editor 세션이 없어 Content 저장과 PIE 통합 검증을 대기한다.
 
-## Source 변경
+## 기준 계약
 
-- `UCustomerKnockdownComponent::HandleHealthDepleted`의 root body `AddImpulse`를 `bVelChange=true`로 변경했다.
-- common equipment drop은 이미 `bVelChange=true`라 변경하지 않았다.
-- Strength property 이름·타입·기본값과 기존 합성식은 유지했다.
+- `.md/PROMPT_REVIEW.md`: 코드 단계 승인, 치명/중요 finding 없음
+- `.md/PROMPT_UNREAL.md`: 네 carryable Blueprint physical root `Use CCD=true` authoring/검증
+- native API: `FPhysicalCarryPlacementTransaction::ApplyFreeWorld`, 각 concrete physical root default와 last-safe `SetWorldPhysics(true)`
 
-## Editor 및 Content
+## 완료된 검증
 
-- Blueprint, Curve, PhysicsAsset, StateTree와 Level 변경은 필요하지 않다.
-- Content/map package를 수정하거나 저장하지 않았다.
-- 별도 background Editor를 실행하지 않았고 사용자 Editor를 종료하지 않았다.
+- UE 5.8 exact Editor target build: 보완 전/후 모두 성공
+- focused `BathhouseSim.Interaction.PhysicalCarry`: 5/5 성공, exit 0, `GIsCriticalError=0`
+- full `BathhouseSim`: 28/28 성공, exit 0, `GIsCriticalError=0`
+- static review: common free-world, slot/hook release, late failure rollback과 concrete last-safe recovery가 CCD 계약을 보존함
+- Core Redirect/API rename/module dependency 없음
 
-## 검증 결과
+## Editor Preflight 결과
 
-- Source 전체 authorable Strength 기반 `AddImpulse` 2개가 모두 `bVelChange=true`임을 확인했다.
-- `git diff --check`: whitespace error 없음. 기존 line-ending warning만 존재.
-- 사용자 Editor에 MCP로 연결해 PIE가 실행 중이 아님을 확인했다.
-- MCP toolset에는 Live Coding compile API가 없었고 Python Remote Execution node도 없었다.
-- Live Coding 단축키 자동 전달 2회는 새 compile log를 만들지 않아 성공으로 간주하지 않았다.
-- MCP 세션은 HTTP DELETE `202`로 종료했다.
+- `.uproject` EngineAssociation: `5.8`
+- workspace MCP endpoint: `http://127.0.0.1:8000/mcp`
+- preflight 시 `UnrealEditor` process: 없음
+- 현재 session의 callable Unreal MCP tool: 없음
+- allowlist Content 수정/저장: 0개
+- 예상 밖 map/external actor 저장: 0개
 
-## 미완료 항목
+## 남은 작업
 
-- 사용자 Editor에서 `Ctrl+Alt+F11` Live Coding 또는 정상 Editor 재시작.
-- compile 결과 확인과 필요 시 focused automation/PIE 회귀.
+사용자가 UE 5.8 Editor를 연 뒤 `.md/PROMPT_UNREAL.md`를 수행한다.
 
-상세 사용자 조작은 `.md/USER_UNREAL.md`에 기록했다. 위 항목 전에는 통합 완료로 올리지 않는다.
+- `/Game/Bathhouse/Blueprints/Interaction/BP_BathhouseKey.KeyPhysicsRoot`
+- `/Game/Bathhouse/Blueprints/Cleaning/BP_WetMop.WorldMesh`
+- `/Game/Bathhouse/Blueprints/Towel/BP_TowelBasket.WorldMesh`
+- `/Game/Bathhouse/Blueprints/Combat/BP_MonkeyWrench.WorldMesh`
+
+네 component의 `BodyInstance.bUseCCD=true`, warnings-as-errors Compile, Data Validation, 개별 Save/reload와 PIE drop 검증 후 이 문서를 최종 결과로 교체해야 한다.
+
+## 통합 리뷰 결론
+
+보류. Source 계약과 native regression은 승인하지만 Editor/Content/PIE 수용 기준이 남아 있어 최종 통합 완료로 판정하지 않는다.

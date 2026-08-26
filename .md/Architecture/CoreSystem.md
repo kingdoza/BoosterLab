@@ -76,7 +76,8 @@ Core System은 고정된 native class inventory를 유지하지 않는다. 구�
 
 - `CharacterSystem.md`: `Source/BathhouseSim/Public/Character`, `Source/BathhouseSim/Private/Character`
 - `CameraSystem.md`: `Source/BathhouseSim/Public/Camera`, `Source/BathhouseSim/Private/Camera`
-- `InteractionSystem.md`: player trace, primary/secondary intent와 single physical carry 경계
+- `InteractionSystem.md`: player trace, primary/secondary intent와 equipment-use 경계
+- `PhysicalCarrySystem.md`: Interaction Source 안의 fixed slot, free-drop transaction과 physical item recovery 경계
 - `FacilitySystem.md`: facility slot과 counter queue 경계
 - `EconomySystem.md`: wallet과 cash claim 경계
 - `CustomerSystem.md`: StateTree routine과 customer session 경계
@@ -93,7 +94,7 @@ Core System은 고정된 native class inventory를 유지하지 않는다. 구�
 
 새 Source 하위 디렉터리를 추가하면 같은 이름의 `*System.md`를 추가하고 책임, 핵심 클래스, runtime flow, 의존성, Blueprint/API 계약, 수동 검토 지점을 문서화한다.
 
-Cleaning/Towel/Computer와 Combat/Customer Recovery target은 현재 runtime module dependency 안에서 구현한다. physics, curve, collision, AI/Navigation과 StateTree는 이미 선언된 Engine/AIModule/GameplayStateTree dependency를 사용하며 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
+Cleaning/Towel/Computer, Combat/Customer Recovery와 Physical Carry는 현재 runtime module dependency 안에서 구현한다. physics, curve, collision, AI/Navigation과 StateTree는 이미 선언된 Engine/AIModule/GameplayStateTree dependency를 사용하며 새 dependency는 실제 include/use site가 확인되지 않는 한 추가하지 않는다.
 
 ## Class Growth Policy
 
@@ -102,7 +103,8 @@ Cleaning/Towel/Computer와 Combat/Customer Recovery target은 현재 runtime mod
 - input Character에 damage, cleaning, carry, computer와 customer routine 상태를 복제하지 않는다.
 - `UCustomerSessionComponent`는 domain resource/timer owner로 유지하고 ragdoll physics와 StateTree pause/restart lifecycle은 신규 Customer component에 둔다.
 - `UPlayerInteractionComponent`는 focus/query/result 표시 경계를 유지하고 concrete weapon/cleaning mutation은 equipment actor와 domain owner에 위임한다.
-- 공통 physical carry Actor 상속은 만들지 않고 `IPhysicalCarryable`을 유지한다. 재사용 가능한 held motion은 carry 소유권과 분리된 표현 Component로 둔다.
+- 공통 physical carry Actor/Component는 만들지 않고 `IPhysicalCarryable`을 유지한다. generic fixed slot은 world interaction Actor로, atomic placement의 commit owner는 `UPlayerCarryComponent`에 두며 snapshot/rollback mechanics는 private non-UObject helper로 분리한다.
+- 재사용 가능한 held motion은 carry 소유권과 분리된 표현 Component로 유지한다.
 
 ## Manual Review Points
 

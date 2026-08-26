@@ -46,6 +46,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	FPlayerInteractionResult TrySecondaryInteract();
 
+	FPlayerInteractionResult TryDropCarry(const FVector& ViewDirection);
 	FPlayerInteractionResult TryDropCarry(const FVector& ViewOrigin, const FVector& ViewDirection);
 
 	UFUNCTION(BlueprintPure, Category = "Interaction")

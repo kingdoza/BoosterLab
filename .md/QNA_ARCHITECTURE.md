@@ -1,50 +1,51 @@
-# QnA — Physical Carry Fixed Slot And Free Drop
+# QnA — Counter Queue Facing, Overflow And Physical Key Return
 
 각 질문의 `답변:` 줄에 선택한 항목을 입력한다.
 
-## Q47. 고정슬롯은 어떤 아이템을 받을 수 있어야 하는가?
+## Q53. 손님이 큐 포인트에 도착한 뒤 목표 회전을 어떻게 적용할까?
 
-- A: 슬롯에 지정된 정확한 아이템 인스턴스 하나만 수납
-- B: 같은 종류의 아이템이면 모두 수납
-- C: 모든 소지 아이템을 수납
-- 권장안: A — 열쇠 걸이와 동일하게 원래 아이템과 원래 슬롯의 관계를 보존할 수 있다.
+- A: 이동 완료 후 Editor 조정 가능한 회전 속도로 부드럽게 회전하고 허용 오차 안에 들어오면 완료
+- B: 이동 완료 즉시 큐 포인트 회전으로 snap
+- C: 이동 중 AI Focus로 계속 목표 방향을 바라보며 접근
+- 권장안: A — 이동 중에는 진행 방향을 보고 도착 후 자연스럽게 정렬할 수 있다. StateTree 예상 작업량: 낮음. 기존 check-in/checkout MoveTo Task에 `Facing`과 회전 설정을 binding한다.
 - 답변: A
 
-## Q48. 내용물이 있는 수건 바구니도 고정슬롯에 놓을 수 있는가?
+## Q54. 큐 구성원이 쓰러졌다 일어났을 때 어느 큐 포인트로 복귀할까?
 
-- A: 내용물 상태와 수량을 유지한 채 놓을 수 있음
-- B: 빈 바구니만 놓을 수 있음
-- 권장안: A — 고정슬롯은 보관 위치일 뿐 수건 이동 endpoint가 아니므로 내용물을 변경하면 안 된다.
+- A: 기립 시점의 최신 큐 순번에 해당하는 service point 또는 queue point
+- B: 쓰러지기 직전에 할당됐던 포인트
+- C: 현재 위치에서 가장 가까운 큐 포인트
+- 권장안: A — 쓰러져 있는 동안 앞사람이 빠져도 최신 FIFO 순번과 실제 배치를 일치시킬 수 있다. C++ recovery gate에서 다시 resolve하므로 별도 StateTree 분기는 필요하지 않다.
 - 답변: A
 
-## Q49. 고정슬롯 배치 입력은 무엇으로 하는가?
+## Q55. 체크아웃 최대 대기자 수는 무엇을 기준으로 할까?
 
-- A: 슬롯을 보고 E를 누르면 고정 배치하고 G는 항상 자유 내려놓기
-- B: 슬롯 근처에서 G를 누르면 자동으로 고정 배치
-- C: E와 G 모두 고정 배치 가능
-- 권장안: A — E는 월드 대상 상호작용, G는 현재 소지품 자유 내려놓기라는 기존 입력 구분을 유지한다.
+- A: 유효한 `CheckoutQueuePointReferences` 개수를 최대 대기자 수로 사용하고 service point의 한 명은 별도로 계산
+- B: service point를 포함한 전체 인원 수를 최대 대기자 수로 사용
+- C: queue point 개수와 별도 `MaxCheckoutWaitingCustomers` 값을 각각 authoring
+- 권장안: A — 실제 배치 가능한 포인트와 제한값이 어긋나지 않는다. visible checkout lane의 총 수용량은 `1 + 유효 queue point 수`가 된다.
+- 답변:A
+
+## Q56. 체크아웃 대기열을 초과한 손님의 내부 배회 범위를 어떻게 지정할까?
+
+- A: 하나 이상의 전용 NavMesh 기반 배회 Volume을 Editor에서 배치하고 그 안의 reachable random 위치를 사용
+- B: 여러 개의 고정 배회 Point를 Editor에서 배치하고 무작위 선택
+- C: Level의 전체 NavMesh에서 무작위 위치 선택
+- 권장안: A — 목욕탕 외부나 작업 불가능한 공간으로 나가지 않으면서 반복 동선이 고정되는 현상을 줄일 수 있다.
+- 답변:A
+
+## Q57. 단일 카운터 키 드랍 지점에 기존 반환 키가 놓여 있으면 새 키를 어떻게 내려놓을까?
+
+- A: 드랍 지점 주변의 작은 authorable XY 범위에서 충돌하지 않는 위치를 제한 횟수 탐색하고, 실패하면 기존 checkout Task에서 대기 후 재시도
+- B: 정확한 드랍 지점만 사용하고 막혀 있으면 플레이어가 기존 키를 치울 때까지 재시도
+- C: 기존 키와 겹쳐도 정확한 드랍 지점에서 물리를 강제로 활성화
+- 권장안: A — 단일 지점이라는 동선은 유지하면서 초기 물리 겹침과 영구 checkout 정지를 줄일 수 있다. StateTree 추가 작업은 없고 기존 checkout Task의 재시도 흐름을 유지한다.
 - 답변: A
 
-## Q50. HeldPosition에서 물리를 켤 때 플레이어와의 충돌은 어떻게 처리하는가?
+## Q58. 큐 이동·도착 회전·체크아웃 초과 배회를 StateTree에 어떻게 연결할까?
 
-- A: 월드 충돌은 즉시 활성화하고 Pawn 충돌만 짧은 시간 또는 충분히 분리될 때까지 무시
-- B: 자유 내려놓은 아이템은 Pawn 충돌을 영구적으로 무시
-- C: Pawn 충돌도 즉시 활성화
-- 권장안: A — 손에서 자연스럽게 출발하면서 플레이어 캡슐에 튕겨 나가는 현상을 방지한다.
-- 답변: B
-
-## Q51. HeldPosition이 벽이나 시설물과 겹쳐 있으면 어떻게 처리하는가?
-
-- A: 자유 내려놓기를 실패시키고 계속 손에 유지
-- B: 가장 가까운 안전 위치로 순간이동시킨 뒤 내려놓기
-- C: 충돌을 끄고 던진 뒤 일정 시간 후 활성화
-- 권장안: A — 위치 순간이동과 벽 관통을 막으면서 transaction rollback을 보장한다.
-- 답변: A
-
-## Q52. 아이템이나 플레이어가 비정상 종료되면 아이템을 어디로 복구하는가?
-
-- A: 유효하고 비어 있는 전용 고정슬롯으로 복구하고, 불가능하면 마지막 안전 월드 위치로 복구
-- B: 항상 마지막 안전 월드 위치로 복구
-- C: 기존 아이템을 제거하고 고정슬롯에 새 아이템 생성
-- 권장안: A — 아이템을 복제하지 않으면서 원래 보관 위치를 우선 복구할 수 있다.
-- 답변: A
+- A: native `Move To Current Queue Assignment` Task 하나가 최신 큐 배치 resolve, 이동, 도착 회전, overflow 배회와 promotion cancel을 처리
+- B: StateTree에 visible queue와 overflow wander용 상태·조건·반복 transition을 각각 구성
+- C: Customer Session Component가 StateTree 밖에서 큐 이동과 배회를 계속 직접 제어
+- 권장안: A — queue domain은 Counter/Session에 유지하면서 StateTree 분기를 늘리지 않고 knockdown restart와 같은 native operation token을 재사용할 수 있다. StateTree 예상 작업량: 낮음. check-in/checkout의 기존 Queue Target + MoveTo 조합을 새 Task로 교체하고 `Session`, `Lane`, 회전/배회 설정을 binding한다.
+- 답변:A

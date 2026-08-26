@@ -409,7 +409,7 @@ bool FBathhouseTowelTransferTest::RunTest(const FString& Parameters)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FBathhousePhysicalCarryDropTest,
-	"BathhouseSim.Interaction.PhysicalCarryDropSweepAndTransaction",
+	"BathhouseSim.Interaction.PhysicalCarryHeldPoseAndTransaction",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
@@ -457,9 +457,9 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 		Mop->GetHeldTransform().GetScale3D(), FVector::OneVector);
 	TestEqual(TEXT("Basket held contract ignores authored held scale"),
 		Basket->GetHeldTransform().GetScale3D(), FVector::OneVector);
-	TestTrue(TEXT("The mop has non-zero physical sweep bounds"),
+	TestTrue(TEXT("The mop has non-zero physical overlap bounds"),
 		ConfigureCarryPrimitiveForTest(Mop, CarryTestMesh));
-	TestTrue(TEXT("The basket has non-zero physical sweep bounds"),
+	TestTrue(TEXT("The basket has non-zero physical overlap bounds"),
 		ConfigureCarryPrimitiveForTest(Basket, CarryTestMesh));
 	const FVector MopPhysicalScale = Mop->GetActorScale3D();
 	const FVector BasketPhysicalScale = Basket->GetActorScale3D();
@@ -475,21 +475,24 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 	Wall->SetWorldLocation(FVector(50.0f, 0.0f, 100.0f));
 
 	FText CarryFailure;
-	TestTrue(TEXT("The drop sweep setup takes the wet mop"),
+	TestTrue(TEXT("The held-position setup takes the wet mop"),
 		Carry->TryTakePhysicalObject(Mop, CarryFailure));
 	TestEqual(TEXT("Held mop applies its actor-specific local location"),
 		Mop->GetRootComponent()->GetRelativeLocation(), Mop->GetHeldTransform().GetLocation());
 	TestTrue(TEXT("Held mop applies its actor-specific local rotation"),
 		Mop->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(Mop->GetHeldTransform().GetRotation()));
 	TestEqual(TEXT("Held mop preserves its physical actor scale"), Mop->GetActorScale3D(), MopPhysicalScale);
+	const FTransform ActualHeldPose = Mop->GetActorTransform();
 	const FPlayerInteractionResult WallDrop = Carry->TryReleaseHeldEquipment(
-		HeldAnchor->GetComponentLocation(),
+		FVector(50000.0f),
 		FVector::ForwardVector);
-	TestTrue(TEXT("A wall hit resolves to a safe pre-wall drop"), WallDrop.bSucceeded);
-	TestTrue(TEXT("The swept mop remains on the player side of the wall"),
-		Mop->GetActorLocation().X < 45.0f);
+	TestTrue(TEXT("A wall beyond the held pose does not block free drop"), WallDrop.bSucceeded);
+	TestTrue(TEXT("Free drop ignores camera origin and retains the actual held pose"),
+		Mop->GetActorLocation().Equals(ActualHeldPose.GetLocation(), 0.1f));
 	TestTrue(TEXT("The common drop path enables physics"),
 		Mop->GetPhysicalCarryPrimitive()->IsSimulatingPhysics());
+	TestTrue(TEXT("The common drop path enables CCD"),
+		Mop->GetPhysicalCarryPrimitive()->BodyInstance.bUseCCD);
 	TestEqual(TEXT("Mop drop keeps the physical scale independent of HeldTransform"),
 		Mop->GetActorScale3D(), MopPhysicalScale);
 	World->Tick(LEVELTICK_All, 1.0f / 60.0f);
@@ -500,69 +503,29 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The dropped mop can be picked up again"),
 		Carry->TryTakePhysicalObject(Mop, CarryFailure));
 	UPrimitiveComponent* MopPrimitive = Mop->GetPhysicalCarryPrimitive();
-	Wall->SetBoxExtent(FVector(5.0f, 100.0f, 100.0f));
-	Wall->SetWorldLocation(HeldAnchor->GetComponentLocation() - FVector(12.0f, 0.0f, 0.0f));
+	Wall->SetBoxExtent(FVector(100.0f));
+	Wall->SetWorldLocation(MopPrimitive->GetComponentLocation());
 	Wall->UpdateBounds();
 	MopPrimitive->UpdateBounds();
 
-	const FVector ThinSweepStart = MopPrimitive->Bounds.Origin;
-	const FVector ThinBoundsOffset = ThinSweepStart - Mop->GetActorLocation();
-	const FVector ThinSweepEnd = HeldAnchor->GetComponentLocation()
-		+ FVector::ForwardVector * Mop->GetThrowSpawnDistance()
-		+ ThinBoundsOffset;
-	FCollisionQueryParams ThinWallQueryParams(
-		SCENE_QUERY_STAT(PhysicalCarryDropThinWallRegression),
-		false);
-	ThinWallQueryParams.bFindInitialOverlaps = true;
-	ThinWallQueryParams.AddIgnoredActor(Mop);
-	ThinWallQueryParams.AddIgnoredActor(CarrierOwner);
-	FHitResult ThinWallInitialHit;
-	TestTrue(TEXT("The thin-wall fixture produces an initial blocking overlap"),
-		World->SweepSingleByChannel(
-			ThinWallInitialHit,
-			ThinSweepStart,
-			ThinSweepEnd,
-			FQuat::Identity,
-			Carry->DropSweepChannel,
-			FCollisionShape::MakeBox(MopPrimitive->Bounds.BoxExtent),
-			ThinWallQueryParams));
-	TestTrue(TEXT("The thin-wall fixture starts penetrating"), ThinWallInitialHit.bStartPenetrating);
-	TestTrue(TEXT("The thin-wall fixture exposes an MTD toward the throw target"),
-		FVector::DotProduct(ThinWallInitialHit.Normal, FVector::ForwardVector) > 0.0f);
-
 	const FTransform HeldTransformBeforeFailure = Mop->GetActorTransform();
-	const FPlayerInteractionResult ThinWallDrop = Carry->TryReleaseHeldEquipment(
+	const FPlayerInteractionResult OverlapDrop = Carry->TryReleaseHeldEquipment(
 		HeldAnchor->GetComponentLocation(),
 		FVector::ForwardVector);
-	TestFalse(TEXT("A target-side initial-overlap MTD never commits beyond the thin wall"),
-		ThinWallDrop.bSucceeded);
-	TestTrue(TEXT("The thin-wall rejection preserves the held object"), Carry->GetHeldObject() == Mop);
-	TestEqual(TEXT("The thin-wall rejection preserves the held attachment"),
+	TestFalse(TEXT("A WorldStatic overlap at the actual held pose rejects free drop"),
+		OverlapDrop.bSucceeded);
+	TestTrue(TEXT("The overlap rejection preserves the held object"), Carry->GetHeldObject() == Mop);
+	TestEqual(TEXT("The overlap rejection preserves the held attachment"),
 		Mop->GetRootComponent()->GetAttachParent(), HeldAnchor);
-	TestFalse(TEXT("The thin-wall rejection keeps held physics disabled"),
+	TestFalse(TEXT("The overlap rejection keeps held physics disabled"),
 		MopPrimitive->IsSimulatingPhysics());
-	TestTrue(TEXT("The thin-wall rejection preserves the held transform"),
+	TestTrue(TEXT("The overlap rejection preserves the held transform"),
 		Mop->GetActorTransform().Equals(HeldTransformBeforeFailure));
 	FPlayerInteractionContext HeldMopContext;
 	HeldMopContext.Interactor = CarrierOwner;
 	HeldMopContext.CarryComponent = Carry;
-	TestFalse(TEXT("The thin-wall rejection preserves the concrete mop carrier"),
+	TestFalse(TEXT("The overlap rejection preserves the concrete mop carrier"),
 		Mop->QueryInteraction(HeldMopContext).bVisible);
-
-	Wall->SetBoxExtent(FVector(100.0f));
-	Wall->SetWorldLocation(HeldAnchor->GetComponentLocation());
-	Wall->UpdateBounds();
-	const FPlayerInteractionResult BlockedDrop = Carry->TryReleaseHeldEquipment(
-		HeldAnchor->GetComponentLocation(),
-		FVector::ForwardVector);
-	TestFalse(TEXT("The existing large start blocker still rejects the drop"), BlockedDrop.bSucceeded);
-	TestTrue(TEXT("A rejected drop preserves the held object"), Carry->GetHeldObject() == Mop);
-	TestEqual(TEXT("A rejected drop preserves the held attachment"),
-		Mop->GetRootComponent()->GetAttachParent(), HeldAnchor);
-	TestFalse(TEXT("A rejected drop keeps held physics disabled"),
-		Mop->GetPhysicalCarryPrimitive()->IsSimulatingPhysics());
-	TestTrue(TEXT("A rejected drop preserves the held transform"),
-		Mop->GetActorTransform().Equals(HeldTransformBeforeFailure));
 
 	Wall->SetWorldLocation(FVector(300.0f, 0.0f, 100.0f));
 	Wall->UpdateBounds();
@@ -600,6 +563,8 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 		Carry->TryReleaseHeldEquipment(HeldAnchor->GetComponentLocation(), FVector::ForwardVector).bSucceeded);
 	TestEqual(TEXT("Basket drop keeps the physical scale independent of HeldTransform"),
 		Basket->GetActorScale3D(), BasketPhysicalScale);
+	Basket->GetPhysicalCarryPrimitive()->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	Basket->SetActorLocation(FVector(0.0f, 500.0f, 100.0f), false, nullptr, ETeleportType::TeleportPhysics);
 
 	FEnumProperty* FacilityTypeProperty = FindFProperty<FEnumProperty>(
 		ABathhouseFacilityActor::StaticClass(),
@@ -652,6 +617,25 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 		Key->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(Key->GetHeldTransform().GetRotation()));
 	TestEqual(TEXT("Held key preserves physical scale while authored held scale is ignored"),
 		Key->GetActorScale3D(), KeyPhysicalScale);
+	const FTransform HeldKeyWorldPose = Key->GetActorTransform();
+	TestTrue(TEXT("G free-drops a held key through the generic carry transaction"),
+		Carry->TryFreeDropHeldObject(FVector::ForwardVector).bSucceeded);
+	TestEqual(TEXT("A free-dropped key enters DroppedInWorld"),
+		Key->GetKeyState(), EBathhouseKeyState::DroppedInWorld);
+	TestTrue(TEXT("Key free drop starts from its actual held world pose"),
+		Key->GetActorLocation().Equals(HeldKeyWorldPose.GetLocation(), 0.1f));
+	TestEqual(TEXT("Dropped key permanently ignores Pawn collision"),
+		Key->GetPhysicalCarryPrimitive()->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
+	TestTrue(TEXT("Dropped key uses the common free-world CCD contract"),
+		Key->GetPhysicalCarryPrimitive()->BodyInstance.bUseCCD);
+	FPlayerInteractionContext DroppedKeyContext;
+	DroppedKeyContext.Interactor = CarrierOwner;
+	DroppedKeyContext.CarryComponent = Carry;
+	TestTrue(TEXT("Dropped key advertises direct E re-pickup"),
+		Key->QueryInteraction(DroppedKeyContext).bCanInteract);
+	TestTrue(TEXT("Dropped key can be picked up without changing its identity"),
+		Key->ExecuteInteraction(DroppedKeyContext).bSucceeded);
+	TestTrue(TEXT("Re-picked dropped key keeps the original hook"), Key->GetKeyHook() == KeyHook);
 	TestTrue(TEXT("The held key returns through its hook transaction"), Key->TryReturnToHook(*Carry, *KeyHook));
 	TestTrue(TEXT("Hook return removes the held offset instead of applying it at the hook"),
 		Key->GetRootComponent()->GetRelativeTransform().GetLocation().IsNearlyZero()

@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 단일 physical carry 계약을 사용하는 몽키스패너, 범용 LMB 장비 사용, 카메라 기준 근접 피격과 공용 체력의 현재 native 구현을 정의한다.
+이 문서는 단일 physical carry 계약을 사용하는 몽키스패너, 범용 LMB 장비 사용, 카메라 기준 근접 피격과 공용 체력의 현재 native 구현을 정의한다. wrench exact fixed slot, held-position free drop과 placement 전 active attack cancel도 [PhysicalCarrySystem.md](PhysicalCarrySystem.md)에 따라 구현되어 있다.
 
 고객 전용 래그돌, 기립과 루틴 재시작은 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)가 소유한다.
 
@@ -25,7 +25,7 @@ Source/BathhouseSim/Private/Combat/
 
 ## Responsibilities
 
-- 몽키스패너의 world pickup, single carry와 G free drop
+- 몽키스패너의 world/fixed-slot pickup, single carry와 G free drop
 - LMB Started당 한 번의 공격 lifecycle
 - 무기 World Mesh와 분리된 카메라 기준 multi shape trace
 - 공격 1회 당 Actor 단위 중복 제거와 범위 내 모든 대상에 피해 전달
@@ -77,8 +77,9 @@ Interaction System의 `IHeldEquipmentUsable`은 concrete 무기와 청소 도구
 - 빈손 player가 E로 pickup
 - key, mop, basket 또는 다른 wrench를 들고 있으면 실패
 - held중 world collision/physics 비활성과 개별 `HeldTransform` 적용
-- G로 기존 swept free-drop transaction 사용
-- falling out of world, carrier/actor EndPlay에서 기존 equipment recovery 계약 사용
+- exact assigned slot에 E로 take/store
+- G로 actual held pose에서 질량 무시 약한 velocity change를 적용하는 free-drop transaction 사용
+- falling out of world와 carrier EndPlay에서 fixed-slot 우선 recovery 사용
 
 `EPhysicalCarryKind::MonkeyWrench`는 기존 ordinal을 보존하도록 enum 끝에 추가한다.
 
@@ -113,7 +114,7 @@ LMB `Started`가 공격을 한 번 시작한다. 공격중 추가 Started와 Hol
 
 Editor authoring:
 
-- wrench mesh/collision, `HeldTransform`, throw distance/impulse
+- wrench mesh/collision, `HeldTransform`, fixed slot과 약한 forward/upward release velocity
 - swing position/rotation curve, attack duration와 hit time
 - attack distance/radius, trace channel, damage, impulse와 vertical impulse
 - `UHealthComponent::MaxHealth`
@@ -128,7 +129,7 @@ Blueprint는 attack timing, trace, 중복 제거, damage commit과 health/deplet
 
 ## Dependencies
 
-- Combat -> Interaction public carry/equipment-use 계약
+- Combat -> Interaction/Physical Carry public carry/fixed-slot/equipment-use 계약
 - Combat -> Engine collision, curve, ActorComponent
 - Customer -> Combat health/damage public 계약
 - Character -> Interaction input routing
@@ -138,7 +139,7 @@ Blueprint는 attack timing, trace, 중복 제거, damage commit과 health/deplet
 
 ## Failure And Cleanup
 
-- 사용중 wrench drop/EndPlay: attack과 motion cancel, baseline 복구 후 carry cleanup
+- 사용중 wrench slot store/drop/EndPlay: attack과 motion cancel, baseline 복구 후 atomic placement/cleanup
 - invalid camera/context: attack 시작 전 실패, trace/damage 없음
 - 중간에 target EndPlay: weak target를 commit 직전 재검증
 - trace component 중복: Actor 단위 한 번만 damage
@@ -152,3 +153,4 @@ Blueprint는 attack timing, trace, 중복 제거, damage commit과 health/deplet
 - 무기 mesh 위치와 관계없이 camera 기준 거리/반경의 모든 target이 한 번씩 맞는지 확인한다.
 - nonlethal damage가 루틴을 중단하지 않고 depleted만 Customer Recovery를 시작하는지 확인한다.
 - drop/cancel 후 held actor transform과 다음 use가 정상 복구되는지 확인한다.
+- exact slot take/store가 attack을 시작하지 않고 wrong instance를 거부하는지 확인한다.

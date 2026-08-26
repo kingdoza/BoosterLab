@@ -232,7 +232,6 @@ FPlayerInteractionResult UPlayerInteractionComponent::TrySecondaryInteract()
 }
 
 FPlayerInteractionResult UPlayerInteractionComponent::TryDropCarry(
-	const FVector& ViewOrigin,
 	const FVector& ViewDirection)
 {
 	if (bInteractionSuppressed)
@@ -249,13 +248,20 @@ FPlayerInteractionResult UPlayerInteractionComponent::TryDropCarry(
 			NSLOCTEXT("BathhouseInteraction", "HoldInterruptedByDrop", "장비를 내려놓아 상호작용이 취소되었습니다."));
 	}
 	FPlayerInteractionResult Result = CarryComponent
-		? CarryComponent->TryReleaseHeldEquipment(ViewOrigin, ViewDirection)
+		? CarryComponent->TryFreeDropHeldObject(ViewDirection)
 		: FPlayerInteractionResult::Failed(
 			NSLOCTEXT("BathhouseInteraction", "MissingCarry", "소지 상태를 확인할 수 없습니다."),
 			EPlayerInteractionIntent::DropCarry);
 	Result.Intent = EPlayerInteractionIntent::DropCarry;
 	RefreshInteractionQuery();
 	return FinishInteractionAttempt(Result);
+}
+
+FPlayerInteractionResult UPlayerInteractionComponent::TryDropCarry(
+	const FVector& ViewOrigin,
+	const FVector& ViewDirection)
+{
+	return TryDropCarry(ViewDirection);
 }
 
 void UPlayerInteractionComponent::RefreshInteractionQuery()

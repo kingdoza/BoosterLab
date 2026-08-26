@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Interaction/HeldEquipmentMotionComponent.h"
+#include "Interaction/PhysicalCarryFixedSlot.h"
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
 #endif
@@ -17,6 +18,8 @@ AWetMopActor::AWetMopActor()
 	WorldMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WorldMesh"));
 	SetRootComponent(WorldMesh);
 	WorldMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+	WorldMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	WorldMesh->SetUseCCD(true);
 }
 
 void AWetMopActor::BeginPlay()
@@ -28,9 +31,18 @@ void AWetMopActor::BeginPlay()
 
 void AWetMopActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bEndingPlay = true;
 	FHeldEquipmentUseContext UseContext;
 	UseContext.User = Carrier ? Carrier->GetOwner() : nullptr;
 	StopMopping(UseContext);
+	if (AActor* SlotActor = FixedSlot.Get())
+	{
+		if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(SlotActor))
+		{
+			Slot->NotifyAssignedPhysicalCarryItemEnding(*this);
+		}
+	}
+	FixedSlot.Reset();
 	if (Carrier)
 	{
 		Carrier->NotifyHeldActorEnding(this);
@@ -49,7 +61,7 @@ void AWetMopActor::FellOutOfWorld(const UDamageType& DamageType)
 FPlayerInteractionQuery AWetMopActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
 	FPlayerInteractionQuery Query;
-	if (Carrier)
+	if (Carrier || IsStoredInAssignedPhysicalCarryFixedSlot())
 	{
 		return Query;
 	}
@@ -86,6 +98,11 @@ FTransform AWetMopActor::GetHeldTransform() const
 
 bool AWetMopActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
+	if (IsStoredInAssignedPhysicalCarryFixedSlot())
+	{
+		OutFailureReason = LOCTEXT("TakeFromSlotRequired", "물걸레는 전용 슬롯에서 가져와야 합니다.");
+		return false;
+	}
 	if (Carrier || !Carry.IsHandEmpty())
 	{
 		OutFailureReason = LOCTEXT("HandOccupied", "이미 다른 물건을 들고 있습니다.");
@@ -109,7 +126,6 @@ bool AWetMopActor::HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* 
 		AttachToComponent(HeldAnchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 		ApplyHeldTransform();
 	}
-	OnHeldPresentationChanged.Broadcast(true);
 	return true;
 }
 
@@ -118,15 +134,118 @@ UPrimitiveComponent* AWetMopActor::GetPhysicalCarryPrimitive() const
 	return WorldMesh;
 }
 
-void AWetMopActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry)
+bool AWetMopActor::CanFreeDrop(FText& OutFailureReason) const
 {
-	ensureMsgf(Carrier == &Carry, TEXT("Wet mop drop committed by a carry component that does not own it."));
-	FHeldEquipmentUseContext UseContext;
-	UseContext.User = Carry.GetOwner();
-	StopMopping(UseContext);
+	if (!Carrier || Carrier->GetHeldObject() != this)
+	{
+		OutFailureReason = LOCTEXT("MopNotHeldForDrop", "물걸레를 들고 있어야 내려놓을 수 있습니다.");
+		return false;
+	}
+	return true;
+}
+
+bool AWetMopActor::TryBindPhysicalCarryFixedSlot(AActor& SlotActor, FText& OutFailureReason)
+{
+	if (bFixedSlotBindingConflict)
+	{
+		OutFailureReason = LOCTEXT("SlotBindingConflict", "물걸레가 여러 슬롯에 연결되어 있습니다.");
+		return false;
+	}
+	IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(&SlotActor);
+	if (!Slot || Slot->GetAssignedPhysicalCarryItem() != this)
+	{
+		OutFailureReason = LOCTEXT("InvalidSlotBinding", "물걸레와 슬롯 연결이 올바르지 않습니다.");
+		return false;
+	}
+	if (FixedSlot.IsValid() && FixedSlot.Get() != &SlotActor)
+	{
+		OutFailureReason = LOCTEXT("DuplicateSlotBinding", "물걸레가 여러 슬롯에 연결되어 있습니다.");
+		return false;
+	}
+	FixedSlot = &SlotActor;
+	return true;
+}
+
+void AWetMopActor::ClearPhysicalCarryFixedSlotBinding(AActor& ExpectedSlot)
+{
+	if (FixedSlot.Get() == &ExpectedSlot)
+	{
+		FixedSlot.Reset();
+	}
+}
+
+bool AWetMopActor::IsStoredInAssignedPhysicalCarryFixedSlot() const
+{
+	const IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(FixedSlot.Get());
+	return Slot && Slot->GetStoredPhysicalCarryItem() == this;
+}
+
+bool AWetMopActor::NotifyTakenFromFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || Carrier)
+	{
+		return false;
+	}
+	Carrier = &Carry;
+	return true;
+}
+
+bool AWetMopActor::NotifyStoredInFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || Carrier != &Carry)
+	{
+		return false;
+	}
 	Carrier = nullptr;
 	LastSafeTransform = GetActorTransform();
-	OnHeldPresentationChanged.Broadcast(false);
+	return true;
+}
+
+bool AWetMopActor::NotifyRecoveredToFixedSlotCommitted(AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || bEndingPlay)
+	{
+		return false;
+	}
+	if (Carrier && Carrier->GetHeldObject() == this)
+	{
+		return false;
+	}
+	Carrier = nullptr;
+	LastSafeTransform = GetActorTransform();
+	return true;
+}
+
+void AWetMopActor::NotifyFixedSlotDestroyed(AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor)
+	{
+		return;
+	}
+	FixedSlot.Reset();
+	Carrier = nullptr;
+	LastSafeTransform = GetActorTransform();
+}
+
+bool AWetMopActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry)
+{
+	if (Carrier != &Carry)
+	{
+		return false;
+	}
+	Carrier = nullptr;
+	LastSafeTransform = GetActorTransform();
+	return true;
+}
+
+void AWetMopActor::PublishPhysicalCarryCommit(const EPhysicalCarryCommitTransition Transition)
+{
+	OnHeldPresentationChanged.Broadcast(
+		Transition == EPhysicalCarryCommitTransition::TakenIntoHand);
 }
 
 FHeldEquipmentUseQuery AWetMopActor::QueryEquipmentUse(const FHeldEquipmentUseContext& Context) const
@@ -238,23 +357,29 @@ void AWetMopActor::RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry
 	{
 		return;
 	}
-	const bool bWasHeld = Carrier != nullptr;
+	if (Carrier && Carrier->GetHeldObject() == this
+		&& Carrier->RecoverHeldPhysicalObject(this))
+	{
+		return;
+	}
 	FHeldEquipmentUseContext UseContext;
 	UseContext.User = Carrier ? Carrier->GetOwner() : nullptr;
 	StopMopping(UseContext);
-	if (Carrier)
+	if (AActor* SlotActor = FixedSlot.Get())
 	{
-		Carrier->CommitReleasePhysicalObject(this);
+		if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(SlotActor))
+		{
+			if (Slot->TryRecoverAssignedPhysicalCarryItem(*this))
+			{
+				return;
+			}
+		}
 	}
 	Carrier = nullptr;
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetWorldPhysics(false);
-	SetActorTransform(LastSafeTransform.Equals(FTransform::Identity) ? InitialTransform : LastSafeTransform);
+	SetActorTransform(LastSafeTransform);
 	SetWorldPhysics(true);
-	if (bWasHeld)
-	{
-		OnHeldPresentationChanged.Broadcast(false);
-	}
 }
 
 AWaterStainActor* AWetMopActor::ResolveFocusedStain(const FHeldEquipmentUseContext& Context) const
@@ -307,6 +432,8 @@ void AWetMopActor::SetWorldPhysics(const bool bEnabled)
 	{
 		if (bEnabled)
 		{
+			WorldMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+			WorldMesh->SetUseCCD(true);
 			WorldMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 			WorldMesh->SetSimulatePhysics(true);
 		}

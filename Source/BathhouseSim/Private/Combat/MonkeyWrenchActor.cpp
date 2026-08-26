@@ -4,6 +4,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Interaction/PlayerCarryComponent.h"
+#include "Interaction/PhysicalCarryFixedSlot.h"
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
 #endif
@@ -16,6 +17,8 @@ AMonkeyWrenchActor::AMonkeyWrenchActor()
 	WorldMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WorldMesh"));
 	SetRootComponent(WorldMesh);
 	WorldMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+	WorldMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	WorldMesh->SetUseCCD(true);
 	MeleeAttack = CreateDefaultSubobject<UMeleeAttackComponent>(TEXT("MeleeAttack"));
 }
 
@@ -28,10 +31,19 @@ void AMonkeyWrenchActor::BeginPlay()
 
 void AMonkeyWrenchActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bEndingPlay = true;
 	if (MeleeAttack)
 	{
 		MeleeAttack->CancelAttack();
 	}
+	if (AActor* SlotActor = FixedSlot.Get())
+	{
+		if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(SlotActor))
+		{
+			Slot->NotifyAssignedPhysicalCarryItemEnding(*this);
+		}
+	}
+	FixedSlot.Reset();
 	if (Carrier)
 	{
 		Carrier->NotifyHeldActorEnding(this);
@@ -49,7 +61,7 @@ void AMonkeyWrenchActor::FellOutOfWorld(const UDamageType& DamageType)
 FPlayerInteractionQuery AMonkeyWrenchActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
 	FPlayerInteractionQuery Query;
-	if (Carrier)
+	if (Carrier || IsStoredInAssignedPhysicalCarryFixedSlot())
 	{
 		return Query;
 	}
@@ -86,6 +98,11 @@ FTransform AMonkeyWrenchActor::GetHeldTransform() const
 
 bool AMonkeyWrenchActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
+	if (IsStoredInAssignedPhysicalCarryFixedSlot())
+	{
+		OutFailureReason = LOCTEXT("TakeFromSlotRequired", "몽키스패너는 전용 슬롯에서 가져와야 합니다.");
+		return false;
+	}
 	if (Carrier || !Carry.IsHandEmpty())
 	{
 		OutFailureReason = LOCTEXT("HandOccupied", "이미 다른 물건을 들고 있습니다.");
@@ -109,7 +126,6 @@ bool AMonkeyWrenchActor::HandleTakenBy(UPlayerCarryComponent& Carry, USceneCompo
 		AttachToComponent(HeldAnchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 		ApplyHeldTransform();
 	}
-	OnHeldPresentationChanged.Broadcast(true);
 	return true;
 }
 
@@ -118,16 +134,117 @@ UPrimitiveComponent* AMonkeyWrenchActor::GetPhysicalCarryPrimitive() const
 	return WorldMesh;
 }
 
-void AMonkeyWrenchActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry)
+bool AMonkeyWrenchActor::CanFreeDrop(FText& OutFailureReason) const
 {
-	ensureMsgf(Carrier == &Carry, TEXT("Monkey wrench drop committed by a carry component that does not own it."));
-	if (MeleeAttack)
+	if (!Carrier || Carrier->GetHeldObject() != this)
 	{
-		MeleeAttack->CancelAttack();
+		OutFailureReason = LOCTEXT("WrenchNotHeldForDrop", "몽키스패너를 들고 있어야 내려놓을 수 있습니다.");
+		return false;
+	}
+	return true;
+}
+
+bool AMonkeyWrenchActor::TryBindPhysicalCarryFixedSlot(AActor& SlotActor, FText& OutFailureReason)
+{
+	if (bFixedSlotBindingConflict)
+	{
+		OutFailureReason = LOCTEXT("SlotBindingConflict", "몽키스패너가 여러 슬롯에 연결되어 있습니다.");
+		return false;
+	}
+	IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(&SlotActor);
+	if (!Slot || Slot->GetAssignedPhysicalCarryItem() != this)
+	{
+		OutFailureReason = LOCTEXT("InvalidSlotBinding", "몽키스패너와 슬롯 연결이 올바르지 않습니다.");
+		return false;
+	}
+	if (FixedSlot.IsValid() && FixedSlot.Get() != &SlotActor)
+	{
+		OutFailureReason = LOCTEXT("DuplicateSlotBinding", "몽키스패너가 여러 슬롯에 연결되어 있습니다.");
+		return false;
+	}
+	FixedSlot = &SlotActor;
+	return true;
+}
+
+void AMonkeyWrenchActor::ClearPhysicalCarryFixedSlotBinding(AActor& ExpectedSlot)
+{
+	if (FixedSlot.Get() == &ExpectedSlot)
+	{
+		FixedSlot.Reset();
+	}
+}
+
+bool AMonkeyWrenchActor::IsStoredInAssignedPhysicalCarryFixedSlot() const
+{
+	const IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(FixedSlot.Get());
+	return Slot && Slot->GetStoredPhysicalCarryItem() == this;
+}
+
+bool AMonkeyWrenchActor::NotifyTakenFromFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || Carrier)
+	{
+		return false;
+	}
+	Carrier = &Carry;
+	return true;
+}
+
+bool AMonkeyWrenchActor::NotifyStoredInFixedSlotCommitted(
+	UPlayerCarryComponent& Carry,
+	AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || Carrier != &Carry)
+	{
+		return false;
 	}
 	Carrier = nullptr;
 	LastSafeTransform = GetActorTransform();
-	OnHeldPresentationChanged.Broadcast(false);
+	return true;
+}
+
+bool AMonkeyWrenchActor::NotifyRecoveredToFixedSlotCommitted(AActor& SlotActor)
+{
+	if (FixedSlot.Get() != &SlotActor || bEndingPlay)
+	{
+		return false;
+	}
+	if (Carrier && Carrier->GetHeldObject() == this)
+	{
+		return false;
+	}
+	Carrier = nullptr;
+	LastSafeTransform = GetActorTransform();
+	return true;
+}
+
+void AMonkeyWrenchActor::NotifyFixedSlotDestroyed(AActor& SlotActor)
+{
+	if (FixedSlot.Get() == &SlotActor)
+	{
+		FixedSlot.Reset();
+		Carrier = nullptr;
+		LastSafeTransform = GetActorTransform();
+	}
+}
+
+bool AMonkeyWrenchActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry)
+{
+	if (Carrier != &Carry)
+	{
+		return false;
+	}
+	Carrier = nullptr;
+	LastSafeTransform = GetActorTransform();
+	return true;
+}
+
+void AMonkeyWrenchActor::PublishPhysicalCarryCommit(const EPhysicalCarryCommitTransition Transition)
+{
+	OnHeldPresentationChanged.Broadcast(
+		Transition == EPhysicalCarryCommitTransition::TakenIntoHand);
 }
 
 void AMonkeyWrenchActor::RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry)
@@ -136,24 +253,30 @@ void AMonkeyWrenchActor::RecoverPhysicalCarryable(UPlayerCarryComponent* Previou
 	{
 		return;
 	}
+	if (Carrier && Carrier->GetHeldObject() == this
+		&& Carrier->RecoverHeldPhysicalObject(this))
+	{
+		return;
+	}
 	if (MeleeAttack)
 	{
 		MeleeAttack->CancelAttack();
 	}
-	const bool bWasHeld = Carrier != nullptr;
-	if (Carrier)
+	if (AActor* SlotActor = FixedSlot.Get())
 	{
-		Carrier->CommitReleasePhysicalObject(this);
+		if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(SlotActor))
+		{
+			if (Slot->TryRecoverAssignedPhysicalCarryItem(*this))
+			{
+				return;
+			}
+		}
 	}
 	Carrier = nullptr;
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetWorldPhysics(false);
-	SetActorTransform(LastSafeTransform.Equals(FTransform::Identity) ? InitialTransform : LastSafeTransform);
+	SetActorTransform(LastSafeTransform);
 	SetWorldPhysics(true);
-	if (bWasHeld)
-	{
-		OnHeldPresentationChanged.Broadcast(false);
-	}
 }
 
 FHeldEquipmentUseQuery AMonkeyWrenchActor::QueryEquipmentUse(const FHeldEquipmentUseContext& Context) const
@@ -216,6 +339,8 @@ void AMonkeyWrenchActor::SetWorldPhysics(const bool bEnabled)
 	}
 	if (bEnabled)
 	{
+		WorldMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		WorldMesh->SetUseCCD(true);
 		WorldMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		WorldMesh->SetSimulatePhysics(true);
 	}

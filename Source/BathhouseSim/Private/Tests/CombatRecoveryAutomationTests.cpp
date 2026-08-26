@@ -3,6 +3,7 @@
 #include "AIController.h"
 #include "Camera/CameraComponent.h"
 #include "Character/FirstPersonCharacter.h"
+#include "Cleaning/WaterStainActor.h"
 #include "Cleaning/WetMopActor.h"
 #include "Combat/CombatTypes.h"
 #include "Combat/HealthComponent.h"
@@ -19,6 +20,7 @@
 #include "Customer/CustomerRoutineInterruptionComponent.h"
 #include "Customer/CustomerSessionComponent.h"
 #include "Customer/StateTree/CustomerStateTreeTasks.h"
+#include "Curves/CurveVector.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
@@ -26,11 +28,15 @@
 #include "Facility/BathhouseFacilityActor.h"
 #include "Facility/BathhouseFacilitySlotComponent.h"
 #include "Facility/BathhouseCounterActor.h"
+#include "GameFramework/DamageType.h"
 #include "InputAction.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Interaction/PlayerEquipmentUseComponent.h"
+#include "Interaction/HeldEquipmentMotionComponent.h"
+#include "Interaction/PhysicalCarryFixedSlotActor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/AutomationTest.h"
+#include "Tests/BathhouseCleaningTowelTestProbe.h"
 #include "UObject/GarbageCollection.h"
 #include "UObject/UnrealType.h"
 
@@ -188,7 +194,7 @@ bool FBathhouseEquipmentUseRoutingTest::RunTest(const FString& Parameters)
 	const FPlayerInteractionResult MopDrop = Character->GetPlayerCarry()->TryReleaseHeldEquipment(
 		Character->GetFirstPersonCamera()->GetComponentLocation(),
 		FVector::ForwardVector);
-	TestTrue(TEXT("G uses the existing swept drop transaction"), MopDrop.bSucceeded);
+	TestTrue(TEXT("G uses the held-position free-drop transaction"), MopDrop.bSucceeded);
 	TestFalse(TEXT("G cancels active mop use before the drop commit"), Mop->IsMopping());
 	Mop->SetActorEnableCollision(false);
 	Character->PrimaryUseEndInput();
@@ -213,7 +219,7 @@ bool FBathhouseEquipmentUseRoutingTest::RunTest(const FString& Parameters)
 	const FPlayerInteractionResult WrenchDrop = Character->GetPlayerCarry()->TryReleaseHeldEquipment(
 		Character->GetFirstPersonCamera()->GetComponentLocation(),
 		FVector::ForwardVector);
-	TestTrue(TEXT("Wrench supports rollback-safe G drop"), WrenchDrop.bSucceeded);
+	TestTrue(TEXT("Wrench supports rollback-safe held-position G drop"), WrenchDrop.bSucceeded);
 	TestFalse(TEXT("G cancels an in-flight instant attack before commit"), Wrench->GetMeleeAttack()->IsAttacking());
 
 	AMonkeyWrenchActor* EndingWrench = World->SpawnActor<AMonkeyWrenchActor>();
@@ -228,6 +234,110 @@ bool FBathhouseEquipmentUseRoutingTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Held Actor EndPlay cancels the equipment-use owner"),
 		Character->GetPlayerEquipmentUse()->IsEquipmentUseInputActive());
 	Character->PrimaryUseEndInput();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FBathhousePhysicalCarryFallRecoveryTest,
+	"BathhouseSim.Interaction.PhysicalCarryHeldMopFallRecovery",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBathhousePhysicalCarryFallRecoveryTest::RunTest(const FString& Parameters)
+{
+	FScopedCombatAutomationWorld TestWorld(TEXT("PhysicalCarryFallRecoveryWorld"));
+	UWorld* World = TestWorld.Get();
+	if (!World)
+	{
+		AddError(TEXT("Failed to create the physical-carry fall recovery automation world."));
+		return false;
+	}
+
+	AFirstPersonCharacter* Character = World->SpawnActor<AFirstPersonCharacter>();
+	BeginCombatTestActor(Character);
+	UHeldEquipmentMotionComponent* Motion = Character->FindComponentByClass<UHeldEquipmentMotionComponent>();
+	if (!TestNotNull(TEXT("First-person fixture owns held-equipment motion"), Motion))
+	{
+		return false;
+	}
+
+	UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	AWetMopActor* Mop = World->SpawnActor<AWetMopActor>();
+	UStaticMeshComponent* MopMesh = Mop ? Mop->FindComponentByClass<UStaticMeshComponent>() : nullptr;
+	if (!TestNotNull(TEXT("Fall recovery mop owns its physical mesh"), MopMesh)
+		|| !TestNotNull(TEXT("Fall recovery cube mesh is available"), CubeMesh))
+	{
+		return false;
+	}
+	MopMesh->SetStaticMesh(CubeMesh);
+	MopMesh->SetWorldScale3D(FVector(0.2f));
+	MopMesh->UpdateBounds();
+	UCurveVector* MoppingCurve = NewObject<UCurveVector>(Mop, TEXT("FallRecoveryMoppingCurve"));
+	MoppingCurve->FloatCurves[0].AddKey(0.0f, 0.0f);
+	MoppingCurve->FloatCurves[0].AddKey(0.4f, 10.0f);
+	Mop->MoppingPositionCurve = MoppingCurve;
+	BeginCombatTestActor(Mop);
+
+	APhysicalCarryFixedSlotActor* Slot = World->SpawnActor<APhysicalCarryFixedSlotActor>();
+	Slot->SetActorLocation(FVector(600.0f, 0.0f, 100.0f));
+	Slot->AssignedItem = Mop;
+	Slot->bStartOccupied = false;
+	BeginCombatTestActor(Slot);
+	FText CarryFailure;
+	TestTrue(TEXT("Character takes the exact mop assigned to an empty recovery slot"),
+		Character->GetPlayerCarry()->TryTakePhysicalObject(Mop, CarryFailure));
+
+	Character->PrimaryUseStartInput();
+	TestTrue(TEXT("Hold mopping owns equipment input before the fall"),
+		Character->GetPlayerEquipmentUse()->IsEquipmentUseInputActive());
+	TestTrue(TEXT("Hold mopping activates mop domain state before the fall"), Mop->IsMopping());
+	TestTrue(TEXT("Hold mopping activates held-equipment motion before the fall"), Motion->IsMotionActive());
+
+	AWaterStainActor* Stain = World->SpawnActor<AWaterStainActor>();
+	BeginCombatTestActor(Stain);
+	FText StainFailure;
+	TestTrue(TEXT("Fall fixture starts a stain cleaning session with the same player"),
+		Stain->BeginMopCleaning(Character, StainFailure));
+	Mop->ActiveStain = Stain;
+	UBathhouseCleaningCancelProbe* CancelProbe = NewObject<UBathhouseCleaningCancelProbe>();
+	CancelProbe->Bind(Stain);
+
+	Mop->FellOutOfWorld(*GetDefault<UDamageType>());
+	TestFalse(TEXT("Held mop fall clears the equipment input owner"),
+		Character->GetPlayerEquipmentUse()->IsEquipmentUseInputActive());
+	TestFalse(TEXT("Held mop fall stops the retained motion target"), Motion->IsMotionActive());
+	TestTrue(TEXT("Held mop fall clears the authoritative carry hand"), Character->GetPlayerCarry()->IsHandEmpty());
+	TestFalse(TEXT("Held mop fall cancels mopping domain state"), Mop->IsMopping());
+	TestEqual(TEXT("Held mop fall cancels the active stain exactly once"), CancelProbe->CancelCount, 1);
+	TestEqual(TEXT("Held mop fall resets stain state"), Stain->GetCleaningState(), EStainCleaningState::Idle);
+	TestTrue(TEXT("Held mop fall resets stain progress"), FMath::IsNearlyZero(Stain->GetCleaningProgress()));
+	TestTrue(TEXT("Held mop fall recovers into the exact empty fixed slot"), Slot->IsOccupied());
+	TestEqual(TEXT("Recovered mop is attached to the exact slot anchor"),
+		Mop->GetRootComponent()->GetAttachParent(), Slot->GetPhysicalCarryItemAnchor());
+	TestTrue(TEXT("Recovered mop matches the exact slot location"),
+		Mop->GetActorLocation().Equals(Slot->GetPhysicalCarryItemAnchor()->GetComponentLocation(), 0.01f));
+	TestTrue(TEXT("Recovered mop matches the exact slot rotation"),
+		Mop->GetActorQuat().Equals(Slot->GetPhysicalCarryItemAnchor()->GetComponentQuat(), KINDA_SMALL_NUMBER));
+	TestFalse(TEXT("Recovered mop keeps physics disabled in the slot"), MopMesh->IsSimulatingPhysics());
+
+	const FTransform RecoveredTransform = Mop->GetActorTransform();
+	World->Tick(LEVELTICK_All, 1.0f / 30.0f);
+	Character->PrimaryUseEndInput();
+	World->Tick(LEVELTICK_All, 1.0f / 30.0f);
+	TestTrue(TEXT("Post-fall motion tick and later input release cannot overwrite the slot pose"),
+		Mop->GetActorTransform().Equals(RecoveredTransform));
+	TestTrue(TEXT("Post-fall input release preserves exact slot occupancy"), Slot->IsOccupied());
+	TestFalse(TEXT("Post-fall input release preserves disabled slot physics"), MopMesh->IsSimulatingPhysics());
+
+	TestTrue(TEXT("The same recovered mop can be taken again"),
+		Character->GetPlayerCarry()->TryTakeFromFixedSlot(Slot).bSucceeded);
+	Character->PrimaryUseStartInput();
+	TestTrue(TEXT("The same recovered mop can own a later equipment press"),
+		Character->GetPlayerEquipmentUse()->IsEquipmentUseInputActive());
+	TestTrue(TEXT("The same recovered mop can start mopping again"), Mop->IsMopping());
+	TestTrue(TEXT("The same recovered mop can restart held motion"), Motion->IsMotionActive());
+	Character->PrimaryUseEndInput();
+	TestFalse(TEXT("Later use releases normally"), Character->GetPlayerEquipmentUse()->IsEquipmentUseInputActive());
+	CancelProbe->Unbind();
 	return true;
 }
 
