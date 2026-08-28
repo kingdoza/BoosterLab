@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-Q47~Q52의 exact fixed slot과 actual-held-position free drop이 Source와 native automation에 구현되었다. key/wet mop/towel basket/monkey wrench는 공통 single carry coordinator를 사용하고 기본적으로 전용 fixed slot과 G free drop을 지원한다. free drop은 camera-origin 목표 위치로 이동하지 않고 실제 held world pose에서 질량 독립 `120/15 cm/s` velocity change를 적용하며, 모든 physical carry root는 free-world physics에서 CCD를 사용한다.
+Q47~Q52의 exact fixed slot과 actual-held-position free drop이 Source와 native automation에 구현되었다. key/wet mop/towel basket/monkey wrench는 공통 single carry coordinator를 사용하고 기본적으로 전용 fixed slot과 G free drop을 지원한다. free drop은 camera-origin 목표 위치로 이동하지 않고 실제 held world pose에서 질량 독립 `120/15 cm/s` velocity change를 적용하며, 모든 physical carry root는 free-world physics에서 CCD를 사용한다. checkout key도 같은 physical transaction으로 단일 Counter drop point 주변에 동일 인스턴스를 반환한다.
 
 equipment slot Blueprint/instance 배치, exact `AssignedItem`/anchor, key physics bounds와 기존 Blueprint release velocity 값은 코드 리뷰 후 Editor 단계에서 authoring한다.
 
@@ -189,10 +189,14 @@ held/fixed-slot 상태는 collision과 physics가 꺼져 있으므로 CCD 플래
 | `DroppedInWorld` | item을 보고 E take | `HeldByPlayer` |
 | `HeldByPlayer` | 원래 hook을 보고 E store | `AtHook` |
 | `HeldByPlayer` | check-in transfer | `AssignedToCustomer` |
+| `AssignedToCustomer` | checkout physical return | `OnCounter` |
+| `OnCounter` | key를 보고 E take | `HeldByPlayer` |
 
-free drop은 `KeyNumber`, original `KeyHook`과 unique token identity를 바꾸지 않는다. dropped key를 hook에 자동 반환하지 않고 player가 다시 들고 E로 반환한다. customer/counter transition은 기존 expected-owner guard를 유지한다.
+free drop은 `KeyNumber`, original `KeyHook`과 unique token identity를 바꾸지 않는다. dropped key를 hook에 자동 반환하지 않고 player가 다시 들고 E로 반환한다. checkout도 새 key를 spawn하지 않고 같은 hidden `AssignedKey`를 Counter의 후보 transform으로 옮긴 뒤 `FPhysicalCarryPlacementTransaction::ApplyFreeWorld` 계약으로 physics를 켠다. velocity change는 player free drop과 동일한 key authoring 값을 사용하되 방향은 Counter drop point forward와 world up이다.
 
-현재 key의 root는 비물리 `SceneRoot`이므로 신규 `KeyPhysicsRoot: UBoxComponent`를 root로 추가하고 기존 `SceneRoot`/`WorldMesh`를 그 아래 보존한다. `KeyPhysicsRoot`만 free-world collision/physics를 담당한다. 기존 reflected component 이름은 삭제·rename하지 않으며 Blueprint hierarchy/relative transform은 Editor에서 재검증한다.
+checkout commit 전에 key root bounds로 WorldStatic/WorldDynamic blocking overlap을 검사한다. exact point를 먼저 시도하고 Counter의 authorable local XY 범위에서 제한 횟수만 탐색한다. 성공해야 `AssignedToCustomer -> OnCounter`와 customer checkout key-return guard를 commit하며, 실패하면 transform, visibility, collision/physics와 key/session state를 모두 유지한다. Counter slot reservation이나 occupancy는 사용하지 않는다.
+
+key의 `KeyPhysicsRoot: UBoxComponent`만 free-world collision/physics를 담당하고 기존 `SceneRoot`/`WorldMesh`는 그 아래에서 presentation을 담당한다. 기존 reflected component 이름은 삭제·rename하지 않으며 Blueprint hierarchy/relative transform은 Editor에서 재검증한다.
 
 ## Equipment Extension
 

@@ -5,6 +5,7 @@
 #include "Combat/HealthComponent.h"
 #include "Customer/CustomerKnockdownComponent.h"
 #include "Customer/CustomerRoutineInterruptionComponent.h"
+#include "Customer/CustomerQueueNavigationComponent.h"
 #include "Customer/CustomerSessionComponent.h"
 #include "Customer/CustomerRoutineDefinition.h"
 #include "Facility/BathhouseCounterActor.h"
@@ -17,6 +18,7 @@ ABathhouseCustomerCharacter::ABathhouseCustomerCharacter()
 	Health = CreateDefaultSubobject<UHealthComponent>(TEXT("Health"));
 	CustomerKnockdown = CreateDefaultSubobject<UCustomerKnockdownComponent>(TEXT("CustomerKnockdown"));
 	CustomerRoutineInterruption = CreateDefaultSubobject<UCustomerRoutineInterruptionComponent>(TEXT("CustomerRoutineInterruption"));
+	CustomerQueueNavigation = CreateDefaultSubobject<UCustomerQueueNavigationComponent>(TEXT("CustomerQueueNavigation"));
 	AIControllerClass = ABathhouseCustomerAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 }

@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-25(KST) physical carry free-world CCD 계약 구현 기준
-- 상태: 모든 현재 physical carryable의 exact fixed slot/free-drop 및 공통 CCD 계약 구현, Editor Blueprint authoring·통합 검증 대기
+- 기준일: 2026-08-26(KST) counter queue transform/overflow와 physical key return 확정 설계 기준
+- 상태: 기존 physical carry/recovery 구현 위에 최신 queue assignment, checkout overflow wander, queue-pose recovery gate와 단일 physical key drop 구현 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -35,7 +35,7 @@
 - [CameraSystem.md](Architecture/CameraSystem.md): 이동/착지 기반 카메라 셰이크, camera manager 기반 pitch limit
 - [InteractionSystem.md](Architecture/InteractionSystem.md): camera trace, primary/secondary intent와 equipment-use routing
 - [PhysicalCarrySystem.md](Architecture/PhysicalCarrySystem.md): exact fixed slot, held-position free drop, key/equipment placement와 recovery
-- [FacilitySystem.md](Architecture/FacilitySystem.md): 다중 facility slot과 분리된 check-in/checkout queue
+- [FacilitySystem.md](Architecture/FacilitySystem.md): 다중 facility slot, transform 기반 counter queue assignment, checkout overflow와 key drop point
 - [EconomySystem.md](Architecture/EconomySystem.md): PlayerState wallet과 일회성 cash 획득
 - [CustomerSystem.md](Architecture/CustomerSystem.md): UE 5.8 StateTree customer routine, session과 cleanup
 - [UISystem.md](Architecture/UISystem.md): native Widget/Widget Blueprint 경계와 E/F/LMB interaction prompt 계약
@@ -107,9 +107,9 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Character는 E/F/G와 범용 LMB `PrimaryUseAction`을 Interaction에 의도로 전달하고 carry/equipment-use component를 조립한다. Computer focus중 LMB는 monitor pointer가, 일반 상태에서는 held equipment가 소유한다.
 - Interaction은 camera trace, 범용 equipment-use routing과 held motion 표현을 소유한다. Physical Carry는 key/wet mop/towel basket/monkey wrench 중 하나의 held state, exact fixed slot과 free-drop transaction을 소유한다.
 - 모든 일반 carryable은 별도 예외가 없으면 G free drop과 exact assigned fixed slot을 모두 지원한다. free drop은 actual held pose에서 질량 무시 약한 velocity change로 시작하며 free-world item은 Pawn을 무시하고 CCD를 사용한다.
-- Facility는 다중 use slot과 check-in/checkout 독립 FIFO queue를 소유한다.
+- Facility는 다중 use slot, check-in/checkout 독립 FIFO와 revision을 소유한다. queue point는 Location/Yaw 전체를 사용하고 checkout visible capacity를 넘은 entry는 같은 FIFO 순번을 유지한 채 전용 NavMesh volume assignment를 받는다.
 - Economy는 PlayerState wallet을 소유하고 cash claim을 한 번만 반영한다.
-- Customer StateTree는 routine을 조율하고 session/queue/facility/key/wallet API에 실행을 위임한다.
+- Customer StateTree는 routine을 조율하고 session/queue/facility/key/wallet API에 실행을 위임한다. native queue Task와 queue navigation component가 assignment 재조회, MoveTo, 도착 회전, overflow wander와 promotion을 처리한다.
 - Customer bath stay는 pre-shower 완료부터 고정 60초이며 그동안 available bath를 random 이동한다.
 - Bath의 `ApproachPoint`와 `ActionPoint`는 모두 캐릭터 발바닥 transform으로 authoring하며, Customer Session이 scaled capsule half height를 한 번 더해 실제 actor/capsule-center transform으로 변환한다. 고객은 NavMesh 위 `ApproachPoint`까지 이동한 뒤 blocking collision 사전 검사 없이 `ActionPoint`로 unswept snap하고, 퇴탕 시 같은 방식으로 `ApproachPoint`에 복귀한 뒤 navigation을 재개한다.
 - Customer 행동 montage는 native StateTree Task가 유효 후보 중 하나를 EnterState에서 선택하며 one-shot 종료 또는 선택된 한 montage의 duration loop를 완료 기준으로 사용한다.
@@ -118,7 +118,8 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Cleaning은 zone 기반 water stain spawn, spawn별 material/yaw/XY scale variation과 wet mop hold-cleaning state를 소유한다.
 - Combat은 LMB Started 단발 몽키스패너 swing, camera-based multi shape trace와 공용 health/depleted event를 소유한다. 무기 World Mesh는 authoritative 피격 판정이 아니다.
 - Cleaning의 wet mop은 LMB Hold중 target 유무와 관계없이 mopping state/motion을 유지하고 유효한 정면 water stain에만 제거 progress를 commit한다.
-- Customer Recovery는 health 0을 death가 아닌 일시 래그돌로 처리한다. session 타이머·자원·예약과 StateTree hierarchy를 보존하고, 기립 후 C++ restart serial을 통해 미완료 국소 행동만 처음부터 재시작한다.
+- Customer Recovery는 health 0을 death가 아닌 일시 래그돌로 처리한다. session 타이머·자원·예약과 StateTree hierarchy를 보존하고, 기립 후 queue member는 최신 visible point 위치·Yaw 복귀 gate를 완료한 다음 미완료 국소 행동을 재시작한다.
+- Checkout key return은 새 Actor나 점유 슬롯을 만들지 않는다. 손님에게 할당된 동일 key instance를 Counter drop point 주변의 충돌 없는 후보에서 공통 free-world physics transaction으로 `OnCounter` 전환한다.
 - Towel은 homogeneous count, atomic transfer, used-bin overflow와 washer/dryer state를 소유한다.
 - Towel Presentation은 inventory snapshot을 읽어 clean stack/used bin/basket의 Stack과 기존 washer/dryer의 Pile을 표시한다. Stack/Pile/Slot은 transient CallInEditor preview를 제공하며 Slot은 gameplay actor에 연결하지 않는다.
 - 사용 수건통 내부는 container 단위 E/F interaction이고, overflow world towel만 개별 E interaction이다.
@@ -142,6 +143,7 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Customer -> Interaction
 - Customer -> Economy
 - Customer -> UE GameplayStateTree/AI/Navigation
+- Facility overflow volume -> UE NavigationSystem
 - UI -> Interaction
 - Computer -> Interaction
 - Computer -> UMG/Engine Camera/PlayerController
@@ -181,6 +183,7 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - E는 world primary와 fixed-slot take/store, F는 world secondary, G는 held item free drop, LMB는 computer click 또는 held equipment primary-use intent다. Character는 intent만 routing한다.
 - 모든 towel endpoint 이동은 source 감소와 destination 증가를 단일 native transaction으로 commit한다.
 - Customer routine의 gameplay 상태 변경은 native C++ API를 통해 수행하고 StateTree/Blueprint asset에 domain mutation을 두지 않는다.
+- Counter는 FIFO와 assignment만 소유하고 Customer Queue Navigation이 AI request·도착 Yaw·overflow wander·knockdown recovery gate를 소유한다. checkout overflow를 별도 queue로 복제하지 않는다.
 - 컴퓨터 사용은 game을 pause하거나 fullscreen viewport UI를 열지 않는다. Character는 입력 의도만 분기하고 Computer component가 view/input session lifecycle을 소유하며 screen Widget은 domain gameplay 상태를 소유하지 않는다.
 
 ## Implementation Boundary
@@ -194,3 +197,4 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - `ABathhouseComputerActor`, `UPlayerComputerUseComponent`, `UComputerSampleScreenWidget`, interaction suppression과 click input은 Source와 focused automation까지 구현되었다. Computer Blueprint/WBP, click InputAction/IMC assignment와 level 배치는 Editor 후속 단계다.
 - Combat Source, `PrimaryUseAction` 호환 이관, LMB mop use, equipment prompt row, customer knockdown/soft interruption과 restartable MoveTo는 Source와 native automation까지 구현되었다. `IA_PrimaryUse`, `IMC_FirstPerson`, wrench/customer Blueprint, `WBP_InteractionPrompt`와 `ST_CustomerRoutine` 교체는 코드 리뷰 후 Editor 단계로 인계한다.
 - exact equipment slot, key free drop과 actual-held-pose weak release는 Source와 native automation까지 구현되었다. equipment slot Blueprint/instance, exact item/anchor, key physics bounds와 기존 Blueprint release velocity 값은 코드 리뷰 후 Editor 단계로 인계한다.
+- counter queue transform/overflow, shared queue navigation, recovery pose gate와 physical checkout key drop은 Source와 native automation까지 구현되었다. StateTree/Counter/overflow volume/Blueprint authoring과 PIE 통합은 후속 Editor 단계이며 기존 queue target Task와 returned-key reflected symbol은 asset migration 동안 deprecated compatibility로 보존한다.

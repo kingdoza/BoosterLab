@@ -13,6 +13,7 @@ class UCustomerRoutineDefinition;
 class UCustomerSessionComponent;
 class UCustomerKnockdownComponent;
 class UCustomerRoutineInterruptionComponent;
+class UCustomerQueueNavigationComponent;
 class UHealthComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBathhouseCustomerFinished, ABathhouseCustomerCharacter*, Customer, EBathhouseCustomerDepartureReason, Reason);
@@ -52,6 +53,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Customer|Recovery")
 	UCustomerRoutineInterruptionComponent* GetCustomerRoutineInterruption() const { return CustomerRoutineInterruption; }
 
+	UFUNCTION(BlueprintPure, Category = "Customer|Queue")
+	UCustomerQueueNavigationComponent* GetCustomerQueueNavigation() const { return CustomerQueueNavigation; }
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Customer|Presentation")
 	void OnActivityStarted(EBathhouseCustomerActivity ActivityType);
 
@@ -89,6 +93,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Customer|Recovery", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCustomerRoutineInterruptionComponent> CustomerRoutineInterruption;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Customer|Queue", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCustomerQueueNavigationComponent> CustomerQueueNavigation;
 
 	bool bFinishBroadcast = false;
 };

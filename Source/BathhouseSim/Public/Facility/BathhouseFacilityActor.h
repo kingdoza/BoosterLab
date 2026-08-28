@@ -43,6 +43,8 @@ public:
 	void OnSlotUseEnded(UBathhouseFacilitySlotComponent* Slot, AActor* User);
 
 protected:
+	friend class FBathhouseKeyTopologyInitializationTest;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bathhouse Facility")
 	TObjectPtr<USceneComponent> SceneRoot;
 

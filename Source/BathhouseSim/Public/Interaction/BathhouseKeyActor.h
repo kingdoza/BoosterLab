@@ -81,6 +81,8 @@ public:
 	bool TryTakeFromHook(UPlayerCarryComponent& Carry, ABathhouseKeyHookActor& Hook);
 	bool TryReturnToHook(UPlayerCarryComponent& Carry, ABathhouseKeyHookActor& Hook);
 	bool TryAssignToCustomer(UPlayerCarryComponent& Carry, AActor& Customer);
+	bool TryPlaceOnCounter(AActor& Customer, ABathhouseCounterActor& Counter);
+	UE_DEPRECATED(5.8, "Returned keys now use the Counter drop point and free-world placement transaction.")
 	bool TryPlaceOnCounter(AActor& Customer, ABathhouseCounterActor& Counter, int32 ReturnSlotIndex, USceneComponent& ReturnSlot);
 	bool TryTakeFromCounter(UPlayerCarryComponent& Carry);
 	void RecoverToHook(UObject* ExpectedOwner = nullptr);
@@ -121,8 +123,10 @@ protected:
 
 private:
 	friend class FBathhouseKeyRecoveryTest;
+	friend class FBathhouseKeyTopologyInitializationTest;
 	friend class FBathhousePhysicalCarryDropTest;
 	friend class FBathhousePhysicalCarryFixedSlotTest;
+	friend class FBathhouseCheckoutKeyDropTest;
 
 	bool CommitState(EBathhouseKeyState NewState, UObject* NewOwner, bool bDeferPublication = false);
 	void BroadcastStateTransition(EBathhouseKeyState PreviousState, EBathhouseKeyState NewState);
@@ -142,7 +146,6 @@ private:
 
 	TWeakObjectPtr<AActor> FixedSlot;
 
-	int32 CounterReturnSlotIndex = INDEX_NONE;
 	FTransform InitialTransform;
 	FTransform LastSafeTransform;
 	EBathhouseKeyState DeferredPreviousState = EBathhouseKeyState::AtHook;

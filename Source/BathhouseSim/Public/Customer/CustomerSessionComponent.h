@@ -129,6 +129,7 @@ private:
 	friend class FBathhouseQueueCleanupTest;
 	friend class FBathhouseCustomerBathSnapTest;
 	friend class FBathhouseCustomerTowelTest;
+	friend class FBathhouseCheckoutKeyDropTest;
 
 	void CacheCurrentFacilityTransforms();
 	void ClearCurrentFacilityTransformCache();
@@ -181,7 +182,6 @@ private:
 	FTowelUseHandle TowelUseHandle;
 
 	int32 KeyNumber = INDEX_NONE;
-	int32 ReturnSlotIndex = INDEX_NONE;
 	int32 NavigationFailureCount = 0;
 	EBathhouseCounterLane QueueLane = EBathhouseCounterLane::None;
 	EBathhouseFacilityType WaitingFacilityType = EBathhouseFacilityType::Bath;

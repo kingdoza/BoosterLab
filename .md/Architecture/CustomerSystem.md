@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. Bath collision-independent snap, health 0 래그돌, soft interruption과 native Task restart가 구현되었으며 상세 계약은 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)에 둔다.
+이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. queue assignment navigation, checkout overflow wander와 physical key return Source는 구현되었으며 Facility 경계는 [FacilitySystem.md](FacilitySystem.md), knockdown 복귀는 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)에 둔다.
 
 ## Source Scope
 
@@ -11,11 +11,13 @@ Source/BathhouseSim/Public/Customer/
   BathhouseCustomerTypes.h
   CustomerRoutineDefinition.h
   CustomerSessionComponent.h
+  CustomerQueueNavigationComponent.h
   CustomerMontagePlaybackComponent.h
   BathhouseCustomerCharacter.h
   BathhouseCustomerAIController.h
   BathhouseCustomerSpawner.h
   StateTree/CustomerStateTreeTasks.h
+  StateTree/CustomerQueueStateTreeTasks.h
   StateTree/CustomerStateTreeConditions.h
   StateTree/CustomerTowelStateTreeTasks.h
 
@@ -23,11 +25,13 @@ Source/BathhouseSim/Private/Customer/
   BathhouseCustomerTypes.cpp
   CustomerRoutineDefinition.cpp
   CustomerSessionComponent.cpp
+  CustomerQueueNavigationComponent.cpp
   CustomerMontagePlaybackComponent.cpp
   BathhouseCustomerCharacter.cpp
   BathhouseCustomerAIController.cpp
   BathhouseCustomerSpawner.cpp
   StateTree/CustomerStateTreeTasks.cpp
+  StateTree/CustomerQueueStateTreeTasks.cpp
   StateTree/CustomerStateTreeConditions.cpp
   StateTree/CustomerTowelStateTreeTasks.cpp
 
@@ -55,7 +59,8 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 |---|---|
 | 현재 routine state와 transition | `ST_CustomerRoutine` StateTree |
 | key number, key reference, timer와 runtime handles | `UCustomerSessionComponent` |
-| navigation request | native `FCustomerRestartableMoveToTask`와 AIController; Content StateTree 교체 전 asset은 기존 Task 사용 |
+| 일반 navigation request | native `FCustomerRestartableMoveToTask`와 AIController |
+| queue 이동·도착 회전·overflow wander | `UCustomerQueueNavigationComponent`; Counter assignment를 읽고 mutation하지 않음 |
 | queue | `ABathhouseCounterActor` |
 | facility reservation/occupancy | `UBathhouseFacilitySlotComponent` |
 | Bath approach/action snap 상태와 복구 | `UCustomerSessionComponent` |
@@ -79,6 +84,8 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 - store shoes, undress, pre-shower, main shower 시간
 - drying, towel return, dress, wear shoes 시간
 - facility retry 간격과 navigation 최대 재시도
+- queue 이동 허용 반경, 도착 Yaw 회전 속도와 허용 오차
+- checkout overflow wander 도착 반경과 지점 재선택 대기 범위
 - `UsageFee = 10000`
 - towel availability wait limit
 - towel unavailable satisfaction penalty
@@ -99,7 +106,7 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 - current satisfaction value
 - check-in wait와 checkout offer의 non-interruptible queue-service guard
 
-Session은 domain runtime state owner이며 StateTree transition graph를 복제하지 않는다. StateTree Task가 session API를 통해 transaction을 수행한다.
+Session은 queue lane membership을 보유하지만 index/assignment/배회 위치를 복제하지 않는다. 최신 assignment는 Counter에 위임하고 StateTree Task가 session API를 통해 transaction을 수행한다.
 
 Bath timer가 만료되면 session은 `Customer.Event.BathStayExpired` event를 StateTree에 전달한다.
 
@@ -108,6 +115,7 @@ Bath timer가 만료되면 session은 `Customer.Event.BathStayExpired` event를 
 - customer Pawn의 composition root다.
 - private `CustomerSession` default subobject로 `UCustomerSessionComponent`를 생성하고 외부 C++에는 `GetCustomerSession()` 접근만 제공한다.
 - private `CustomerMontagePlayback` default subobject로 montage lifecycle을 조립하며 gameplay session state와 분리한다.
+- `CustomerQueueNavigation` default subobject로 queue AI request, 도착 회전과 overflow wander lifecycle을 조립한다.
 - `Health`, `CustomerKnockdown`, `CustomerRoutineInterruption` private default subobject를 조립하고 각 책임을 getter로만 노출한다.
 - `CustomerSession`은 `VisibleAnywhere`, `BlueprintReadOnly`, `AllowPrivateAccess` 계약으로 Blueprint와 StateTree의 읽기 binding을 유지한다.
 - check-in 중 `IPlayerInteractable`을 구현하고 session에 query/execute를 위임한다.
@@ -156,12 +164,14 @@ Native C++이 소유하는 것:
 - gameplay event 발행
 - montage 후보 검증, 단일 선택과 실제 playback 종료 판정
 - soft interruption serial, restartable MoveTo와 기존 Task local restart
+- queue revision 기반 assignment 재조회와 recovery queue-pose gate
 
 Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 않는다.
 
 ## Native StateTree Tasks
 
 - queue join/leave와 front 도착 대기
+- `FCustomerMoveToCurrentQueueAssignmentTask`: service/queue/overflow를 한 실행으로 처리하고 service point 위치·Yaw 정렬 뒤에만 성공
 - check-in key 대기와 timeout 시작·취소
 - facility/slot 선택·예약·release
 - native `FCustomerRestartableMoveToTask`는 기존 목적지 binding을 수용하며, `ST_CustomerRoutine` asset의 built-in `FStateTreeMoveToTask` 교체는 Editor 단계에서 수행
@@ -176,13 +186,13 @@ Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 �
 
 조건은 session과 owner API를 읽기만 하고 상태를 바꾸지 않는다.
 
-Queue removal은 session membership와 wait/service guard를 먼저 지운 뒤 counter에서 dequeue한다. Counter의 동기 lane broadcast는 남은 customer에게 계속 전달하지만, 이미 떠나는 customer와 active check-in wait/checkout offer에는 `QueueChanged` StateTree event를 보내지 않는다. Check-in wait 시작은 idempotent하여 StateTree reselect가 기존 timeout을 다시 시작하지 않는다. Knockdown soft pause는 StateTree reselect/exit가 아니며 queue, facility와 checkout cleanup을 호출하지 않는다.
+Queue removal은 session membership와 wait/service guard를 먼저 지운 뒤 counter에서 dequeue한다. Counter의 동기 lane broadcast는 남은 customer와 queue navigation component에 전달하지만, 이미 떠나는 customer와 active check-in wait/checkout offer에는 StateTree event를 보내지 않는다. Check-in wait 시작은 idempotent하다. Knockdown soft pause는 StateTree reselect/exit가 아니며 queue, facility와 checkout cleanup을 호출하지 않는다.
 
 ## Full Routine Flow
 
 1. Spawner가 entry에 customer를 생성하고 routine definition/counter를 주입한다.
-2. Customer가 check-in lane에 enqueue하고 할당 queue point로 이동한다.
-3. Front service point 도착 후 `WaitingForKey`가 되고 60초 timeout을 시작한다.
+2. Customer가 check-in lane에 enqueue하고 최신 assignment 위치로 이동한 뒤 authored Yaw로 정렬한다.
+3. Front service point 위치·회전 완료 후 `WaitingForKey`가 되고 60초 timeout을 시작한다.
 4. Player가 유효한 번호 key를 주면 key/session을 commit하고 timeout을 취소한다.
 5. Timeout이면 check-in lane을 떠나 exit로 이동한 뒤 소멸한다.
 6. 성공하면 같은 번호 shoe locker slot에서 store-shoes timed activity를 수행한다.
@@ -201,8 +211,9 @@ Queue removal은 session membership와 wait/service guard를 먼저 지운 뒤 c
 19. used bin full이면 bin 주변 valid floor의 individual used towel로 commit하고, 즉시 spawn 불가면 PendingSpill ledger로 이전한다.
 20. towel handle이 없으면 towel-dependent drying/return을 건너뛴다.
 21. clothes locker와 shoe locker에서 dress/wear-shoes activity를 수행한다.
-22. Checkout lane에 enqueue하고 key 배치, cash claim을 처리한다.
-23. Cash claim 성공 즉시 checkout lane을 떠나 exit로 이동하고 소멸한다.
+22. Checkout lane에 enqueue한다. visible capacity 안에서는 고유 service/queue point로 이동·정렬하고 초과 시 FIFO 순번을 유지한 채 전용 NavMesh volume을 배회한다.
+23. service point 도착 후 동일한 assigned key를 counter drop point에서 physical `OnCounter` 상태로 전환하고 cash claim을 처리한다.
+24. Cash claim 성공 즉시 checkout lane을 떠나 exit로 이동하고 소멸한다.
 
 Player의 key pickup/rack 반환은 customer 퇴장 조건이 아니다.
 
@@ -213,6 +224,14 @@ Player의 key pickup/rack 반환은 customer 퇴장 조건이 아니다.
 - 성공 시 key actor를 `AssignedToCustomer`로 전이하고 player hand를 비운 뒤 session에 저장한다.
 - key 번호는 player가 선택한 번호이며 customer가 미리 배정받지 않는다.
 - key receive와 timeout이 같은 frame에 경쟁하면 game thread에서 먼저 commit한 terminal event만 유효하다.
+
+## Checkout Queue And Key Transaction
+
+- checkout queue는 visible lane과 overflow를 나누는 두 배열이 아니라 Counter의 단일 FIFO다.
+- `FCustomerMoveToCurrentQueueAssignmentTask`는 queue point에서 성공하지 않고 revision을 기다리며, service point 위치·Yaw 정렬 후에만 checkout offer로 전이한다.
+- 반환 시 새 key를 spawn하지 않고 session의 동일한 `AssignedKey`를 Counter drop 후보 transform으로 옮긴다.
+- overlap 검사, free-world physics 적용과 `AssignedToCustomer -> OnCounter`를 한 key-owned transaction으로 commit한다. 실패하면 key/session과 cash offer 전 상태를 유지하고 authorable retry 간격 뒤 다시 시도한다.
+- 성공한 `OnCounter` key는 player가 회수하지 않아도 cash claim과 customer 퇴장을 막지 않는다.
 
 ## Customer Towel Transaction
 
@@ -281,13 +300,15 @@ Check-in 외 gameplay timeout은 두지 않는다.
 ## Manual Review Points
 
 - check-in timeout이 front 도착 후 시작되고 key 수령 시 취소되는지 확인한다.
+- check-in/checkout customer가 queue point의 위치뿐 아니라 Yaw까지 정렬하며, knockdown 기립 후 최신 assignment로 복귀한 뒤 routine을 재개하는지 확인한다.
+- checkout overflow customer가 FIFO 순번을 잃지 않고 전용 volume 안을 배회하며 promotion 때 active wander를 중단하는지 확인한다.
 - player가 준 key 번호와 두 numbered facility가 전체 routine에서 일치하는지 확인한다.
 - bath timer가 pre-shower 완료 시 시작하고 정확히 60초에 current montage를 중단한 뒤 approach 복귀와 release를 수행하는지 확인한다.
 - blocking collision이 action point를 점유해도 snap이 성공하고 정확한 cached transform, `MOVE_None`과 기존 collision enabled 상태를 유지하는지 확인한다.
 - blocked action snap 후 정상 release/technical abort가 cached approach로 복귀하고 movement mode를 복원하는지 확인한다.
 - bath random dwell과 다른 bath 선택이 고정 체류시간 종료를 지연하지 않는지 확인한다.
 - 모든 StateTree exit/abort에서 queue, slot, timer와 key가 정리되는지 확인한다.
-- key 배치와 cash claim 뒤 NPC가 key 회수를 기다리지 않고 퇴장하는지 확인한다.
+- 동일한 assigned key가 counter 후보 위치에서 physics `OnCounter`로 전환되고 blocked drop은 key/session을 보존하며, cash claim 뒤 NPC가 key 회수를 기다리지 않고 퇴장하는지 확인한다.
 - montage 후보가 0/1/여러 개인 경우 각각 failure/단일 선택/random 단일 선택으로 동작하는지 확인한다.
 - duration-loop가 처음 선택한 montage만 반복하고 StateTree exit에서 다른 playback을 중단하지 않는지 확인한다.
 - montage가 없는 timer-only 상태의 기존 logical loop가 유지되는지 확인한다.

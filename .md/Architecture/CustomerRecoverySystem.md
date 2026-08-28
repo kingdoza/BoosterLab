@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 customer health depleted 후 래그돌, 설정 시간 뒤 제자리 즉시 기립과 C++ 루틴 실행 계층의 soft interruption/restart 구현을 정의한다. Source와 native automation은 구현되었고, `ST_CustomerRoutine`의 MoveTo 교체와 Blueprint physics authoring은 Editor 단계에 남아 있다.
+이 문서는 customer health depleted 후 래그돌, 설정 시간 뒤 제자리 즉시 기립과 C++ 루틴 실행 계층의 soft interruption/restart를 정의한다. queue-pose recovery gate와 native StateTree queue Task Source까지 구현되었고 asset 교체는 후속 Editor 단계다.
 
 Soft interruption은 StateTree 종료, technical abort 또는 customer death가 아니다. [CustomerSystem.md](CustomerSystem.md)의 정상·timeout·technical cleanup과 구분한다.
 
@@ -12,12 +12,16 @@ Soft interruption은 StateTree 종료, technical abort 또는 customer death가 
 Source/BathhouseSim/Public/Customer/
   CustomerKnockdownComponent.h
   CustomerRoutineInterruptionComponent.h
+  CustomerQueueNavigationComponent.h
   StateTree/CustomerStateTreeTasks.h        # restartable MoveTo/Task 계약 확장
+  StateTree/CustomerQueueStateTreeTasks.h
 
 Source/BathhouseSim/Private/Customer/
   CustomerKnockdownComponent.cpp
   CustomerRoutineInterruptionComponent.cpp
+  CustomerQueueNavigationComponent.cpp
   StateTree/CustomerStateTreeTasks.cpp
+  StateTree/CustomerQueueStateTreeTasks.cpp
 ```
 
 `UCustomerSessionComponent`, `UCustomerMontagePlaybackComponent`, `ABathhouseCustomerCharacter`와 focused automation test를 함께 확장한다.
@@ -30,6 +34,7 @@ Source/BathhouseSim/Private/Customer/
 - StateTree `ExitState()` cleanup을 실행하지 않는 soft pause/restart
 - session 타이머 잔여 시간, key/towel/cash/queue/facility reservation 보존
 - 미완료 국소 행동의 시작 지점 재실행
+- queue member의 기립 후 최신 service/queue transform 복귀와 Yaw 정렬
 - 이미 commit된 원자적 transaction의 중복 방지
 
 Customer Recovery는 피해 검출, player 공격 판정, facility slot authoritative state와 StateTree transition graph를 소유하지 않는다.
@@ -44,6 +49,7 @@ Customer Recovery는 피해 검출, player 공격 판정, facility slot authorit
 | session timer 잔여·domain resource | `UCustomerSessionComponent` |
 | routine state/transition | `ST_CustomerRoutine` |
 | restartable navigation request | native `FCustomerRestartableMoveToTask`과 AIController |
+| queue navigation·recovery pose | `UCustomerQueueNavigationComponent`와 Counter assignment |
 | local activity/montage restart | 기존 native Customer StateTree Task |
 | facility reservation/occupancy | `UBathhouseFacilitySlotComponent` |
 
@@ -53,6 +59,7 @@ Customer Recovery는 피해 검출, player 공격 판정, facility slot authorit
 
 - 기존 `CustomerSession`
 - 기존 `CustomerMontagePlayback`
+- `CustomerQueueNavigation`
 - `Health`
 - `CustomerKnockdown`
 - `CustomerRoutineInterruption`
@@ -85,8 +92,9 @@ Knockdown duration 만료 시:
 4. actor/capsule, mesh relative transform과 collision snapshot 복구
 5. configured recovery health ratio로 health 회복
 6. CharacterMovement를 복구하고 routine restart 준비
+7. queue member면 최신 assignment를 resolve해 queue-pose recovery gate 실행
 
-별도 get-up montage, Motion Warping와 원래 위치/NavMesh로의 수평 복귀를 추가하지 않는다. floor trace가 실패하면 파괴된 physics 값을 사용하지 않도록 최종 유효 actor/root transform을 안전 값으로 사용한다.
+별도 get-up montage와 Motion Warping은 추가하지 않는다. 일반 routine은 ragdoll 최종 XY에서 재개하지만, active queue member의 visible assignment는 예외로 현재 service/queue point까지 이동하고 authored Yaw로 정렬한 뒤 routine을 재개한다. floor trace가 실패하면 파괴된 physics 값을 사용하지 않도록 최종 유효 actor/root transform을 안전 값으로 사용한다.
 
 ## Soft Interruption Boundary
 
@@ -96,11 +104,13 @@ Knockdown은 StateTree에 stop/restart를 요청하지 않는다. UE 5.8 `UState
 
 - assigned key/number
 - towel use handle/stage
-- cash offer/key return slot/cash claimed state
+- cash offer/physical key return commit/cash claimed state
 - queue membership와 current lane
 - current facility reservation
 - satisfaction, completed transaction guard
 - StateTree active hierarchy
+
+`EndSoftInterruption()`은 queue recovery gate를 먼저 검사한다. queue member가 아니거나 checkout `OverflowWander` assignment면 즉시 resume한다. visible service/queue assignment면 StateTree와 routine timer를 paused 상태로 유지하고 shared queue navigation component가 이동·회전을 완료한 뒤 한 번만 timer와 brain을 resume한다. queue revision이 바뀌면 과거 point가 아니라 최신 assignment로 active request를 교체한다.
 
 정상 StateTree exit, technical abort와 EndPlay는 기존 cleanup을 실행하며 soft interruption guard로 이를 막지 않는다.
 
@@ -139,7 +149,19 @@ Bath local dwell은 새로 시작하지만 total bath stay 잔여 시간을 넘�
 - replacement에 의해 token이 superseded된 Task는 자신의 request와 local token을 정리하고 `Failed`로 기존 retry/cleanup 계약에 이관하며 무기한 `Running`하지 않음
 - navigation 실패는 기존 retry/technical-abort 계약으로 전달
 
-`ST_CustomerRoutine`에는 행동별 checkpoint state나 recovery transition을 추가하지 않고 기존 MoveTo Task만 동일 binding의 restartable native Task로 교체한다.
+`ST_CustomerRoutine`에는 행동별 checkpoint state나 recovery transition을 추가하지 않는다. 일반 목적지는 기존 MoveTo를 동일 binding의 restartable native Task로 교체하고, check-in/checkout은 queue 전용 native Task로 교체한다.
+
+## Queue Pose Recovery
+
+`UCustomerQueueNavigationComponent`는 정상 queue Task와 paused-StateTree recovery gate가 공유하는 async 실행 owner다. Counter의 FIFO/index를 복제하지 않고 매 resolve마다 session의 lane과 owner actor로 최신 assignment를 얻는다.
+
+- 정상 실행: queue point 이동·Yaw 정렬·revision 대기, checkout overflow wander와 promotion을 처리하고 service point 정렬 후 성공한다.
+- knockdown 시작: active AI request와 turn을 중단하되 queue membership은 유지한다.
+- 기립 후 visible assignment: latest point로 이동·회전한 뒤 interruption component에 gate 완료를 알린다.
+- 기립 후 overflow: 고정 복귀점이 없으므로 brain을 resume하고 queue Task가 새 wander destination을 선택한다.
+- invalid counter/assignment 또는 반복 navigation failure: 오래된 request를 성공 처리하지 않고 기존 technical-abort 경계로 전달한다.
+
+queue movement의 request token, delegate, Tick과 임시 CharacterMovement 회전 flag는 이 Component가 대칭 정리한다. `UCustomerSessionComponent`와 이미 비대한 공용 StateTree Task 파일에 async lifecycle을 추가하지 않는다.
 
 ## Facility Activity Recovery
 
@@ -161,7 +183,7 @@ Bath local dwell은 새로 시작하지만 total bath stay 잔여 시간을 넘�
 - check-in key transfer
 - clean towel token acquire
 - mark towel used/used towel return
-- checkout key placement/return slot reservation
+- checkout assigned key의 physical `OnCounter` commit
 - cash offer creation/cash claim
 - activity completion에 결합된 domain side effect
 
@@ -203,3 +225,5 @@ Blueprint는 health, recovery timer, physics state, session timer, reservation�
 - facility action은 예약을 유지한 채 ragdoll 위치에서 approach로 다시 이동하고 action을 재시작하는지 확인한다.
 - soft pause가 Queue/Facility/Checkout Task의 destructive `ExitState()`를 호출하지 않는지 확인한다.
 - actor/controller/facility EndPlay에서 soft interruption이 정상 cleanup을 막지 않는지 확인한다.
+- service/queue point에서 쓰러진 customer가 기립 후 최신 point 위치·Yaw 복구를 완료하기 전에 StateTree/timer가 재개되지 않는지 확인한다.
+- overflow customer는 기립 후 과거 wander point로 강제 복귀하지 않고 FIFO를 보존한 새 wander 실행을 재개하는지 확인한다.

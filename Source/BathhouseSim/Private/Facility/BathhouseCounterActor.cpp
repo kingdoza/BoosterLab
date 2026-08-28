@@ -1,6 +1,7 @@
 #include "Facility/BathhouseCounterActor.h"
 
 #include "Components/SceneComponent.h"
+#include "Facility/CustomerQueueOverflowWanderVolume.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBathhouseCounter, Log, All);
 
@@ -16,18 +17,14 @@ ABathhouseCounterActor::ABathhouseCounterActor()
 	CheckoutServicePoint->SetupAttachment(SceneRoot);
 	CashOfferPoint = CreateDefaultSubobject<USceneComponent>(TEXT("CashOfferPoint"));
 	CashOfferPoint->SetupAttachment(SceneRoot);
+	ReturnedKeyDropPoint = CreateDefaultSubobject<USceneComponent>(TEXT("ReturnedKeyDropPoint"));
+	ReturnedKeyDropPoint->SetupAttachment(SceneRoot);
 }
 
 void ABathhouseCounterActor::BeginPlay()
 {
 	Super::BeginPlay();
 	ResolveConfiguredPoints();
-	RuntimeReturnedSlots.Reset(ResolvedReturnedKeyPoints.Num());
-	for (USceneComponent* Point : ResolvedReturnedKeyPoints)
-	{
-		FBathhouseReturnedObjectSlot& Slot = RuntimeReturnedSlots.AddDefaulted_GetRef();
-		Slot.Point = Point;
-	}
 }
 
 void ABathhouseCounterActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -36,8 +33,6 @@ void ABathhouseCounterActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	CheckoutQueue.Reset();
 	ResolvedCheckInQueuePoints.Reset();
 	ResolvedCheckoutQueuePoints.Reset();
-	ResolvedReturnedKeyPoints.Reset();
-	RuntimeReturnedSlots.Reset();
 	OnQueueChangedNative.Clear();
 	OnReturnedKeySlotsChangedNative.Clear();
 	Super::EndPlay(EndPlayReason);
@@ -45,30 +40,64 @@ void ABathhouseCounterActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 bool ABathhouseCounterActor::EnqueueActor(const EBathhouseCounterLane Lane, AActor* Actor)
 {
+	bool bCheckInChanged = CompactInvalidEntries(EBathhouseCounterLane::CheckIn);
+	bool bCheckoutChanged = CompactInvalidEntries(EBathhouseCounterLane::Checkout);
+	auto CommitCompaction = [this, &bCheckInChanged, &bCheckoutChanged]()
+	{
+		if (bCheckInChanged)
+		{
+			AdvanceQueueRevision(EBathhouseCounterLane::CheckIn);
+			BroadcastQueueChanged(EBathhouseCounterLane::CheckIn);
+		}
+		if (bCheckoutChanged)
+		{
+			AdvanceQueueRevision(EBathhouseCounterLane::Checkout);
+			BroadcastQueueChanged(EBathhouseCounterLane::Checkout);
+		}
+	};
+
 	if (!IsValid(Actor) || Lane == EBathhouseCounterLane::None)
 	{
+		CommitCompaction();
 		return false;
 	}
 
-	if (GetQueue(EBathhouseCounterLane::CheckIn).ContainsByPredicate([Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor == Actor; })
-		|| GetQueue(EBathhouseCounterLane::Checkout).ContainsByPredicate([Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor == Actor; }))
+	if (GetQueue(EBathhouseCounterLane::CheckIn).ContainsByPredicate([Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor.Get() == Actor; })
+		|| GetQueue(EBathhouseCounterLane::Checkout).ContainsByPredicate([Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor.Get() == Actor; }))
 	{
-		return GetQueue(Lane).ContainsByPredicate([Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor == Actor; });
+		const bool bAlreadyInLane = GetQueue(Lane).ContainsByPredicate(
+			[Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor.Get() == Actor; });
+		CommitCompaction();
+		return bAlreadyInLane;
 	}
 
 	FBathhouseQueueEntry& Entry = GetMutableQueue(Lane).AddDefaulted_GetRef();
 	Entry.Actor = Actor;
 	Entry.Sequence = NextQueueSequence++;
-	BroadcastQueueChanged(Lane);
+	if (Lane == EBathhouseCounterLane::CheckIn)
+	{
+		bCheckInChanged = true;
+	}
+	else
+	{
+		bCheckoutChanged = true;
+	}
+	CommitCompaction();
 	return true;
 }
 
 bool ABathhouseCounterActor::DequeueActor(const EBathhouseCounterLane Lane, AActor* Actor)
 {
-	TArray<FBathhouseQueueEntry>& Queue = GetMutableQueue(Lane);
-	const int32 Removed = Queue.RemoveAll([Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor == Actor; });
-	if (Removed > 0)
+	if (Lane == EBathhouseCounterLane::None)
 	{
+		return false;
+	}
+	TArray<FBathhouseQueueEntry>& Queue = GetMutableQueue(Lane);
+	const bool bCompacted = CompactInvalidEntries(Lane);
+	const int32 Removed = Queue.RemoveAll([Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor.Get() == Actor; });
+	if (bCompacted || Removed > 0)
+	{
+		AdvanceQueueRevision(Lane);
 		BroadcastQueueChanged(Lane);
 	}
 	return Removed > 0;
@@ -76,8 +105,80 @@ bool ABathhouseCounterActor::DequeueActor(const EBathhouseCounterLane Lane, AAct
 
 bool ABathhouseCounterActor::IsFront(const EBathhouseCounterLane Lane, const AActor* Actor) const
 {
+	FBathhouseQueueAssignment Assignment;
+	return ResolveQueueAssignment(Lane, Actor, Assignment)
+		&& Assignment.Type == EBathhouseQueueAssignmentType::ServicePoint;
+}
+
+bool ABathhouseCounterActor::ResolveQueueAssignment(
+	const EBathhouseCounterLane Lane,
+	const AActor* Actor,
+	FBathhouseQueueAssignment& OutAssignment) const
+{
+	OutAssignment = FBathhouseQueueAssignment();
+	OutAssignment.LaneRevision = GetQueueRevision(Lane);
+	if (Lane == EBathhouseCounterLane::None || !IsValid(Actor))
+	{
+		return false;
+	}
+
 	const TArray<FBathhouseQueueEntry>& Queue = GetQueue(Lane);
-	return Queue.Num() > 0 && Queue[0].Actor == Actor;
+	int32 LogicalIndex = 0;
+	bool bFound = false;
+	for (const FBathhouseQueueEntry& Entry : Queue)
+	{
+		if (!Entry.Actor.IsValid())
+		{
+			continue;
+		}
+		if (Entry.Actor.Get() == Actor)
+		{
+			bFound = true;
+			break;
+		}
+		++LogicalIndex;
+	}
+	if (!bFound)
+	{
+		return false;
+	}
+
+	OutAssignment.LogicalIndex = LogicalIndex;
+	if (LogicalIndex == 0)
+	{
+		if (const USceneComponent* ServicePoint = GetServicePoint(Lane))
+		{
+			OutAssignment.Type = EBathhouseQueueAssignmentType::ServicePoint;
+			OutAssignment.TargetTransform = ServicePoint->GetComponentTransform();
+			return true;
+		}
+		return false;
+	}
+
+	const TArray<TObjectPtr<USceneComponent>>& Points = GetQueuePoints(Lane);
+	const int32 PointIndex = LogicalIndex - 1;
+	if (Points.IsValidIndex(PointIndex) && Points[PointIndex])
+	{
+		OutAssignment.Type = EBathhouseQueueAssignmentType::QueuePoint;
+		OutAssignment.QueuePointIndex = PointIndex;
+		OutAssignment.TargetTransform = Points[PointIndex]->GetComponentTransform();
+		return true;
+	}
+	if (Lane == EBathhouseCounterLane::Checkout && PointIndex >= Points.Num())
+	{
+		OutAssignment.Type = EBathhouseQueueAssignmentType::OverflowWander;
+		return true;
+	}
+	return false;
+}
+
+int64 ABathhouseCounterActor::GetQueueRevision(const EBathhouseCounterLane Lane) const
+{
+	if (Lane == EBathhouseCounterLane::None)
+	{
+		return 0;
+	}
+	return Lane == EBathhouseCounterLane::Checkout ? CheckoutQueueRevision : CheckInQueueRevision;
 }
 
 bool ABathhouseCounterActor::GetQueueTargetTransform(
@@ -85,120 +186,66 @@ bool ABathhouseCounterActor::GetQueueTargetTransform(
 	const AActor* Actor,
 	FTransform& OutTransform) const
 {
-	const TArray<FBathhouseQueueEntry>& Queue = GetQueue(Lane);
-	const int32 Index = Queue.IndexOfByPredicate([Actor](const FBathhouseQueueEntry& Entry) { return Entry.Actor == Actor; });
-	if (Index == INDEX_NONE)
+	FBathhouseQueueAssignment Assignment;
+	if (!ResolveQueueAssignment(Lane, Actor, Assignment) || !Assignment.IsVisibleAssignment())
 	{
 		return false;
 	}
+	OutTransform = Assignment.TargetTransform;
+	return true;
+}
 
-	if (Index == 0)
+bool ABathhouseCounterActor::TrySampleCheckoutOverflowPoint(const AActor& Requestor, FVector& OutPoint) const
+{
+	if (CheckoutOverflowVolumes.IsEmpty())
 	{
-		if (const USceneComponent* ServicePoint = GetServicePoint(Lane))
+		return false;
+	}
+	const int32 StartIndex = FMath::RandHelper(CheckoutOverflowVolumes.Num());
+	for (int32 Offset = 0; Offset < CheckoutOverflowVolumes.Num(); ++Offset)
+	{
+		const int32 Index = (StartIndex + Offset) % CheckoutOverflowVolumes.Num();
+		const ACustomerQueueOverflowWanderVolume* Volume = CheckoutOverflowVolumes[Index];
+		if (IsValid(Volume) && Volume->TrySampleReachablePoint(Requestor, OutPoint))
 		{
-			OutTransform = ServicePoint->GetComponentTransform();
 			return true;
 		}
-		return false;
 	}
-
-	const TArray<TObjectPtr<USceneComponent>>& Points = GetQueuePoints(Lane);
-	if (Points.IsEmpty())
-	{
-		return false;
-	}
-	const int32 PointIndex = FMath::Min(Index - 1, Points.Num() - 1);
-	if (!Points[PointIndex])
-	{
-		return false;
-	}
-	OutTransform = Points[PointIndex]->GetComponentTransform();
-	return true;
+	return false;
 }
 
 bool ABathhouseCounterActor::TryReserveReturnedObjectSlot(AActor* Requestor, int32& OutSlotIndex, FTransform& OutTransform)
 {
 	OutSlotIndex = INDEX_NONE;
-	if (!IsValid(Requestor))
-	{
-		return false;
-	}
-
-	for (int32 Index = 0; Index < RuntimeReturnedSlots.Num(); ++Index)
-	{
-		FBathhouseReturnedObjectSlot& Slot = RuntimeReturnedSlots[Index];
-		if (Slot.ReservationOwner == Requestor && Slot.ReturnedObject == nullptr && Slot.Point)
-		{
-			OutSlotIndex = Index;
-			OutTransform = Slot.Point->GetComponentTransform();
-			return true;
-		}
-		if (Slot.ReservationOwner == nullptr && Slot.ReturnedObject == nullptr && Slot.Point)
-		{
-			Slot.ReservationOwner = Requestor;
-			OutSlotIndex = Index;
-			OutTransform = Slot.Point->GetComponentTransform();
-			OnReturnedKeySlotsChanged();
-			OnReturnedKeySlotsChangedNative.Broadcast();
-			return true;
-		}
-	}
 	return false;
 }
 
 bool ABathhouseCounterActor::PlaceReturnedObject(AActor* Requestor, const int32 SlotIndex, AActor* ReturnedObject)
 {
-	if (!RuntimeReturnedSlots.IsValidIndex(SlotIndex) || !IsValid(Requestor) || !IsValid(ReturnedObject))
-	{
-		return false;
-	}
-	FBathhouseReturnedObjectSlot& Slot = RuntimeReturnedSlots[SlotIndex];
-	if (Slot.ReservationOwner != Requestor || Slot.ReturnedObject != nullptr || !Slot.Point)
-	{
-		return false;
-	}
-	Slot.ReturnedObject = ReturnedObject;
-	OnReturnedKeySlotsChanged();
-	OnReturnedKeySlotsChangedNative.Broadcast();
-	return true;
+	return false;
 }
 
 bool ABathhouseCounterActor::TakeReturnedObject(AActor* ReturnedObject)
 {
-	for (FBathhouseReturnedObjectSlot& Slot : RuntimeReturnedSlots)
-	{
-		if (Slot.ReturnedObject == ReturnedObject)
-		{
-			Slot.ReturnedObject = nullptr;
-			Slot.ReservationOwner = nullptr;
-			OnReturnedKeySlotsChanged();
-			OnReturnedKeySlotsChangedNative.Broadcast();
-			return true;
-		}
-	}
 	return false;
 }
 
 bool ABathhouseCounterActor::ReleaseReturnedObjectReservation(AActor* Requestor, const int32 SlotIndex)
 {
-	if (!RuntimeReturnedSlots.IsValidIndex(SlotIndex))
-	{
-		return false;
-	}
-	FBathhouseReturnedObjectSlot& Slot = RuntimeReturnedSlots[SlotIndex];
-	if (Slot.ReservationOwner != Requestor || Slot.ReturnedObject != nullptr)
-	{
-		return false;
-	}
-	Slot.ReservationOwner = nullptr;
-	OnReturnedKeySlotsChanged();
-	OnReturnedKeySlotsChangedNative.Broadcast();
-	return true;
+	return false;
 }
 
 USceneComponent* ABathhouseCounterActor::GetReturnSlotComponent(const int32 SlotIndex) const
 {
-	return RuntimeReturnedSlots.IsValidIndex(SlotIndex) ? RuntimeReturnedSlots[SlotIndex].Point.Get() : nullptr;
+	return nullptr;
+}
+
+void ABathhouseCounterActor::NotifyReturnedKeyDropped(AActor* ReturnedKey)
+{
+	if (IsValid(ReturnedKey))
+	{
+		OnReturnedKeyDropped(ReturnedKey);
+	}
 }
 
 TArray<FBathhouseQueueEntry>& ABathhouseCounterActor::GetMutableQueue(const EBathhouseCounterLane Lane)
@@ -233,11 +280,6 @@ void ABathhouseCounterActor::ResolveConfiguredPoints()
 		TEXT("CheckoutQueue"),
 		CheckoutQueuePointReferences,
 		ResolvedCheckoutQueuePoints,
-		UsedAcrossRoles);
-	ResolvePointReferences(
-		TEXT("ReturnedKey"),
-		ReturnedKeyPointReferences,
-		ResolvedReturnedKeyPoints,
 		UsedAcrossRoles);
 }
 
@@ -291,6 +333,18 @@ void ABathhouseCounterActor::ResolvePointReferences(
 				*GetPathName());
 			continue;
 		}
+		if (Point == CheckInServicePoint || Point == CheckoutServicePoint)
+		{
+			UE_LOG(
+				LogBathhouseCounter,
+				Error,
+				TEXT("Counter queue point %s[%d] on %s uses native service point %s; service points are reserved and cannot be queue-point references."),
+				RoleName,
+				Index,
+				*GetPathName(),
+				*Point->GetName());
+			continue;
+		}
 		if (UsedInRole.Contains(Point))
 		{
 			UE_LOG(
@@ -326,4 +380,33 @@ void ABathhouseCounterActor::BroadcastQueueChanged(const EBathhouseCounterLane L
 {
 	OnQueueChanged(Lane);
 	OnQueueChangedNative.Broadcast(Lane);
+}
+
+bool ABathhouseCounterActor::CompactInvalidEntries(const EBathhouseCounterLane Lane)
+{
+	if (Lane == EBathhouseCounterLane::None)
+	{
+		return false;
+	}
+	return GetMutableQueue(Lane).RemoveAll(
+		[](const FBathhouseQueueEntry& Entry) { return !Entry.Actor.IsValid(); }) > 0;
+}
+
+void ABathhouseCounterActor::AdvanceQueueRevision(const EBathhouseCounterLane Lane)
+{
+	int64& Revision = Lane == EBathhouseCounterLane::Checkout
+		? CheckoutQueueRevision
+		: CheckInQueueRevision;
+	if (Revision == MAX_int64)
+	{
+		Revision = 1;
+	}
+	else
+	{
+		++Revision;
+		if (Revision == 0)
+		{
+			Revision = 1;
+		}
+	}
 }

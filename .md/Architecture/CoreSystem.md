@@ -102,6 +102,7 @@ Cleaning/Towel/Computer, Combat/Customer Recovery와 Physical Carry는 현재 ru
 - 독립적인 타이머, Tick, delegate lifecycle, physics snapshot과 transaction guard는 응집된 Component/Subsystem으로 분리한다.
 - input Character에 damage, cleaning, carry, computer와 customer routine 상태를 복제하지 않는다.
 - `UCustomerSessionComponent`는 domain resource/timer owner로 유지하고 ragdoll physics와 StateTree pause/restart lifecycle은 신규 Customer component에 둔다.
+- queue MoveTo/도착 회전/overflow wander와 recovery gate의 async lifecycle은 `UCustomerSessionComponent`나 이미 400줄을 넘은 `CustomerStateTreeTasks` 구현에 누적하지 않고 `UCustomerQueueNavigationComponent`와 `CustomerQueueStateTreeTasks` 파일로 분리한다. Counter는 FIFO/assignment owner로만 유지한다.
 - `UPlayerInteractionComponent`는 focus/query/result 표시 경계를 유지하고 concrete weapon/cleaning mutation은 equipment actor와 domain owner에 위임한다.
 - 공통 physical carry Actor/Component는 만들지 않고 `IPhysicalCarryable`을 유지한다. generic fixed slot은 world interaction Actor로, atomic placement의 commit owner는 `UPlayerCarryComponent`에 두며 snapshot/rollback mechanics는 private non-UObject helper로 분리한다.
 - 재사용 가능한 held motion은 carry 소유권과 분리된 표현 Component로 유지한다.

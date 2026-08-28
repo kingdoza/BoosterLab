@@ -57,6 +57,7 @@ public:
 
 protected:
 	friend class ABathhouseKeyActor;
+	friend class FBathhouseKeyTopologyInitializationTest;
 	friend class FBathhousePhysicalCarryDropTest;
 	friend class FBathhousePhysicalCarryFixedSlotTest;
 
@@ -77,7 +78,10 @@ protected:
 
 private:
 	bool InitializeRuntimeFixedSlot();
+	void HandleKeyTopologyChanged();
 	void ReleaseStoredKeyForEndPlay();
+
+	FDelegateHandle KeyTopologyChangedHandle;
 
 	FText RuntimeFailureReason;
 	bool bSlotOccupied = false;

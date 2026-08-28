@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Facility/BathhouseCounterActor.h"
 #include "Interaction/BathhouseKeyHookActor.h"
+#include "Interaction/CheckoutKeyPlacementUtils.h"
 #include "Interaction/PhysicalCarryFixedSlot.h"
 #include "Interaction/PlayerCarryComponent.h"
 #if WITH_EDITOR
@@ -59,11 +60,10 @@ void ABathhouseKeyActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	if (KeyState == EBathhouseKeyState::OnCounter && CounterOwner)
 	{
-		CounterOwner->TakeReturnedObject(this);
+		CounterOwner = nullptr;
 	}
 	StateOwner = nullptr;
 	CounterOwner = nullptr;
-	CounterReturnSlotIndex = INDEX_NONE;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -358,34 +358,41 @@ bool ABathhouseKeyActor::TryAssignToCustomer(UPlayerCarryComponent& Carry, AActo
 
 bool ABathhouseKeyActor::TryPlaceOnCounter(
 	AActor& Customer,
-	ABathhouseCounterActor& Counter,
-	const int32 ReturnSlotIndex,
-	USceneComponent& ReturnSlot)
+	ABathhouseCounterActor& Counter)
 {
+	if (KeyState == EBathhouseKeyState::OnCounter)
+	{
+		return StateOwner == &Counter && CounterOwner == &Counter;
+	}
 	if (KeyState != EBathhouseKeyState::AssignedToCustomer || StateOwner != &Customer)
 	{
 		return false;
 	}
-	if (!Counter.PlaceReturnedObject(&Customer, ReturnSlotIndex, this))
+	if (!BathhouseCheckoutKeyPlacement::TryPlaceKeyInFreeWorld(*this, Counter))
 	{
 		return false;
 	}
 
 	CounterOwner = &Counter;
-	CounterReturnSlotIndex = ReturnSlotIndex;
 	CommitState(EBathhouseKeyState::OnCounter, &Counter);
-	AttachToComponent(&ReturnSlot, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-	SetWorldPresentation(true, true);
+	LastSafeTransform = GetActorTransform();
+	SetActorHiddenInGame(false);
+	Counter.NotifyReturnedKeyDropped(this);
 	return true;
+}
+
+bool ABathhouseKeyActor::TryPlaceOnCounter(
+	AActor& Customer,
+	ABathhouseCounterActor& Counter,
+	const int32 ReturnSlotIndex,
+	USceneComponent& ReturnSlot)
+{
+	return TryPlaceOnCounter(Customer, Counter);
 }
 
 bool ABathhouseKeyActor::TryTakeFromCounter(UPlayerCarryComponent& Carry)
 {
 	if (KeyState != EBathhouseKeyState::OnCounter || StateOwner != CounterOwner || !CounterOwner || !Carry.IsHandEmpty())
-	{
-		return false;
-	}
-	if (!CounterOwner->TakeReturnedObject(this))
 	{
 		return false;
 	}
@@ -395,7 +402,6 @@ bool ABathhouseKeyActor::TryTakeFromCounter(UPlayerCarryComponent& Carry)
 	}
 
 	CounterOwner = nullptr;
-	CounterReturnSlotIndex = INDEX_NONE;
 	CommitState(EBathhouseKeyState::HeldByPlayer, &Carry);
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetWorldPhysics(false);
@@ -430,9 +436,7 @@ void ABathhouseKeyActor::RecoverToHook(UObject* ExpectedOwner)
 	}
 	if (CounterOwner)
 	{
-		CounterOwner->TakeReturnedObject(this);
 		CounterOwner = nullptr;
-		CounterReturnSlotIndex = INDEX_NONE;
 	}
 	if (AActor* SlotActor = FixedSlot.Get())
 	{

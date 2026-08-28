@@ -2,12 +2,14 @@
 
 #include "Tests/BathhouseDomainTestProbe.h"
 
+#include "AIController.h"
 #include "Animation/AnimMontage.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Facility/BathhouseCounterActor.h"
 #include "Facility/BathhouseFacilityActor.h"
 #include "Facility/BathhouseFacilitySlotComponent.h"
+#include "Facility/CustomerQueueOverflowWanderVolume.h"
 #include "Interaction/BathhouseKeyActor.h"
 #include "Interaction/BathhouseKeyHookActor.h"
 #include "Interaction/PlayerCarryComponent.h"
@@ -15,6 +17,10 @@
 #include "Customer/CustomerSessionComponent.h"
 #include "Customer/BathhouseCustomerCharacter.h"
 #include "Customer/CustomerMontagePlaybackComponent.h"
+#include "Customer/CustomerQueueNavigationComponent.h"
+#include "Customer/CustomerRoutineDefinition.h"
+#include "Customer/CustomerRoutineInterruptionComponent.h"
+#include "Economy/BathhouseCashPaymentActor.h"
 #include "Customer/StateTree/CustomerStateTreeTasks.h"
 #include "Components/SceneComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -435,14 +441,8 @@ bool FBathhouseKeyRecoveryTest::RunTest(const FString& Parameters)
 	ABathhouseKeyHookActor* CounterHook = NewObject<ABathhouseKeyHookActor>();
 	ABathhouseKeyActor* CounterKey = NewObject<ABathhouseKeyActor>();
 	ABathhouseCounterActor* Counter = NewObject<ABathhouseCounterActor>();
-	USceneComponent* ReturnPoint = NewObject<USceneComponent>(Counter);
 	TestTrue(TEXT("Counter key initializes at its hook"), CounterKey->InitializeAtHook(CounterHook));
-	FBathhouseReturnedObjectSlot& ReturnedSlot = Counter->RuntimeReturnedSlots.AddDefaulted_GetRef();
-	ReturnedSlot.Point = ReturnPoint;
-	ReturnedSlot.ReservationOwner = Customer;
-	ReturnedSlot.ReturnedObject = CounterKey;
 	CounterKey->CounterOwner = Counter;
-	CounterKey->CounterReturnSlotIndex = 0;
 	CounterKey->CommitState(EBathhouseKeyState::OnCounter, Counter);
 	CounterKey->HeldTransform = FTransform(
 		FRotator(-12.0f, 63.0f, 7.0f),
@@ -468,8 +468,6 @@ bool FBathhouseKeyRecoveryTest::RunTest(const FString& Parameters)
 		CounterKey->GetRootComponent()->GetRelativeTransform().GetLocation().IsNearlyZero()
 		&& CounterKey->GetRootComponent()->GetRelativeTransform().GetRotation().Equals(FQuat::Identity));
 	TestTrue(TEXT("Counter recovery clears the carry owner"), CounterCarry->IsHandEmpty());
-	TestNull(TEXT("Recovery clears the returned object slot"), ReturnedSlot.ReturnedObject.Get());
-	TestNull(TEXT("Recovery clears the returned slot reservation"), ReturnedSlot.ReservationOwner.Get());
 
 	ABathhouseKeyHookActor* HeldHook = NewObject<ABathhouseKeyHookActor>();
 	ABathhouseKeyActor* HeldKey = NewObject<ABathhouseKeyActor>();
@@ -491,6 +489,104 @@ bool FBathhouseKeyRecoveryTest::RunTest(const FString& Parameters)
 	EndingKey->CommitState(EBathhouseKeyState::HeldByPlayer, EndingCarry);
 	EndingKey->EndPlay(EEndPlayReason::Destroyed);
 	TestTrue(TEXT("Key EndPlay clears the carry reference"), EndingCarry->IsHandEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FBathhouseKeyTopologyInitializationTest,
+	"BathhouseSim.Interaction.KeyTopologyInitializationOrder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBathhouseKeyTopologyInitializationTest::RunTest(const FString& Parameters)
+{
+	if (!GEngine)
+	{
+		AddError(TEXT("GEngine is required for the key topology initialization test."));
+		return false;
+	}
+	const FName WorldName = MakeUniqueObjectName(nullptr, UWorld::StaticClass(), TEXT("KeyTopologyAutomationWorld"));
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, WorldName, GetTransientPackage());
+	if (!World)
+	{
+		GEngine->DestroyWorldContext(World);
+		AddError(TEXT("Failed to create the key topology automation world."));
+		return false;
+	}
+	World->AddToRoot();
+	WorldContext.SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+
+	const FTransform Identity = FTransform::Identity;
+	const auto BeginActor = [](AActor* Actor)
+	{
+		if (Actor && !Actor->HasActorBegunPlay())
+		{
+			Actor->DispatchBeginPlay();
+		}
+	};
+	ABathhouseKeyHookActor* Hook = World->SpawnActorDeferred<ABathhouseKeyHookActor>(
+		ABathhouseKeyHookActor::StaticClass(),
+		Identity,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	ABathhouseKeyActor* Key = World->SpawnActorDeferred<ABathhouseKeyActor>(
+		ABathhouseKeyActor::StaticClass(),
+		Identity,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	Hook->KeyNumber = 2;
+	Hook->KeyActor = Key;
+	Key->KeyNumber = 2;
+	Key->KeyHook = Hook;
+	UGameplayStatics::FinishSpawningActor(Hook, Identity);
+	UGameplayStatics::FinishSpawningActor(Key, Identity);
+	BeginActor(Hook);
+	BeginActor(Key);
+
+	FText FailureReason;
+	TestFalse(TEXT("A key hook that begins before its numbered facilities is initially unavailable"),
+		Hook->IsPhysicalCarrySlotOperational(&FailureReason));
+	TestTrue(TEXT("The early failure identifies the missing numbered facility"), !FailureReason.IsEmpty());
+
+	ABathhouseFacilityActor* ShoeLocker = World->SpawnActorDeferred<ABathhouseFacilityActor>(
+		ABathhouseFacilityActor::StaticClass(),
+		Identity,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	ShoeLocker->FacilityType = EBathhouseFacilityType::ShoeLocker;
+	ShoeLocker->FacilityNumber = 2;
+	ShoeLocker->bEnabled = true;
+	UGameplayStatics::FinishSpawningActor(ShoeLocker, Identity);
+	BeginActor(ShoeLocker);
+	TestFalse(TEXT("One numbered facility is not enough to activate the key hook"),
+		Hook->IsPhysicalCarrySlotOperational());
+
+	ABathhouseFacilityActor* ClothesLocker = World->SpawnActorDeferred<ABathhouseFacilityActor>(
+		ABathhouseFacilityActor::StaticClass(),
+		Identity,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	ClothesLocker->FacilityType = EBathhouseFacilityType::ClothesLocker;
+	ClothesLocker->FacilityNumber = 2;
+	ClothesLocker->bEnabled = true;
+	UGameplayStatics::FinishSpawningActor(ClothesLocker, Identity);
+	BeginActor(ClothesLocker);
+
+	TestTrue(TEXT("The final numbered facility registration reactivates the existing key hook"),
+		Hook->IsPhysicalCarrySlotOperational(&FailureReason));
+	TestEqual(TEXT("The reactivated hook stores its exact authored key"),
+		Hook->GetStoredPhysicalCarryItem(), static_cast<AActor*>(Key));
+	TestEqual(TEXT("Reactivation preserves the key's AtHook domain state"),
+		Key->GetKeyState(), EBathhouseKeyState::AtHook);
+
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	World->RemoveFromRoot();
 	return true;
 }
 
@@ -558,6 +654,10 @@ bool FBathhouseCounterPointReferenceTest::RunTest(const FString& Parameters)
 		NewObject<UBathhouseNonSceneTestComponent>(Counter, TEXT("InvalidNonScenePoint"));
 	AActor* OtherActor = NewObject<AActor>();
 	USceneComponent* OtherActorPoint = NewObject<USceneComponent>(OtherActor, TEXT("InvalidOtherActorPoint"));
+	Counter->CheckInServicePoint->SetRelativeLocation(FVector(0.0f, -100.0f, 0.0f));
+	Counter->CheckoutServicePoint->SetRelativeLocation(FVector(0.0f, 100.0f, 0.0f));
+	CheckInPoint->SetRelativeLocation(FVector(-100.0f, -100.0f, 0.0f));
+	CheckoutPoint->SetRelativeLocation(FVector(-100.0f, 100.0f, 0.0f));
 
 	const auto MakeReference = [](UActorComponent* Component)
 	{
@@ -568,8 +668,10 @@ bool FBathhouseCounterPointReferenceTest::RunTest(const FString& Parameters)
 
 	Counter->CheckInQueuePointReferences = {
 		MakeReference(CheckInPoint),
+		MakeReference(Counter->CheckInServicePoint),
 		MakeReference(CheckInPoint)};
 	Counter->CheckoutQueuePointReferences = {
+		MakeReference(Counter->CheckoutServicePoint),
 		MakeReference(CheckInPoint),
 		MakeReference(CheckoutPoint),
 		MakeReference(OtherActorPoint)};
@@ -579,7 +681,8 @@ bool FBathhouseCounterPointReferenceTest::RunTest(const FString& Parameters)
 		MakeReference(ReturnedPoint),
 		MakeReference(CheckoutPoint)};
 
-	AddExpectedError(TEXT("Counter point reference"), EAutomationExpectedErrorFlags::Contains, 6);
+	AddExpectedError(TEXT("Counter point reference"), EAutomationExpectedErrorFlags::Contains, 3);
+	AddExpectedError(TEXT("uses native service point"), EAutomationExpectedErrorFlags::Contains, 2);
 	Counter->ResolveConfiguredPoints();
 
 	TestEqual(TEXT("Only the valid check-in point is resolved"), Counter->ResolvedCheckInQueuePoints.Num(), 1);
@@ -588,9 +691,120 @@ bool FBathhouseCounterPointReferenceTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Only the valid checkout point is resolved"), Counter->ResolvedCheckoutQueuePoints.Num(), 1);
 	TestEqual(TEXT("Checkout ordering preserves its valid authored point"),
 		Counter->ResolvedCheckoutQueuePoints[0].Get(), CheckoutPoint);
-	TestEqual(TEXT("Only the valid returned-key point is resolved"), Counter->ResolvedReturnedKeyPoints.Num(), 1);
-	TestEqual(TEXT("Returned-key ordering preserves its valid authored point"),
-		Counter->ResolvedReturnedKeyPoints[0].Get(), ReturnedPoint);
+	TestFalse(TEXT("Check-in queue points cannot reuse the native service point"),
+		Counter->ResolvedCheckInQueuePoints.Contains(Counter->CheckInServicePoint));
+	TestFalse(TEXT("Checkout queue points cannot reuse the native service point"),
+		Counter->ResolvedCheckoutQueuePoints.Contains(Counter->CheckoutServicePoint));
+	AActor* CheckInFront = NewObject<AActor>();
+	AActor* CheckInQueued = NewObject<AActor>();
+	Counter->EnqueueActor(EBathhouseCounterLane::CheckIn, CheckInFront);
+	Counter->EnqueueActor(EBathhouseCounterLane::CheckIn, CheckInQueued);
+	FBathhouseQueueAssignment ServiceAssignment;
+	FBathhouseQueueAssignment QueueAssignment;
+	TestTrue(TEXT("Validated service assignment resolves"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::CheckIn, CheckInFront, ServiceAssignment));
+	TestTrue(TEXT("Validated queue-point assignment resolves"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::CheckIn, CheckInQueued, QueueAssignment));
+	TestFalse(TEXT("Distinct visible indices use distinct accepted component transforms"),
+		ServiceAssignment.TargetTransform.Equals(QueueAssignment.TargetTransform));
+	TestNotNull(TEXT("The native returned-key drop point remains stable"), Counter->GetReturnedKeyDropPoint());
+	TestEqual(TEXT("Deprecated returned-key point references remain serialized but are not canonical"),
+		Counter->ReturnedKeyPointReferences.Num(), 4);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FBathhouseCounterAssignmentTest,
+	"BathhouseSim.Facility.CounterAssignmentAndOverflow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBathhouseCounterAssignmentTest::RunTest(const FString& Parameters)
+{
+	ABathhouseCounterActor* Counter = NewObject<ABathhouseCounterActor>();
+	Counter->CheckInServicePoint->SetRelativeLocationAndRotation(FVector(10.0f, 20.0f, 30.0f), FRotator(5.0f, 25.0f, 7.0f));
+	Counter->CheckoutServicePoint->SetRelativeLocationAndRotation(FVector(40.0f, 50.0f, 60.0f), FRotator(3.0f, 90.0f, 4.0f));
+	USceneComponent* CheckInPoint = NewObject<USceneComponent>(Counter);
+	CheckInPoint->SetRelativeLocationAndRotation(FVector(100.0f, 0.0f, 0.0f), FRotator(12.0f, 35.0f, 2.0f));
+	USceneComponent* CheckoutPoint = NewObject<USceneComponent>(Counter);
+	CheckoutPoint->SetRelativeLocationAndRotation(FVector(200.0f, 0.0f, 0.0f), FRotator(8.0f, 125.0f, 1.0f));
+	Counter->ResolvedCheckInQueuePoints = {CheckInPoint};
+	Counter->ResolvedCheckoutQueuePoints = {CheckoutPoint};
+
+	AActor* First = NewObject<AActor>();
+	AActor* Second = NewObject<AActor>();
+	AActor* Third = NewObject<AActor>();
+	const int64 InitialRevision = Counter->GetQueueRevision(EBathhouseCounterLane::Checkout);
+	TestTrue(TEXT("Checkout service entry enqueues"), Counter->EnqueueActor(EBathhouseCounterLane::Checkout, First));
+	TestTrue(TEXT("Checkout visible queue entry enqueues"), Counter->EnqueueActor(EBathhouseCounterLane::Checkout, Second));
+	TestTrue(TEXT("Checkout overflow entry stays in the same FIFO"), Counter->EnqueueActor(EBathhouseCounterLane::Checkout, Third));
+	TestTrue(TEXT("Checkout mutation advances a nonzero revision"),
+		Counter->GetQueueRevision(EBathhouseCounterLane::Checkout) > InitialRevision);
+
+	FBathhouseQueueAssignment Assignment;
+	TestTrue(TEXT("Service assignment resolves"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::Checkout, First, Assignment));
+	TestEqual(TEXT("Index zero is the service point"), Assignment.Type, EBathhouseQueueAssignmentType::ServicePoint);
+	TestTrue(TEXT("Service assignment preserves the full component transform"),
+		Assignment.TargetTransform.Equals(Counter->CheckoutServicePoint->GetComponentTransform()));
+	TestTrue(TEXT("Visible queue assignment resolves"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::Checkout, Second, Assignment));
+	TestEqual(TEXT("Index one maps to queue point zero"), Assignment.QueuePointIndex, 0);
+	TestTrue(TEXT("Queue assignment preserves authored pitch/yaw/roll"),
+		Assignment.TargetTransform.GetRotation().Equals(CheckoutPoint->GetComponentQuat()));
+	TestTrue(TEXT("Overflow assignment resolves without clamping"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::Checkout, Third, Assignment));
+	TestEqual(TEXT("Index after visible capacity is overflow"), Assignment.Type, EBathhouseQueueAssignmentType::OverflowWander);
+
+	TestTrue(TEXT("Dequeuing front promotes the same FIFO entries"), Counter->DequeueActor(EBathhouseCounterLane::Checkout, First));
+	TestTrue(TEXT("Former queue point becomes service"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::Checkout, Second, Assignment));
+	TestEqual(TEXT("FIFO promotion reaches service"), Assignment.Type, EBathhouseQueueAssignmentType::ServicePoint);
+	TestTrue(TEXT("Earliest overflow entry promotes to the exact visible point"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::Checkout, Third, Assignment));
+	TestEqual(TEXT("Overflow promotion reaches queue point zero"), Assignment.Type, EBathhouseQueueAssignmentType::QueuePoint);
+	TestEqual(TEXT("Promoted entry receives point zero"), Assignment.QueuePointIndex, 0);
+
+	AActor* CheckInFirst = NewObject<AActor>();
+	AActor* CheckInSecond = NewObject<AActor>();
+	AActor* CheckInBeyondCapacity = NewObject<AActor>();
+	Counter->EnqueueActor(EBathhouseCounterLane::CheckIn, CheckInFirst);
+	Counter->EnqueueActor(EBathhouseCounterLane::CheckIn, CheckInSecond);
+	Counter->EnqueueActor(EBathhouseCounterLane::CheckIn, CheckInBeyondCapacity);
+	TestFalse(TEXT("Check-in beyond visible capacity is invalid instead of clamped"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::CheckIn, CheckInBeyondCapacity, Assignment));
+	TestEqual(TEXT("Invalid check-in assignment remains explicitly invalid"),
+		Assignment.Type, EBathhouseQueueAssignmentType::Invalid);
+
+	ACustomerQueueOverflowWanderVolume* Volume = NewObject<ACustomerQueueOverflowWanderVolume>();
+	TestTrue(TEXT("Overflow volume contains its local origin"), Volume->ContainsWorldPoint(Volume->GetActorLocation()));
+	TestFalse(TEXT("Overflow volume rejects a point outside its bounds"),
+		Volume->ContainsWorldPoint(Volume->GetActorLocation() + FVector(10000.0f, 0.0f, 0.0f)));
+	const int64 RevisionBeforeFailedSample = Counter->GetQueueRevision(EBathhouseCounterLane::Checkout);
+	FVector Sample;
+	TestFalse(TEXT("Sampling without a NavMesh fails without a global fallback"),
+		Volume->TrySampleReachablePoint(*Third, Sample));
+	TestEqual(TEXT("Overflow sample failure cannot mutate the FIFO revision"),
+		Counter->GetQueueRevision(EBathhouseCounterLane::Checkout), RevisionBeforeFailedSample);
+
+	AActor* InvalidEntry = NewObject<AActor>();
+	Counter->EnqueueActor(EBathhouseCounterLane::Checkout, InvalidEntry);
+	InvalidEntry->MarkAsGarbage();
+	int32 CompactMutationBroadcasts = 0;
+	const FDelegateHandle CompactHandle = Counter->OnQueueChangedNative.AddLambda(
+		[&CompactMutationBroadcasts](const EBathhouseCounterLane Lane)
+		{
+			if (Lane == EBathhouseCounterLane::Checkout)
+			{
+				++CompactMutationBroadcasts;
+			}
+		});
+	AActor* PostCompactEntry = NewObject<AActor>();
+	TestTrue(TEXT("A new mutation compacts invalid weak entries before enqueue"),
+		Counter->EnqueueActor(EBathhouseCounterLane::Checkout, PostCompactEntry));
+	Counter->OnQueueChangedNative.Remove(CompactHandle);
+	TestEqual(TEXT("Compaction plus enqueue broadcasts the lane once"), CompactMutationBroadcasts, 1);
+	TestTrue(TEXT("Post-compaction entry remains resolvable"),
+		Counter->ResolveQueueAssignment(EBathhouseCounterLane::Checkout, PostCompactEntry, Assignment));
 	return true;
 }
 
@@ -647,6 +861,446 @@ bool FBathhouseQueueCleanupTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("An active checkout offer ignores unrelated lane updates"),
 		CheckoutSession->ShouldForwardQueueChangedEvent(EBathhouseCounterLane::Checkout));
 	CheckoutSession->EndCheckoutOffer();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FBathhouseQueueNavigationFacingTest,
+	"BathhouseSim.Customer.QueueNavigationFacingAndRecoveryGate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBathhouseQueueNavigationFacingTest::RunTest(const FString& Parameters)
+{
+	if (!GEngine)
+	{
+		AddError(TEXT("GEngine is required for the queue navigation world test."));
+		return false;
+	}
+	const FName WorldName = MakeUniqueObjectName(nullptr, UWorld::StaticClass(), TEXT("QueueNavigationAutomationWorld"));
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, WorldName, GetTransientPackage());
+	if (!World)
+	{
+		GEngine->DestroyWorldContext(World);
+		AddError(TEXT("Failed to create queue navigation automation world."));
+		return false;
+	}
+	World->AddToRoot();
+	WorldContext.SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+
+	ABathhouseCounterActor* Counter = World->SpawnActor<ABathhouseCounterActor>();
+	ABathhouseCustomerCharacter* Customer = World->SpawnActorDeferred<ABathhouseCustomerCharacter>(
+		ABathhouseCustomerCharacter::StaticClass(),
+		FTransform::Identity,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	Customer->AutoPossessAI = EAutoPossessAI::Disabled;
+	UGameplayStatics::FinishSpawningActor(Customer, FTransform::Identity);
+	UCustomerRoutineDefinition* Definition = NewObject<UCustomerRoutineDefinition>();
+	TestEqual(TEXT("Queue acceptance radius defaults to 10 cm"), Definition->QueueAcceptanceRadius, 10.0f);
+	Definition->QueueFacingRotationSpeedDegrees = 90.0f;
+	Definition->QueueFacingToleranceDegrees = 1.0f;
+	Customer->InitializeCustomer(Definition, Counter);
+	UCustomerSessionComponent* Session = Customer->GetCustomerSession();
+	UCustomerQueueNavigationComponent* Navigation = Customer->GetCustomerQueueNavigation();
+	TestTrue(TEXT("Customer joins the checkout service assignment"), Session->JoinQueue(EBathhouseCounterLane::Checkout));
+	Counter->SetActorRotation(FRotator(0.0f, 90.0f, 0.0f));
+	Customer->SetActorRotation(FRotator::ZeroRotator);
+	Customer->GetCharacterMovement()->bOrientRotationToMovement = true;
+	Customer->GetCharacterMovement()->bUseControllerDesiredRotation = true;
+	Customer->bUseControllerRotationYaw = true;
+	const uint64 Token = Navigation->BeginQueueNavigation(EBathhouseCounterLane::Checkout);
+	TestTrue(TEXT("Native queue navigation starts"), Token != 0);
+	Navigation->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Service does not complete after position alone"),
+		Navigation->GetQueueNavigationStatus(Token) == ECustomerQueueNavigationStatus::ServiceReady);
+	for (int32 Step = 0; Step < 20
+		&& Navigation->GetQueueNavigationStatus(Token) != ECustomerQueueNavigationStatus::ServiceReady; ++Step)
+	{
+		Navigation->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	}
+	TestEqual(TEXT("Service completes after yaw alignment"),
+		Navigation->GetQueueNavigationStatus(Token), ECustomerQueueNavigationStatus::ServiceReady);
+	TestTrue(TEXT("Character uses target yaw without pitch or roll"),
+		Customer->GetActorRotation().Equals(FRotator(0.0f, 90.0f, 0.0f), 1.0f));
+
+	UCustomerRoutineInterruptionComponent* Interruption = Customer->GetCustomerRoutineInterruption();
+	TestTrue(TEXT("Knockdown suspends active queue navigation"), Interruption->BeginSoftInterruption());
+	Counter->SetActorRotation(FRotator(0.0f, 150.0f, 0.0f));
+	AActor* LaterCustomer = NewObject<AActor>();
+	Counter->EnqueueActor(EBathhouseCounterLane::Checkout, LaterCustomer);
+	TestTrue(TEXT("Recovery gate request is accepted"), Interruption->EndSoftInterruption());
+	TestTrue(TEXT("Routine remains paused before latest yaw recovery"), Interruption->IsSoftInterrupted());
+	for (int32 Step = 0; Step < 20 && Interruption->IsSoftInterrupted(); ++Step)
+	{
+		Navigation->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	}
+	TestFalse(TEXT("Routine resumes exactly after the latest assignment pose"), Interruption->IsSoftInterrupted());
+	TestTrue(TEXT("Recovery uses the post-revision service yaw"),
+		Customer->GetActorRotation().Equals(FRotator(0.0f, 150.0f, 0.0f), 1.0f));
+
+	ABathhouseCounterActor* PreBeginPlayCounter = World->SpawnActor<ABathhouseCounterActor>(
+		FVector(2000.0f, 0.0f, 0.0f), FRotator(0.0f, 90.0f, 0.0f));
+	ABathhouseCustomerCharacter* PreBeginPlayCustomer = World->SpawnActorDeferred<ABathhouseCustomerCharacter>(
+		ABathhouseCustomerCharacter::StaticClass(),
+		FTransform(FVector(2000.0f, 0.0f, 0.0f)),
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	PreBeginPlayCustomer->AutoPossessAI = EAutoPossessAI::Disabled;
+	PreBeginPlayCustomer->InitializeCustomer(Definition, PreBeginPlayCounter);
+	UCustomerSessionComponent* PreBeginPlaySession = PreBeginPlayCustomer->GetCustomerSession();
+	UCustomerQueueNavigationComponent* PreBeginPlayNavigation =
+		PreBeginPlayCustomer->GetCustomerQueueNavigation();
+	TestTrue(TEXT("Pre-BeginPlay customer joins checkout"),
+		PreBeginPlaySession->JoinQueue(EBathhouseCounterLane::Checkout));
+	const uint64 PreBeginPlayToken =
+		PreBeginPlayNavigation->BeginQueueNavigation(EBathhouseCounterLane::Checkout);
+	TestTrue(TEXT("Queue navigation can start before component BeginPlay"), PreBeginPlayToken != 0);
+	UGameplayStatics::FinishSpawningActor(
+		PreBeginPlayCustomer,
+		FTransform(FVector(2000.0f, 0.0f, 0.0f)));
+	TestTrue(TEXT("Component BeginPlay preserves an already-active queue Tick"),
+		PreBeginPlayNavigation->IsComponentTickEnabled());
+	for (int32 Step = 0; Step < 20
+		&& PreBeginPlayNavigation->GetQueueNavigationStatus(PreBeginPlayToken)
+			!= ECustomerQueueNavigationStatus::ServiceReady; ++Step)
+	{
+		PreBeginPlayNavigation->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	}
+	TestEqual(TEXT("Pre-BeginPlay queue execution completes its initial facing"),
+		PreBeginPlayNavigation->GetQueueNavigationStatus(PreBeginPlayToken),
+		ECustomerQueueNavigationStatus::ServiceReady);
+	TestTrue(TEXT("Pre-BeginPlay customer reaches the authored service yaw"),
+		PreBeginPlayCustomer->GetActorRotation().Equals(FRotator(0.0f, 90.0f, 0.0f), 1.0f));
+	PreBeginPlaySession->LeaveQueue();
+
+	int32 IntentionalLeaveBroadcasts = 0;
+	const FDelegateHandle IntentionalLeaveHandle = Counter->OnQueueChangedNative.AddLambda(
+		[&IntentionalLeaveBroadcasts](const EBathhouseCounterLane Lane)
+		{
+			if (Lane == EBathhouseCounterLane::Checkout)
+			{
+				++IntentionalLeaveBroadcasts;
+			}
+		});
+	const int64 RevisionBeforeIntentionalLeave = Counter->GetQueueRevision(EBathhouseCounterLane::Checkout);
+	Session->LeaveQueue();
+	Counter->OnQueueChangedNative.Remove(IntentionalLeaveHandle);
+	TestFalse(TEXT("Intentional queue leave is not a technical abort"), Session->IsTechnicalAbort());
+	TestEqual(TEXT("Intentional queue leave broadcasts exactly once"), IntentionalLeaveBroadcasts, 1);
+	TestEqual(TEXT("Intentional queue leave advances the lane revision exactly once"),
+		Counter->GetQueueRevision(EBathhouseCounterLane::Checkout), RevisionBeforeIntentionalLeave + 1);
+	TestTrue(TEXT("The remaining FIFO entry promotes to the service point"),
+		Counter->IsFront(EBathhouseCounterLane::Checkout, LaterCustomer));
+	TestEqual(TEXT("Intentional leave invalidates the execution token"),
+		Navigation->GetQueueNavigationStatus(Token), ECustomerQueueNavigationStatus::Inactive);
+	TestNull(TEXT("Intentional leave releases the active move task"), Navigation->ActiveMoveTask.Get());
+	TestFalse(TEXT("Intentional leave removes the Counter delegate"), Navigation->QueueChangedHandle.IsValid());
+	TestEqual(TEXT("Intentional leave clears the active execution token"), Navigation->ActiveExecutionToken, uint64(0));
+	TestEqual(TEXT("Intentional leave clears the active move token"), Navigation->ActiveMoveToken, uint64(0));
+	TestFalse(TEXT("Intentional leave disables navigation Tick"), Navigation->IsComponentTickEnabled());
+	TestFalse(TEXT("Intentional leave consumes the movement flag snapshot"), Navigation->bMovementFlagsSnapshotted);
+	TestTrue(TEXT("Intentional leave restores orient-to-movement"),
+		Customer->GetCharacterMovement()->bOrientRotationToMovement);
+	TestTrue(TEXT("Intentional leave restores controller-desired rotation"),
+		Customer->GetCharacterMovement()->bUseControllerDesiredRotation);
+	TestTrue(TEXT("Intentional leave restores controller yaw"), Customer->bUseControllerRotationYaw);
+	const uint64 MoveGenerationAfterIntentionalLeave = Navigation->NextMoveToken;
+	const int64 RevisionAfterIntentionalLeave = Counter->GetQueueRevision(EBathhouseCounterLane::Checkout);
+	Session->LeaveQueue();
+	TestEqual(TEXT("Repeated intentional leave does not advance the move generation"),
+		Navigation->NextMoveToken, MoveGenerationAfterIntentionalLeave);
+	TestEqual(TEXT("Repeated intentional leave does not mutate the Counter revision"),
+		Counter->GetQueueRevision(EBathhouseCounterLane::Checkout), RevisionAfterIntentionalLeave);
+
+	ABathhouseCounterActor* OverflowCounter = World->SpawnActor<ABathhouseCounterActor>();
+	ABathhouseCustomerCharacter* OverflowCustomer = World->SpawnActorDeferred<ABathhouseCustomerCharacter>(
+		ABathhouseCustomerCharacter::StaticClass(),
+		FTransform(FVector(1000.0f, 0.0f, 0.0f)),
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	OverflowCustomer->AutoPossessAI = EAutoPossessAI::Disabled;
+	UGameplayStatics::FinishSpawningActor(OverflowCustomer, FTransform(FVector(1000.0f, 0.0f, 0.0f)));
+	OverflowCounter->SetActorLocation(OverflowCustomer->GetActorLocation());
+	OverflowCustomer->InitializeCustomer(Definition, OverflowCounter);
+	AActor* OverflowFront = NewObject<AActor>();
+	OverflowCounter->EnqueueActor(EBathhouseCounterLane::Checkout, OverflowFront);
+	UCustomerSessionComponent* OverflowSession = OverflowCustomer->GetCustomerSession();
+	TestTrue(TEXT("Overflow customer keeps normal checkout membership"),
+		OverflowSession->JoinQueue(EBathhouseCounterLane::Checkout));
+	UCustomerQueueNavigationComponent* OverflowNavigation = OverflowCustomer->GetCustomerQueueNavigation();
+	const uint64 OverflowToken = OverflowNavigation->BeginQueueNavigation(EBathhouseCounterLane::Checkout);
+	TestTrue(TEXT("Overflow execution starts even when sampling must locally retry"), OverflowToken != 0);
+	const FVector PositionBeforeInterruption = OverflowCustomer->GetActorLocation();
+	TestTrue(TEXT("Overflow knockdown suspends the queue task"),
+		OverflowCustomer->GetCustomerRoutineInterruption()->BeginSoftInterruption());
+	TestTrue(TEXT("Overflow recovery resumes without a fixed-pose gate"),
+		OverflowCustomer->GetCustomerRoutineInterruption()->EndSoftInterruption());
+	TestFalse(TEXT("Overflow recovery does not keep the routine paused"),
+		OverflowCustomer->GetCustomerRoutineInterruption()->IsSoftInterrupted());
+	TestEqual(TEXT("Overflow recovery never teleports to an obsolete wander point"),
+		OverflowCustomer->GetActorLocation(), PositionBeforeInterruption);
+	TestEqual(TEXT("Failed local sample waits without consuming the queue task"),
+		OverflowNavigation->GetQueueNavigationStatus(OverflowToken), ECustomerQueueNavigationStatus::Waiting);
+	OverflowNavigation->CancelQueueNavigation(OverflowToken);
+	OverflowSession->LeaveQueue();
+
+	ABathhouseCounterActor* MovingCounter = World->SpawnActor<ABathhouseCounterActor>(
+		FVector(3000.0f, 0.0f, 0.0f), FRotator::ZeroRotator);
+	ABathhouseCustomerCharacter* MovingCustomer = World->SpawnActorDeferred<ABathhouseCustomerCharacter>(
+		ABathhouseCustomerCharacter::StaticClass(),
+		FTransform(FVector(4000.0f, 0.0f, 0.0f)),
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	MovingCustomer->AutoPossessAI = EAutoPossessAI::Disabled;
+	UGameplayStatics::FinishSpawningActor(MovingCustomer, FTransform(FVector(4000.0f, 0.0f, 0.0f)));
+	MovingCustomer->AIControllerClass = AAIController::StaticClass();
+	MovingCustomer->SpawnDefaultController();
+	MovingCustomer->InitializeCustomer(Definition, MovingCounter);
+	UCustomerSessionComponent* MovingSession = MovingCustomer->GetCustomerSession();
+	UCustomerQueueNavigationComponent* MovingNavigation = MovingCustomer->GetCustomerQueueNavigation();
+	TestNotNull(TEXT("Move teardown fixture owns an AI controller"), MovingCustomer->GetController());
+	TestTrue(TEXT("Move teardown fixture joins checkout"),
+		MovingSession->JoinQueue(EBathhouseCounterLane::Checkout));
+	const uint64 MovingToken = MovingNavigation->BeginQueueNavigation(EBathhouseCounterLane::Checkout);
+	TestTrue(TEXT("Move teardown fixture starts a queue execution"), MovingToken != 0);
+	TestNotNull(TEXT("A native MoveTo task is owned before intentional leave"), MovingNavigation->ActiveMoveTask.Get());
+	MovingSession->LeaveQueue();
+	TestFalse(TEXT("MoveTo teardown does not technical-abort"), MovingSession->IsTechnicalAbort());
+	TestNull(TEXT("Intentional leave releases the native MoveTo task"), MovingNavigation->ActiveMoveTask.Get());
+	TestFalse(TEXT("MoveTo teardown removes the Counter delegate"), MovingNavigation->QueueChangedHandle.IsValid());
+	TestEqual(TEXT("MoveTo teardown invalidates the execution token"),
+		MovingNavigation->GetQueueNavigationStatus(MovingToken), ECustomerQueueNavigationStatus::Inactive);
+
+	ABathhouseCounterActor* DestructionCounter = World->SpawnActor<ABathhouseCounterActor>(
+		FVector(5000.0f, 0.0f, 0.0f), FRotator::ZeroRotator);
+	ABathhouseCustomerCharacter* DestructionCustomer = World->SpawnActorDeferred<ABathhouseCustomerCharacter>(
+		ABathhouseCustomerCharacter::StaticClass(),
+		FTransform(FVector(5000.0f, 0.0f, 0.0f)),
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	DestructionCustomer->AutoPossessAI = EAutoPossessAI::Disabled;
+	UGameplayStatics::FinishSpawningActor(DestructionCustomer, FTransform(FVector(5000.0f, 0.0f, 0.0f)));
+	DestructionCustomer->InitializeCustomer(Definition, DestructionCounter);
+	DestructionCustomer->DispatchBeginPlay();
+	UCustomerSessionComponent* DestructionSession = DestructionCustomer->GetCustomerSession();
+	UCustomerQueueNavigationComponent* DestructionNavigation = DestructionCustomer->GetCustomerQueueNavigation();
+	TestTrue(TEXT("Destruction fixture joins checkout"),
+		DestructionSession->JoinQueue(EBathhouseCounterLane::Checkout));
+	const uint64 DestructionToken = DestructionNavigation->BeginQueueNavigation(EBathhouseCounterLane::Checkout);
+	TestTrue(TEXT("Destruction fixture starts a queue execution"), DestructionToken != 0);
+	AActor* DestructionRemaining = World->SpawnActor<AActor>();
+	DestructionCounter->EnqueueActor(EBathhouseCounterLane::Checkout, DestructionRemaining);
+	int32 DestructionBroadcasts = 0;
+	const FDelegateHandle DestructionHandle = DestructionCounter->OnQueueChangedNative.AddLambda(
+		[&DestructionBroadcasts](const EBathhouseCounterLane Lane)
+		{
+			if (Lane == EBathhouseCounterLane::Checkout)
+			{
+				++DestructionBroadcasts;
+			}
+		});
+	const int64 RevisionBeforeDestruction =
+		DestructionCounter->GetQueueRevision(EBathhouseCounterLane::Checkout);
+	TestTrue(TEXT("Destroy routes the active-customer EndPlay path"), DestructionCustomer->Destroy());
+	DestructionCounter->OnQueueChangedNative.Remove(DestructionHandle);
+	TestFalse(TEXT("Active queue destruction is not a technical abort"), DestructionSession->IsTechnicalAbort());
+	TestEqual(TEXT("Active queue destruction broadcasts exactly once"), DestructionBroadcasts, 1);
+	TestEqual(TEXT("Active queue destruction advances the revision exactly once"),
+		DestructionCounter->GetQueueRevision(EBathhouseCounterLane::Checkout), RevisionBeforeDestruction + 1);
+	TestTrue(TEXT("Destruction promotes the remaining FIFO entry"),
+		DestructionCounter->IsFront(EBathhouseCounterLane::Checkout, DestructionRemaining));
+	TestEqual(TEXT("Destruction invalidates the execution token"),
+		DestructionNavigation->GetQueueNavigationStatus(DestructionToken),
+		ECustomerQueueNavigationStatus::Inactive);
+	TestNull(TEXT("Destruction releases the active move task"), DestructionNavigation->ActiveMoveTask.Get());
+	TestFalse(TEXT("Destruction removes the Counter delegate"), DestructionNavigation->QueueChangedHandle.IsValid());
+	TestFalse(TEXT("Destruction disables navigation Tick"), DestructionNavigation->IsComponentTickEnabled());
+	TestFalse(TEXT("Destruction consumes the movement flag snapshot"),
+		DestructionNavigation->bMovementFlagsSnapshotted);
+
+	ABathhouseCounterActor* CorruptionCounter = World->SpawnActor<ABathhouseCounterActor>(
+		FVector(6000.0f, 0.0f, 0.0f), FRotator::ZeroRotator);
+	ABathhouseCustomerCharacter* CorruptionCustomer = World->SpawnActorDeferred<ABathhouseCustomerCharacter>(
+		ABathhouseCustomerCharacter::StaticClass(),
+		FTransform(FVector(6000.0f, 0.0f, 0.0f)),
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	CorruptionCustomer->AutoPossessAI = EAutoPossessAI::Disabled;
+	UGameplayStatics::FinishSpawningActor(CorruptionCustomer, FTransform(FVector(6000.0f, 0.0f, 0.0f)));
+	CorruptionCustomer->InitializeCustomer(Definition, CorruptionCounter);
+	UCustomerSessionComponent* CorruptionSession = CorruptionCustomer->GetCustomerSession();
+	UCustomerQueueNavigationComponent* CorruptionNavigation = CorruptionCustomer->GetCustomerQueueNavigation();
+	TestTrue(TEXT("Corruption fixture joins checkout"),
+		CorruptionSession->JoinQueue(EBathhouseCounterLane::Checkout));
+	const uint64 CorruptionToken = CorruptionNavigation->BeginQueueNavigation(EBathhouseCounterLane::Checkout);
+	TestTrue(TEXT("Corruption fixture starts a queue execution"), CorruptionToken != 0);
+	int32 CorruptionBroadcasts = 0;
+	const FDelegateHandle CorruptionHandle = CorruptionCounter->OnQueueChangedNative.AddLambda(
+		[&CorruptionBroadcasts](const EBathhouseCounterLane Lane)
+		{
+			if (Lane == EBathhouseCounterLane::Checkout)
+			{
+				++CorruptionBroadcasts;
+			}
+		});
+	AddExpectedError(
+		TEXT("technical abort: Queue assignment became invalid during native queue navigation."),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
+	TestTrue(TEXT("External membership corruption removes the active FIFO entry"),
+		CorruptionCounter->DequeueActor(EBathhouseCounterLane::Checkout, CorruptionCustomer));
+	CorruptionCounter->OnQueueChangedNative.Remove(CorruptionHandle);
+	TestTrue(TEXT("Unexpected missing active assignment remains a technical failure"),
+		CorruptionSession->IsTechnicalAbort());
+	TestEqual(TEXT("External corruption broadcasts its logical dequeue exactly once"), CorruptionBroadcasts, 1);
+	TestEqual(TEXT("Technical-abort cleanup invalidates the execution token"),
+		CorruptionNavigation->GetQueueNavigationStatus(CorruptionToken),
+		ECustomerQueueNavigationStatus::Inactive);
+	TestFalse(TEXT("Technical-abort cleanup removes the Counter delegate"),
+		CorruptionNavigation->QueueChangedHandle.IsValid());
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	World->RemoveFromRoot();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FBathhouseCheckoutKeyDropTest,
+	"BathhouseSim.Interaction.CheckoutPhysicalKeyDrop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBathhouseCheckoutKeyDropTest::RunTest(const FString& Parameters)
+{
+	if (!GEngine)
+	{
+		AddError(TEXT("GEngine is required for the checkout key drop world test."));
+		return false;
+	}
+	const FName WorldName = MakeUniqueObjectName(nullptr, UWorld::StaticClass(), TEXT("CheckoutKeyDropAutomationWorld"));
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, WorldName, GetTransientPackage());
+	if (!World)
+	{
+		GEngine->DestroyWorldContext(World);
+		AddError(TEXT("Failed to create checkout key drop automation world."));
+		return false;
+	}
+	World->AddToRoot();
+	WorldContext.SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+
+	ABathhouseCounterActor* Counter = World->SpawnActor<ABathhouseCounterActor>(
+		FVector(0.0f, 0.0f, 300.0f), FRotator(0.0f, 35.0f, 0.0f));
+	Counter->GetReturnedKeyDropPoint()->SetRelativeRotation(FRotator(0.0f, 70.0f, 0.0f));
+	Counter->ReturnedKeyDropLocalXYExtent = FVector2D(250.0f, 250.0f);
+	Counter->ReturnedKeyDropAttemptCount = 32;
+	int32 DeprecatedSlotBroadcastCount = 0;
+	const FDelegateHandle DeprecatedSlotHandle = Counter->OnReturnedKeySlotsChangedNative.AddLambda(
+		[&DeprecatedSlotBroadcastCount]() { ++DeprecatedSlotBroadcastCount; });
+
+	AActor* FirstCustomer = World->SpawnActor<AActor>();
+	ABathhouseKeyHookActor* FirstHook = World->SpawnActor<ABathhouseKeyHookActor>();
+	ABathhouseKeyActor* FirstKey = World->SpawnActor<ABathhouseKeyActor>();
+	FirstKey->KeyHook = FirstHook;
+	TestEqual(TEXT("First checkout key retains its original hook identity"), FirstKey->GetKeyHook(), FirstHook);
+	FirstKey->CommitState(EBathhouseKeyState::AssignedToCustomer, FirstCustomer);
+	FirstKey->SetWorldPresentation(false, false);
+	FirstKey->KeyPhysicsRoot->SetMassOverrideInKg(NAME_None, 50.0f, true);
+	FirstKey->KeyPhysicsRoot->SetEnableGravity(false);
+	const int32 ActorCountBeforeDrop = World->GetCurrentLevel()->Actors.Num();
+	TestTrue(TEXT("Assigned key physically drops on the Counter"), FirstKey->TryPlaceOnCounter(*FirstCustomer, *Counter));
+	TestEqual(TEXT("Checkout drop reuses the same Actor without spawning"),
+		World->GetCurrentLevel()->Actors.Num(), ActorCountBeforeDrop);
+	TestEqual(TEXT("Same key commits OnCounter"), FirstKey->GetKeyState(), EBathhouseKeyState::OnCounter);
+	TestTrue(TEXT("Returned key simulates physics"), FirstKey->KeyPhysicsRoot->IsSimulatingPhysics());
+	TestEqual(TEXT("Returned key ignores Pawn collision"),
+		FirstKey->KeyPhysicsRoot->GetCollisionResponseToChannel(ECC_Pawn), ECR_Ignore);
+	TestTrue(TEXT("Returned key enables CCD"), FirstKey->KeyPhysicsRoot->BodyInstance.bUseCCD);
+	TestFalse(TEXT("Drop-point forward deliberately differs from Counter forward"),
+		Counter->GetReturnedKeyDropPoint()->GetForwardVector().Equals(Counter->GetActorForwardVector(), 0.001f));
+	const FVector ExpectedVelocity = Counter->GetReturnedKeyDropPoint()->GetForwardVector()
+		* FirstKey->GetThrowImpulseStrength()
+		+ FVector::UpVector * FirstKey->GetUpwardThrowImpulseStrength();
+	const FVector FirstDropLocation = FirstKey->GetActorLocation();
+	World->Tick(LEVELTICK_All, 1.0f / 60.0f);
+	TestTrue(TEXT("Heavy returned key follows drop-point forward plus authored world-up velocity change"),
+		FirstKey->KeyPhysicsRoot->GetPhysicsLinearVelocity().Equals(ExpectedVelocity, 1.0f));
+	FirstKey->KeyPhysicsRoot->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	FirstKey->KeyPhysicsRoot->SetSimulatePhysics(false);
+	FirstKey->SetActorLocation(FirstDropLocation, false, nullptr, ETeleportType::TeleportPhysics);
+	FirstKey->KeyPhysicsRoot->UpdateOverlaps();
+	TestTrue(TEXT("Repeated OnCounter placement is idempotent"), FirstKey->TryPlaceOnCounter(*FirstCustomer, *Counter));
+	TestEqual(TEXT("Idempotent placement does not redrop the key"), FirstKey->GetActorLocation(), FirstDropLocation);
+
+	AActor* SecondCustomer = World->SpawnActor<AActor>();
+	ABathhouseKeyHookActor* SecondHook = World->SpawnActor<ABathhouseKeyHookActor>();
+	ABathhouseKeyActor* SecondKey = World->SpawnActor<ABathhouseKeyActor>();
+	SecondKey->KeyHook = SecondHook;
+	SecondKey->CommitState(EBathhouseKeyState::AssignedToCustomer, SecondCustomer);
+	SecondKey->SetWorldPresentation(false, false);
+	SecondKey->KeyPhysicsRoot->SetMassOverrideInKg(NAME_None, 1.0f, true);
+	SecondKey->KeyPhysicsRoot->SetEnableGravity(false);
+	TestTrue(TEXT("A second key finds a collision-free candidate"), SecondKey->TryPlaceOnCounter(*SecondCustomer, *Counter));
+	TestFalse(TEXT("Multiple returned keys do not occupy the same candidate"),
+		SecondKey->GetActorLocation().Equals(FirstDropLocation, 0.1f));
+	TestTrue(TEXT("The collision-free second key also enters physics"),
+		SecondKey->KeyPhysicsRoot->IsSimulatingPhysics());
+
+	AActor* CarryOwner = NewObject<AActor>();
+	USceneComponent* HeldAnchor = NewObject<USceneComponent>(CarryOwner);
+	CarryOwner->SetRootComponent(HeldAnchor);
+	UPlayerCarryComponent* Carry = NewObject<UPlayerCarryComponent>(CarryOwner);
+	Carry->ConfigureHeldAnchor(HeldAnchor);
+	TestTrue(TEXT("Player pickup no longer needs a Counter slot release"), FirstKey->TryTakeFromCounter(*Carry));
+	TestEqual(TEXT("Deprecated slot delegate is never broadcast by drop or pickup"), DeprecatedSlotBroadcastCount, 0);
+
+	AActor* Blocker = World->SpawnActor<AActor>();
+	UBoxComponent* BlockerRoot = NewObject<UBoxComponent>(Blocker, TEXT("ReturnedKeyBlocker"));
+	Blocker->SetRootComponent(BlockerRoot);
+	Blocker->AddInstanceComponent(BlockerRoot);
+	BlockerRoot->SetBoxExtent(FVector(1000.0f));
+	BlockerRoot->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	BlockerRoot->RegisterComponent();
+	Blocker->SetActorLocation(Counter->GetActorLocation());
+	AActor* BlockedCustomer = World->SpawnActor<AActor>();
+	UCustomerSessionComponent* BlockedSession = NewObject<UCustomerSessionComponent>(BlockedCustomer);
+	BlockedCustomer->AddInstanceComponent(BlockedSession);
+	BlockedSession->RegisterComponent();
+	BlockedSession->InitializeSession(NewObject<UCustomerRoutineDefinition>(), Counter);
+	ABathhouseKeyHookActor* BlockedHook = World->SpawnActor<ABathhouseKeyHookActor>();
+	ABathhouseKeyActor* BlockedKey = World->SpawnActor<ABathhouseKeyActor>();
+	BlockedKey->KeyHook = BlockedHook;
+	BlockedKey->CommitState(EBathhouseKeyState::AssignedToCustomer, BlockedCustomer);
+	BlockedKey->SetWorldPresentation(false, false);
+	BlockedSession->AssignedKey = BlockedKey;
+	const FTransform BeforeBlockedPlacement = BlockedKey->GetActorTransform();
+	const ECollisionEnabled::Type BeforeBlockedCollision = BlockedKey->KeyPhysicsRoot->GetCollisionEnabled();
+	TestFalse(TEXT("Blocked exact and random candidates fail atomically"), BlockedSession->TryPlaceCheckoutKey());
+	TestEqual(TEXT("Blocked placement preserves AssignedToCustomer"),
+		BlockedKey->GetKeyState(), EBathhouseKeyState::AssignedToCustomer);
+	TestTrue(TEXT("Blocked placement restores the exact transform"),
+		BlockedKey->GetActorTransform().Equals(BeforeBlockedPlacement));
+	TestTrue(TEXT("Blocked placement preserves the hidden customer-owned presentation"), BlockedKey->IsHidden());
+	TestEqual(TEXT("Blocked placement preserves collision state"),
+		BlockedKey->KeyPhysicsRoot->GetCollisionEnabled(), BeforeBlockedCollision);
+	TestFalse(TEXT("Blocked placement never enables physics"), BlockedKey->KeyPhysicsRoot->IsSimulatingPhysics());
+	TestEqual(TEXT("Blocked placement preserves the expected customer owner"),
+		BlockedKey->StateOwner.Get(), static_cast<UObject*>(BlockedCustomer));
+	TestFalse(TEXT("Cash cannot be created before physical OnCounter commit"),
+		BlockedSession->TryCreateCashOffer(ABathhouseCashPaymentActor::StaticClass()));
+
+	Counter->OnReturnedKeySlotsChangedNative.Remove(DeprecatedSlotHandle);
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	World->RemoveFromRoot();
 	return true;
 }
 

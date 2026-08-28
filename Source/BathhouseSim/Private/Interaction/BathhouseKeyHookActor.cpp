@@ -3,6 +3,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
+#include "Engine/World.h"
 #include "Facility/BathhouseFacilitySubsystem.h"
 #include "Interaction/BathhouseKeyActor.h"
 #include "Interaction/PhysicalCarryPlacementTransaction.h"
@@ -32,6 +33,9 @@ void ABathhouseKeyHookActor::BeginPlay()
 	if (UBathhouseFacilitySubsystem* Subsystem = GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>())
 	{
 		Subsystem->RegisterKeyHook(this, KeyNumber);
+		KeyTopologyChangedHandle = Subsystem->OnKeyTopologyChanged.AddUObject(
+			this,
+			&ABathhouseKeyHookActor::HandleKeyTopologyChanged);
 	}
 	InitializeRuntimeFixedSlot();
 }
@@ -52,6 +56,11 @@ void ABathhouseKeyHookActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	if (UBathhouseFacilitySubsystem* Subsystem = GetWorld() ? GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>() : nullptr)
 	{
+		if (KeyTopologyChangedHandle.IsValid())
+		{
+			Subsystem->OnKeyTopologyChanged.Remove(KeyTopologyChangedHandle);
+			KeyTopologyChangedHandle.Reset();
+		}
 		Subsystem->UnregisterKeyHook(this, KeyNumber);
 	}
 	bSlotOccupied = false;
@@ -326,8 +335,19 @@ bool ABathhouseKeyHookActor::InitializeRuntimeFixedSlot()
 		return false;
 	}
 	bRuntimeOperational = true;
+	RuntimeFailureReason = FText::GetEmpty();
 	bSlotOccupied = KeyActor->GetKeyState() == EBathhouseKeyState::AtHook;
 	return true;
+}
+
+void ABathhouseKeyHookActor::HandleKeyTopologyChanged()
+{
+	const UWorld* World = GetWorld();
+	if (bEndingPlay || !World || World->bIsTearingDown)
+	{
+		return;
+	}
+	InitializeRuntimeFixedSlot();
 }
 
 void ABathhouseKeyHookActor::ReleaseStoredKeyForEndPlay()

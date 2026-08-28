@@ -60,7 +60,7 @@ Customer는 concrete callback 없이 `OnCashClaimed` delegate를 구독해 check
 
 ## Checkout Cash Flow
 
-1. Checkout front customer가 key actor를 counter return slot에 배치한다.
+1. Checkout front customer의 동일 assigned key가 Counter drop point 주변에서 physical `OnCounter` 상태로 commit된다.
 2. Customer가 `ABathhouseCashPaymentActor`를 cash offer point에 생성·표시한다.
 3. Player가 cash actor와 상호작용한다.
 4. Cash actor가 `ABathhousePlayerState`의 wallet을 resolve한다.

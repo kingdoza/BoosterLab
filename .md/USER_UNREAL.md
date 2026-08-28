@@ -1,22 +1,51 @@
-# User Unreal Action — Open The Fresh UE 5.8 Editor
+# User Unreal Action — ST_CustomerRoutine Queue Task Migration
 
-## 현재 상태
+## 필요한 이유
 
-physical carry default CCD Source 구현, 정식 build와 focused/full native automation은 완료했다. Editor authoring preflight 시점에 `UnrealEditor` 프로세스와 Unreal MCP 연결이 없어 네 Blueprint의 serialized component template 확인·저장 및 PIE를 진행할 수 없다.
+Counter/drop/overflow asset authoring은 완료했다. 남은 필수 작업은 `/Game/Bathhouse/AI/ST_CustomerRoutine`의 두 queue movement region을 새 native task로 바꾸는 것이다.
 
-## 사용자 작업
+현재 MCP에는 StateTree write 기능이 없고 UE 5.8 Python reflection도 node 생성과 Context binding 저장을 노출하지 않는다. 따라서 이 항목만 StateTree Editor에서 직접 편집해야 한다. `.uasset` binary patch는 하지 않는다.
 
-1. `C:\UnrealProjects\BathhouseSim\BathhouseSim.uproject`를 UE 5.8 Editor로 연다.
-2. 프로젝트 로딩과 asset scan이 끝날 때까지 기다린다.
-3. PIE/SIE는 시작하지 않은 상태로 Codex에 `열었음`이라고 알린다.
+## 변경 전 확인
 
-Restore Packages 창이 뜨면 이번 CCD 작업을 위해 자동 복구할 package는 없다. 기존 사용자 autosave의 복구 여부는 사용자가 판단하며, Codex가 임의 선택하지 않는다.
+StateTree를 열고 다음 parent task와 기존 transition은 그대로 둔다.
 
-## 이후 Codex 작업
+- `/Root/CheckIn`의 `Hold Customer Queue`
+- `/Root/Checkout`의 `Hold Customer Queue`
+- success/failure/retry/timeout/checkout transition 전부
 
-Codex는 사용자가 연 세션에만 연결해 다음을 수행한다.
+새 state, transition, overflow state, queue index 변수, destination 변수 또는 Blueprint Task는 추가하지 않는다.
 
-- 네 native CDO와 Blueprint physical root의 CCD 값 확인
-- allowlist 네 Blueprint만 필요 시 `Use CCD=true` authoring/Compile/Data Validation/개별 Save
-- 저장 후 reload, dirty package 비교와 PIE drop 검증
-- 통합 리뷰 완료
+## CheckIn 변경
+
+1. `/Root/CheckIn/QueueMove`를 선택한다.
+2. 다음 두 Task만 삭제한다.
+   - `Get Customer Queue Target (Deprecated)`
+   - `Restartable Customer Move To`
+3. Task 하나를 추가하고 `Move To Current Queue Assignment`를 선택한다.
+4. Task binding을 다음처럼 설정한다.
+   - `Customer` → 기존 Customer context의 Customer actor
+   - `Session` → 기존 Customer Session context
+   - `ExpectedLane` → `CheckIn`
+
+## Checkout 변경
+
+1. `/Root/Checkout/QueueMove`를 선택한다.
+2. 다음 두 Task만 삭제한다.
+   - `Get Customer Queue Target (Deprecated)`
+   - `Restartable Customer Move To`
+3. Task 하나를 추가하고 `Move To Current Queue Assignment`를 선택한다.
+4. Task binding을 다음처럼 설정한다.
+   - `Customer` → 기존 Customer context의 Customer actor
+   - `Session` → 기존 Customer Session context
+   - `ExpectedLane` → `Checkout`
+
+## 완료 조건
+
+1. StateTree를 Compile한다.
+2. error/warning이 없는지 확인한다.
+3. `ST_CustomerRoutine`만 저장한다.
+4. 각 `QueueMove`에 `Move To Current Queue Assignment`가 정확히 하나씩 있고 legacy 두 Task가 없는지 다시 확인한다.
+5. `Hold Customer Queue`와 기존 transition이 그대로인지 확인한다.
+
+완료 후 Codex에 `StateTree 수정 완료`라고 알려주면 저장 재로드 검증과 남은 PIE 수용 검증을 이어서 진행한다.

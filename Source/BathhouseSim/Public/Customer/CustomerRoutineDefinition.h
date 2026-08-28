@@ -13,6 +13,10 @@ class BATHHOUSESIM_API UCustomerRoutineDefinition : public UDataAsset
 public:
 	float GetActivityDuration(EBathhouseCustomerActivity Activity) const;
 
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Check In", meta = (ClampMin = "0.1"))
 	float CheckInTimeoutSeconds = 60.0f;
 
@@ -54,6 +58,24 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Retry", meta = (ClampMin = "0"))
 	int32 MaxNavigationRetries = 3;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Queue Navigation", meta = (ClampMin = "1.0", ForceUnits = "cm"))
+	float QueueAcceptanceRadius = 10.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Queue Navigation", meta = (ClampMin = "1.0"))
+	float QueueFacingRotationSpeedDegrees = 360.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Queue Navigation", meta = (ClampMin = "0.1", ClampMax = "180.0"))
+	float QueueFacingToleranceDegrees = 2.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Queue Navigation", meta = (ClampMin = "1.0"))
+	float OverflowWanderAcceptanceRadius = 50.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Queue Navigation", meta = (ClampMin = "0.0"))
+	float OverflowPauseMinSeconds = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Queue Navigation", meta = (ClampMin = "0.0"))
+	float OverflowPauseMaxSeconds = 3.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Towel", meta = (ClampMin = "0.0"))
 	float TowelAvailabilityWaitSeconds = 10.0f;

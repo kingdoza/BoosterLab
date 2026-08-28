@@ -1,5 +1,9 @@
 #include "Customer/CustomerRoutineDefinition.h"
 
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
+
 float UCustomerRoutineDefinition::GetActivityDuration(const EBathhouseCustomerActivity Activity) const
 {
 	switch (Activity)
@@ -28,3 +32,42 @@ float UCustomerRoutineDefinition::GetActivityDuration(const EBathhouseCustomerAc
 		return 0.0f;
 	}
 }
+
+#if WITH_EDITOR
+EDataValidationResult UCustomerRoutineDefinition::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+	auto RequirePositive = [&Context, &Result](const float Value, const TCHAR* Name)
+	{
+		if (!FMath::IsFinite(Value) || Value <= 0.0f)
+		{
+			Context.AddError(FText::Format(
+				NSLOCTEXT("CustomerRoutineDefinition", "QueuePositive", "{0} must be finite and greater than zero."),
+				FText::FromString(Name)));
+			Result = EDataValidationResult::Invalid;
+		}
+	};
+	RequirePositive(QueueAcceptanceRadius, TEXT("QueueAcceptanceRadius"));
+	RequirePositive(QueueFacingRotationSpeedDegrees, TEXT("QueueFacingRotationSpeedDegrees"));
+	RequirePositive(QueueFacingToleranceDegrees, TEXT("QueueFacingToleranceDegrees"));
+	RequirePositive(OverflowWanderAcceptanceRadius, TEXT("OverflowWanderAcceptanceRadius"));
+	if (!FMath::IsFinite(OverflowPauseMinSeconds) || !FMath::IsFinite(OverflowPauseMaxSeconds)
+		|| OverflowPauseMinSeconds < 0.0f || OverflowPauseMaxSeconds < 0.0f)
+	{
+		Context.AddError(NSLOCTEXT(
+			"CustomerRoutineDefinition",
+			"OverflowPauseNonNegative",
+			"Overflow wander pause bounds must be finite and non-negative."));
+		Result = EDataValidationResult::Invalid;
+	}
+	else if (OverflowPauseMinSeconds > OverflowPauseMaxSeconds)
+	{
+		Context.AddError(NSLOCTEXT(
+			"CustomerRoutineDefinition",
+			"OverflowPauseOrder",
+			"OverflowPauseMinSeconds cannot exceed OverflowPauseMaxSeconds."));
+		Result = EDataValidationResult::Invalid;
+	}
+	return Result;
+}
+#endif

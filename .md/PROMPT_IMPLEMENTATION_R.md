@@ -1,104 +1,111 @@
-# Implementation Rework Prompt — Physical Carry Atomic Commit And Fall Recovery
+# Implementation Rework Prompt — Queue Teardown, Point Uniqueness And Key Drop Direction
 
 ## Objective
 
-Fix the physical-carry placement commit order so mechanical state, concrete domain ownership, `HeldObject`, slot occupancy and presentation delegates cannot diverge under synchronous delegate reentry or a late commit failure. Also route held wet-mop fall recovery through the equipment-use/motion coordinator before fixed-slot or last-safe recovery.
+Fix the remaining pre-Editor defects in the Counter queue/navigation lifecycle and checkout key placement contract. Preserve the single weak FIFO per lane, `UCustomerQueueNavigationComponent` ownership, native StateTree task, checkout overflow volume, same-key physical return, deprecated reflected compatibility symbols and the C++/Blueprint responsibility boundary.
 
-Do not modify or resave `Content/`. Preserve the direct `IPhysicalCarryable` implementation policy, exact assigned fixed slots, held-position free drop, key/customer/counter behavior, basket inventory state and the C++/Blueprint presentation boundary.
+Do not modify or resave `Content/`. Do not redesign the queue into separate visible/overflow arrays, move navigation into Counter/Session, restore returned-key runtime slots, or spawn a replacement key.
 
-## P1 — Placement Notifications Run Before The Authoritative Carry Commit
+## P1 — Intentional Queue Removal Can Reenter As A Technical Abort
 
-`UPlayerCarryComponent` invokes concrete `Notify*Committed` methods before the final `CommitHeldObject()` or `ClearHeldObject()`:
+`UCustomerSessionComponent::LeaveQueue()` clears `QueueLane` and then calls `ABathhouseCounterActor::DequeueActor()`. Dequeue synchronously broadcasts `OnQueueChangedNative`. If the leaving customer still has an active `UCustomerQueueNavigationComponent` execution, its bound `HandleQueueChanged()` immediately calls `RefreshAssignment()`, observes `Session->GetQueueLane() != ActiveLane`, and calls `TechnicalAbort()`.
 
-- fixed-slot take: `PlayerCarryComponent.cpp:166-181`
-- fixed-slot store: `PlayerCarryComponent.cpp:218-233`
-- free drop: `PlayerCarryComponent.cpp:290-305`
-
-Those concrete methods mutate `Carrier` or key state and synchronously broadcast Blueprint-assignable presentation delegates. The private placement transaction only rolls back attachment, transform, collision, physics and slot occupancy; it does not restore `HeldObject`, concrete ownership/state or already-broadcast delegates. The placement guard rejects the tested high-level nested drop, but public low-level `CommitReleasePhysicalObject()` bypasses that guard.
-
-A synchronous listener can therefore clear the held reference during `OnHeldPresentationChanged(false)`. The outer `ClearHeldObject()` then fails, the mechanical transaction rolls back to the held pose, but the hand and concrete owner remain cleared. Fixed-slot store rollback can additionally broadcast false and true for one failed operation. Actor destruction from a Blueprint presentation listener can likewise invalidate the item before the remaining commit steps.
+This is reachable during normal Actor teardown because `UCustomerSessionComponent::EndPlay()` calls `LeaveQueue()` while queue-navigation cleanup is owned by another component's `EndPlay()`. UE 5.8 iterates the Actor's `OwnedComponents` set for component `EndPlay`, so ordering between those two components is not a lifecycle contract. The same hazard applies to any intentional leave that occurs before the StateTree queue task has released its execution token.
 
 Affected files:
 
-- `Source/BathhouseSim/Public/Interaction/PhysicalCarryable.h`
-- `Source/BathhouseSim/Public/Interaction/PlayerCarryComponent.h`
-- `Source/BathhouseSim/Private/Interaction/PlayerCarryComponent.cpp`
-- `Source/BathhouseSim/Private/Interaction/PhysicalCarryPlacementTransaction.h/.cpp` only if its private scope needs extension
-- key/mop/basket/wrench concrete Actor files
-- focused physical-carry automation and test probes
+- `Source/BathhouseSim/Private/Customer/CustomerSessionComponent.cpp`
+- `Source/BathhouseSim/Public/Customer/CustomerQueueNavigationComponent.h`
+- `Source/BathhouseSim/Private/Customer/CustomerQueueNavigationComponent.cpp`
+- customer queue automation in `Source/BathhouseSim/Private/Tests/BathhouseDomainTests.cpp`
 
 Required correction:
 
-1. Make fixed take, fixed store and free drop true two-phase operations. Validation and fallible mechanical/domain preparation must complete before externally observable delegates run.
-2. Commit `HeldObject`, concrete owner/key state and slot occupancy as one coordinator-owned transition. Do not label or broadcast a concrete transition as committed while the final carry mutation can still fail.
-3. Defer `OnHeldPresentationChanged`, key-state presentation, `OnHeldObjectChanged` and slot occupancy notifications until the transition can no longer roll back; each logical success broadcasts each applicable change exactly once.
-4. Ensure every failure before that point restores attachment, transform, collision, physics, slot occupancy, held identity and concrete domain owner/state without compensating false/true presentation broadcasts.
-5. Harden or narrow low-level carry mutation APIs so they cannot bypass `bPhysicalDropCommitInProgress` from a synchronous native callback. Preserve required recovery/legacy key call sites without creating another state owner.
-6. Keep `FPhysicalCarryPlacementTransaction` private and non-UObject. Do not move domain state into a common carryable Actor or component.
+1. Add an explicit intentional-removal/teardown path that cancels the active queue execution before the synchronous Counter dequeue notification can be interpreted as assignment corruption, or make the navigation callback distinguish owner-authorized leave from an unexpected invalid assignment.
+2. Keep invalid membership, missing Counter and externally corrupted assignment as technical failures during a genuinely active queue operation.
+3. Ensure the correction is independent of component `EndPlay` ordering and is idempotent when StateTree `ExitState`, interruption cleanup and Actor teardown converge.
+4. Preserve one Counter revision/broadcast for the logical dequeue so remaining customers still refresh and promote.
+5. On every normal leave/EndPlay path, cancel the active `UAITask_MoveTo`, remove the Counter delegate, invalidate tokens, disable Tick and restore snapshotted movement flags exactly once.
 
 Acceptance:
 
-- Add forced reentry/late-failure coverage for `FixedSlot -> Held`, `Held -> FixedSlot` and `Held -> FreeWorld`.
-- At least one synchronous presentation listener must attempt a low-level held mutation, not only the already-guarded high-level drop API.
-- Failure leaves `HeldObject`, concrete `Carrier`/key owner state, slot occupancy, attachment, transform, collision and physics exactly at the pre-operation snapshot.
-- Failed operations emit no committed presentation transition; successful operations emit item, carry and slot changes exactly once.
-- Item destruction or invalidation from an externally observable callback cannot cause stale access or a partially committed surviving item.
+- Spawn or construct a real `ABathhouseCustomerCharacter` with Session and Queue Navigation, enqueue it, start native queue navigation, then exercise intentional `LeaveQueue()` and actual Actor destruction/`EndPlay` while the execution is active.
+- Neither path may set `TechnicalAbort`, emit the queue-assignment technical-abort error, or reenter cleanup.
+- The leaving entry is removed once, remaining FIFO entries receive exactly one lane notification/promotion, and no move/delegate/token/Tick/movement-flag state survives teardown.
+- Add a separate negative fixture proving an unexpectedly missing active assignment still produces the technical failure policy.
 
-## P1 — Wet Mop FellOutOfWorld Leaves Equipment Use And Motion Active
+## P1 — Native Service Points Are Accepted As Queue-Point References
 
-`AWetMopActor::RecoverPhysicalCarryable()` creates a context containing only `User`, calls `StopMopping()`, and then directly calls `Carrier->CommitReleasePhysicalObject(this)` (`WetMopActor.cpp:352-380`). Because the context has no `MotionComponent` and the carry coordinator's placement cancellation is bypassed:
-
-- `UPlayerEquipmentUseComponent::bInputActive`, `ActiveEquipment` and retained context can remain active;
-- `UHeldEquipmentMotionComponent` can continue targeting the recovered mop;
-- fixed-slot recovery can be overwritten on the next motion tick or later LMB release by the old held baseline transform.
-
-This violates the required active-use/motion cancellation and `FellOutOfWorld` recovery lifecycle.
+`ABathhouseCounterActor::ResolveConfiguredPoints()` starts `UsedAcrossRoles` empty and only inserts resolved elements from `CheckInQueuePointReferences` and `CheckoutQueuePointReferences`. A queue array can therefore reference inherited `CheckInServicePoint` or `CheckoutServicePoint` and pass native resolution. The front customer and a queued customer can then receive the same component transform, violating the distinct visible pose and authoring contract. `.md/PROMPT_UNREAL.md` warns the Editor step not to do this, but native validation currently does not enforce it.
 
 Affected files:
 
-- `Source/BathhouseSim/Private/Cleaning/WetMopActor.cpp`
-- `Source/BathhouseSim/Public/Interaction/PlayerCarryComponent.h` and `.cpp` if a coordinator-owned recovery entry point is needed
-- equipment-use/motion files only if a focused defect requires it
-- physical-carry or combat/recovery automation
+- `Source/BathhouseSim/Public/Facility/BathhouseCounterActor.h`
+- `Source/BathhouseSim/Private/Facility/BathhouseCounterActor.cpp`
+- counter point-reference automation in `Source/BathhouseSim/Private/Tests/BathhouseDomainTests.cpp`
 
 Required correction:
 
-1. Before a held mop is released or recovered, route cleanup through the configured player carry/equipment-use coordinator so active equipment use and held motion are canceled exactly once with the complete retained context.
-2. Only after cleanup may the same mop instance recover to its valid empty fixed slot or last-safe world transform.
-3. Preserve fixed-slot-first recovery, no replacement spawn, stain cancellation and next-use behavior.
-4. Do not make the mop discover player components independently or duplicate equipment-use ownership in the Actor.
+1. Reject either lane's native service component when resolving queue-point references. Also keep existing rejection of unset, unresolved, non-scene, foreign-owner, within-role duplicate and cross-role duplicate references.
+2. Log an actionable Counter path, role and array index, and exclude the invalid reference while preserving the relative order of all valid authored points.
+3. Do not scan by name/type/Actor and do not make Blueprint graph validation authoritative.
+4. Keep the existing `EditInstanceOnly` component-picker contract and resolved private transient arrays.
 
 Acceptance:
 
-- Use an `AFirstPersonCharacter` fixture with configured carry, equipment-use and motion components.
-- Begin Hold mopping, invoke the actual mop fall-recovery path, and assert the equipment input owner is inactive, motion is stopped, the carry hand is empty and mopping/stain state is canceled.
-- For fixed-slot recovery, tick the world and issue the later input-release path; the mop must remain at the exact slot anchor with physics disabled and occupancy true.
-- Cover last-safe fallback as appropriate and prove the same Actor can be taken and used again.
+- Extend `BathhouseSim.Facility.CounterPointReferences` with each native service component referenced from queue arrays.
+- Both references are rejected and omitted, expected errors are counted, valid point ordering is unchanged, and check-in/checkout cross-role duplicate coverage remains green.
+- Assignment coverage proves no two logical visible indices are backed by the same accepted SceneComponent.
 
-## Documentation And Editor Handoff
+## P2 — Checkout Velocity Ignores The Authored Drop-Point Forward
 
-- No architecture redesign is required. Keep `UPlayerCarryComponent` as transition/commit owner and concrete Actors as domain-state owners.
-- Update `.md/PROMPT_REVIEW.md` with the new atomicity and active-fall recovery assertions plus the exact final automation count.
-- Update `.md/PROMPT_UNREAL.md` only if the actual reflected C++ contract changes. Otherwise preserve its Blueprint instance/layout/asset authoring scope.
-- No Core Redirect is required unless a reflected symbol is actually renamed or removed; prefer append-only/private corrections.
+`.md/Architecture/PhysicalCarrySystem.md` defines checkout velocity as the Counter drop-point forward plus world up. `CheckoutKeyPlacementUtils.cpp` instead uses `Counter.GetActorForwardVector()`. Rotating `ReturnedKeyDropPoint` independently changes the candidate transform but not the release direction, so Source and the current canonical architecture disagree. The current Unreal handoff only asks to position the point and therefore also omits the rotation authoring/verification implied by the canonical contract.
+
+Affected files:
+
+- `Source/BathhouseSim/Private/Interaction/CheckoutKeyPlacementUtils.cpp`
+- checkout physical-key automation in `Source/BathhouseSim/Private/Tests/BathhouseDomainTests.cpp`
+- `.md/PROMPT_REVIEW.md`
+- `.md/PROMPT_UNREAL.md`
+
+Required correction:
+
+1. Use the stable `ReturnedKeyDropPoint` component's world forward vector for the key forward velocity-change term, with world up for the upward term, matching the canonical Physical Carry document.
+2. Keep candidate orientation and local XY search based on the same drop-point transform.
+3. Update the Unreal handoff to author and verify `ReturnedKeyDropPoint` rotation/Yaw as well as position. Keep Blueprint work limited to transform/search values and presentation event wiring.
+4. Do not change the key's authorable forward/upward magnitudes or the common free-world transaction.
+
+Acceptance:
+
+- Add a test where the Counter Actor forward and `ReturnedKeyDropPoint` forward deliberately differ.
+- The same key Actor is placed `OnCounter`, and its initial velocity-change direction follows the drop point rather than the Counter Actor while retaining the authored world-up component.
+- Existing heavy/light, CCD, Pawn Ignore, candidate separation, idempotence, blocked rollback and cash-gate assertions remain green.
+
+## Blueprint, Compatibility And Documentation
+
+- Preserve `FCustomerQueueTargetTask`, `GetQueueTargetTransform`, `ReturnedKeyPointReferences`, `OnReturnedKeySlotsChanged` and the returned-slot C++ functions for the current deprecated migration cycle. Canonical runtime must not read or broadcast deprecated returned-slot state.
+- No Core Redirect is required because no reflected symbol needs to be renamed or removed.
+- Update `.md/PROMPT_REVIEW.md` with the corrected lifecycle order, service-point rejection, drop-point direction and exact final verification results.
+- Update `.md/PROMPT_UNREAL.md` only to match the corrected native contract, including drop-point rotation authoring and the existing compile/save/reload/PIE checks.
+- Architecture redesign is not required. Do not change the established ownership split among Counter, Queue Navigation, Session, Key and the private physical placement helper.
 
 ## Regression Checks
 
 - `git diff --check`
-- no `Content/`, `Config/`, `.uproject` or runtime module dependency change
+- no `Content/`, `Config/`, `.uproject` or runtime module-dependency change
 - Editor/Live Coding closed
-- UE 5.8 `Build.bat BathhouseSimEditor Win64 Development` succeeds
-- full `BathhouseSim` automation succeeds, including the new focused regressions
-- headless log contains no unexpected `LogBlueprint: Error`, `LogScript: Error`, ensure, assertion, fatal error or access violation
-- key drop/re-pick/hook/customer/counter, basket inventory/revision, exact/wrong/duplicate slots, overlap rollback, two-mass `120/15`, Pawn Ignore and carrier/slot/item lifecycle regressions remain green
+- UE 5.8 exact `Build.bat BathhouseSimEditor Win64 Development` succeeds
+- focused queue cleanup/navigation, Counter reference/assignment and checkout key-drop automation succeeds
+- full `BathhouseSim` automation succeeds with the updated exact count
+- independent headless log scan contains no unexpected technical-abort error, test failure, ensure, assertion, fatal error, access violation, `LogBlueprint: Error` or `LogScript: Error`
 
 ## Review Resubmission
 
-Regenerate `.md/PROMPT_REVIEW.md` for this exact task and report:
+Regenerate `.md/PROMPT_REVIEW.md` and report:
 
-- the final two-phase commit and delegate ordering
-- how low-level mutation reentry is prevented
-- full rollback assertions for all three transitions
-- active mop `FellOutOfWorld` cleanup and post-tick slot-pose assertions
-- build, automation count and independent log scan
-- confirmation that `Content/` and `Config/` were not changed
+- how intentional queue leave is distinguished from assignment corruption without relying on component order
+- active move/delegate/token/Tick/movement-flag teardown assertions
+- native service-point-reference rejection and distinct visible pose coverage
+- drop-point-forward velocity coverage and matching Unreal authoring instructions
+- preserved deprecated reflected symbols and Core Redirect conclusion
+- UE 5.8 build, focused tests, full automation count and independent log scan

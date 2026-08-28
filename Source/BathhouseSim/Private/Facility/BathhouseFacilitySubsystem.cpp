@@ -5,20 +5,38 @@
 
 #define LOCTEXT_NAMESPACE "BathhouseFacilitySubsystem"
 
+namespace
+{
+bool AffectsKeyTopology(const ABathhouseFacilityActor* Facility)
+{
+	return Facility
+		&& (Facility->GetFacilityType() == EBathhouseFacilityType::ShoeLocker
+			|| Facility->GetFacilityType() == EBathhouseFacilityType::ClothesLocker);
+}
+}
+
 void UBathhouseFacilitySubsystem::RegisterFacility(ABathhouseFacilityActor* Facility)
 {
 	if (IsValid(Facility) && !RegisteredFacilities.Contains(Facility))
 	{
 		RegisteredFacilities.Add(Facility);
+		if (AffectsKeyTopology(Facility))
+		{
+			OnKeyTopologyChanged.Broadcast();
+		}
 		NotifyFacilityAvailabilityChanged(Facility->GetFacilityType());
 	}
 }
 
 void UBathhouseFacilitySubsystem::UnregisterFacility(ABathhouseFacilityActor* Facility)
 {
-	RegisteredFacilities.Remove(Facility);
+	const bool bWasRegistered = RegisteredFacilities.Remove(Facility) > 0;
 	if (Facility)
 	{
+		if (bWasRegistered && AffectsKeyTopology(Facility))
+		{
+			OnKeyTopologyChanged.Broadcast();
+		}
 		NotifyFacilityAvailabilityChanged(Facility->GetFacilityType());
 	}
 }

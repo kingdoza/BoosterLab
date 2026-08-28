@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 facility slot, 번호 시설과 분리된 counter queue 및 Towel customer navigation 위치 경계를 정의한다.
+이 문서는 현재 구현된 facility slot과 번호 시설, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point 경계를 정의한다. Source와 native automation은 구현되었고 Editor authoring은 후속 단계다.
 
 ## Source Scope
 
@@ -13,12 +13,14 @@ Source/BathhouseSim/Public/Facility/
   BathhouseFacilityActor.h
   BathhouseFacilitySubsystem.h
   BathhouseCounterActor.h
+  CustomerQueueOverflowWanderVolume.h
 
 Source/BathhouseSim/Private/Facility/
   BathhouseFacilitySlotComponent.cpp
   BathhouseFacilityActor.cpp
   BathhouseFacilitySubsystem.cpp
   BathhouseCounterActor.cpp
+  CustomerQueueOverflowWanderVolume.cpp
 
 Source/BathhouseSim/Private/Tests/
   BathhouseDomainTests.cpp  # slot/queue/reference와 customer Bath snap cleanup coverage
@@ -29,11 +31,13 @@ Source/BathhouseSim/Private/Tests/
 - 배치된 bathhouse facility와 다중 use slot 등록
 - slot reservation, occupancy, release와 대기 notification
 - 번호 기반 shoe locker/clothes locker lookup과 유효성 검사
-- check-in/checkout의 독립 FIFO queue와 service 순서
-- checkout key world object를 보관하는 counter return slot
+- check-in/checkout의 독립 FIFO queue, revision과 service 순서
+- service/queue/overflow assignment와 queue point 전체 transform 제공
+- checkout overflow customer의 authoring된 NavMesh 배회 범위 제공
+- checkout key의 단일 physical drop 기준점과 탐색 설정 제공
 - clean towel stack과 used towel bin의 customer navigation/reservation 위치 제공
 
-Facility는 towel 수량/overflow/machine, customer phase, key actor state, player interaction과 money를 소유하지 않는다.
+Facility는 towel 수량/overflow/machine, customer phase, key actor state·물리 transaction, player interaction과 money를 소유하지 않는다.
 
 ## Facility Types
 
@@ -92,6 +96,7 @@ Blueprint event:
 - facility type별 후보 조회
 - 번호별 shoe locker/clothes locker 조회
 - key number가 두 numbered facility를 정확히 하나씩 가지는지 검증
+- key hook과 numbered locker 등록 순서에 의존하지 않도록 topology 변경을 방송하고 hook이 재검증할 수 있게 함
 - 예약 가능한 slot 중 random 선택
 - Bath 선택 시 다른 빈 탕이 있으면 직전 bath actor를 제외
 - 모든 slot이 점유 중이면 availability delegate 기반 재시도 지원
@@ -120,32 +125,55 @@ Customer knockdown은 StateTree exit가 아니다. 사용중이면 `EndUse(custo
 - Check-in FIFO queue와 service point
 - Checkout FIFO queue와 service point
 
-각 lane은 배치된 Counter 인스턴스 소유 component를 가리키는 순서형 `FComponentReference` queue point 목록을 가지며 front customer만 service interaction을 활성화한다. Queue entry는 customer actor와 enqueue sequence만 저장하고 Customer concrete class에 의존하지 않는다.
+각 lane은 배치된 Counter 인스턴스 소유 component를 가리키는 순서형 `FComponentReference` queue point 목록을 가진다. Queue entry는 customer actor의 weak reference와 enqueue sequence만 저장하고 Customer concrete class에 의존하지 않는다. front customer만 service interaction을 활성화한다.
 
-`CheckInQueuePointReferences`, `CheckoutQueuePointReferences`, `ReturnedKeyPointReferences`는 `EditInstanceOnly` component picker 계약이다. Counter는 BeginPlay에 reference를 resolve해 private transient 배열로 분리하며 null/unresolved, 비-SceneComponent, 다른 Actor 소유와 같은 역할·역할 간 중복을 오류로 기록하고 runtime에서 제외한다. 이름·type·actor scan으로 fallback하지 않으며 유효한 reference의 원래 배열 순서를 유지한다.
+`CheckInQueuePointReferences`, `CheckoutQueuePointReferences`는 `EditInstanceOnly` component picker 계약이다. Counter는 BeginPlay에 reference를 resolve해 private transient 배열로 분리하며 null/unresolved, 비-SceneComponent, 다른 Actor 소유와 역할 안팎의 중복을 오류로 기록하고 runtime에서 제외한다. 이름·type·actor scan으로 fallback하지 않으며 유효 reference의 원래 배열 순서를 유지한다.
+
+Counter는 lane별 monotonic queue revision과 다음 assignment를 제공한다.
+
+- index `0`: lane의 native service point `FTransform`
+- index `1..N`: 유효 queue point `0..N-1`의 `FTransform`
+- checkout index `N+1` 이상: `OverflowWander`
+- check-in에서 배치 범위를 넘는 entry: 방어적 `Invalid`; 기존 admission 한계를 우회해 마지막 point에 겹치지 않는다.
+
+assignment는 type, full target transform, logical index, queue point index와 revision을 포함한다. Character는 위치에 Location을, 도착 정렬에 Yaw를 사용한다. queue mutation은 invalid weak entry를 먼저 compact하고 revision 증가와 lane notification을 한 번만 발생시킨다. checkout visible capacity는 `service 1 + 유효 CheckoutQueuePointReferences 수`이며 overflow entry도 같은 FIFO에서 순번을 유지한다.
 
 Check-in timeout은 queue 진입이 아니라 front customer가 check-in service point에 도착했을 때 시작한다.
 
-## Checkout Key Return Slots
+## Checkout Overflow Wander Volume
 
-- Counter는 `ReturnedKeyPointReferences`에서 검증·resolve된 여러 key return scene component를 가진다.
-- Checkout customer는 available return slot을 예약하고 key actor를 해당 transform에 world object로 배치한다.
-- NPC가 떠난 뒤에도 return slot은 key actor가 놓여 있는 동안 occupied다.
-- Player가 key를 집으면 slot이 해제된다.
-- 모든 return slot이 차 있으면 checkout front customer는 빈 slot이 생길 때까지 기다린다.
+`ACustomerQueueOverflowWanderVolume`은 checkout overflow customer가 배회할 수 있는 범위만 authoring하는 Facility Actor다. gameplay queue 순서나 customer phase는 소유하지 않는다.
 
-이 구조는 player가 key를 늦게 회수해도 여러 key actor가 같은 위치에 겹치는 것을 막는다.
+- Box 범위 안에서 local random sample을 만든다.
+- sample을 NavMesh에 project하고 결과가 volume 안이며 reachable한 경우만 반환한다.
+- 실패하면 authorable 횟수만 재탐색한다.
+- Counter는 하나 이상의 checkout overflow volume을 `EditInstanceOnly`로 참조한다.
+- volume이 없거나 현재 유효 지점을 찾지 못하면 customer는 안전한 현재 위치에서 재시도하며 전체 Level NavMesh로 fallback하지 않는다.
+
+실제 AI Move, 배회 대기, queue promotion 취소와 회전은 Customer Queue Navigation 책임이다.
+
+## Checkout Physical Key Drop
+
+Counter는 stable default subobject `ReturnedKeyDropPoint` 하나와 local XY 탐색 범위·최대 시도 횟수를 authoring한다. 기존 다중 return slot 예약·점유·player pickup 해제 모델은 canonical runtime에서 제거한다.
+
+Customer는 새 key Actor를 spawn하지 않는다. check-in 때 받은 동일한 hidden `ABathhouseKeyActor`를 drop point의 exact 후보부터 작은 local XY 범위 순서로 검사해 다시 표시하고 free-world physics로 전환한다. 후보 overlap 검사와 `AssignedToCustomer -> OnCounter` 원자적 commit은 Interaction/Key가 소유하고 Counter는 transform과 탐색 policy만 제공한다.
+
+- 성공 시 `OnReturnedKeyDropped(AActor*)` 표현 event를 발생시킨다.
+- 실패 시 key/session state를 유지하고 checkout offer Task가 재시도한다.
+- player가 key를 집어도 Counter 점유 상태를 변경하지 않는다. key 자체 state와 Player Carry transaction만 변경한다.
+- 기존 `ReturnedKeyPointReferences`와 `OnReturnedKeySlotsChanged` reflected symbol은 한 migration cycle 동안 deprecated compatibility로 보존하되 canonical runtime에서 읽거나 호출하지 않는다.
 
 ## Queue Flow
 
 1. Customer가 목적에 맞는 lane에 enqueue한다.
-2. Counter가 queue index별 authored transform을 전달한다.
-3. Customer는 transform 변경 notification을 받을 때 새 위치로 이동한다.
-4. Front 도착 후 check-in key 대기 또는 checkout 처리를 시작한다.
-5. 완료·timeout·abort 시 dequeue한다.
-6. Counter가 나머지 customer에게 새 queue 위치를 통지한다.
+2. Counter가 최신 logical index로 service/queue/overflow assignment를 resolve한다.
+3. visible customer는 full transform 위치까지 이동한 뒤 authored Yaw로 정렬한다.
+4. checkout overflow customer는 전용 volume 안을 배회하되 FIFO entry를 유지한다.
+5. revision 변경 시 Customer가 active move/wander를 취소하고 최신 assignment를 다시 resolve한다.
+6. service point 도착·회전 완료 후 check-in key 대기 또는 checkout 처리를 시작한다.
+7. 완료·timeout·abort 시 dequeue하고 Counter가 한 번의 revision notification을 방송한다.
 
-Counter는 customer routine phase를 직접 변경하지 않는다.
+Counter는 customer routine phase, navigation request와 character rotation을 직접 변경하지 않는다.
 
 ## Towel Facility Boundary
 
@@ -163,19 +191,27 @@ Editor authoring 값:
 - 시설별 slot component transform과 facing
 - Bath slot별 발바닥 기준의 NavMesh 위 `ApproachOffset`과 NavMesh 밖일 수 있는 정확한 action transform
 - check-in/checkout service point
-- 두 lane의 `FComponentReference` queue point 목록. 배열 순서가 queue 순서다.
-- checkout `FComponentReference` key return slot 목록. 배열 순서가 return slot 순서다.
+- 두 lane의 `FComponentReference` queue point 목록. 배열 순서가 queue 순서이며 component의 Location/Yaw를 모두 사용한다.
+- checkout overflow wander volume 목록과 각 volume의 NavMesh sample 설정
+- native `ReturnedKeyDropPoint` transform, local XY search extent와 attempt count
 - clean towel stack과 used towel bin의 customer approach/action slot
 
 Blueprint 조회·표현 API:
 
 - slot state와 current occupant 조회
 - `ABathhouseCounterActor::OnQueueChanged`
-- `ABathhouseCounterActor::OnReturnedKeySlotsChanged`
+- `ABathhouseCounterActor::OnReturnedKeyDropped`
+
+보존·이관 계약:
+
+- 기존 `FCustomerQueueTargetTask` reflected type은 StateTree asset 교체가 끝날 때까지 deprecated 상태로 보존한다.
+- `ReturnedKeyPointReferences`, `OnReturnedKeySlotsChanged`는 deprecated compatibility이며 새 runtime의 source of truth가 아니다.
+- reflected symbol rename/delete가 없으므로 Core Redirect를 추가하지 않는다.
 
 ## Dependencies
 
 - Facility -> Engine Actor/SceneComponent/WorldSubsystem
+- Facility overflow volume -> NavigationSystem query
 - Customer -> Facility
 - Towel -> Facility actor/slot contract
 - Interaction -> Facility의 numbered facility validation
@@ -187,9 +223,12 @@ Blueprint 조회·표현 API:
 - 하나의 slot을 두 customer가 동시에 reserve/use하지 않는지 확인한다.
 - check-in/checkout queue가 독립적으로 전진하는지 확인한다.
 - 각 lane의 front customer만 service 가능한지 확인한다.
-- 세 point reference 배열이 정확한 Counter 인스턴스 소유 SceneComponent만 가리키고 같은 component를 역할 안팎에서 재사용하지 않는지 확인한다.
-- 잘못된 point reference가 runtime resolved 배열과 returned slot에서 제외되며 자동 fallback되지 않는지 확인한다.
-- uncollected key가 다음 checkout key와 겹치지 않는지 확인한다.
+- 두 queue point reference 배열이 정확한 Counter 인스턴스 소유 SceneComponent만 가리키고 같은 component를 역할 안팎에서 재사용하지 않는지 확인한다.
+- customer가 각 queue point 도착 후 component Yaw로 정렬되는지 확인한다.
+- checkout visible capacity를 넘은 customer가 마지막 point에 겹치지 않고 FIFO 순번을 유지한 채 전용 volume만 배회하는지 확인한다.
+- 앞 customer가 빠지면 가장 빠른 overflow customer부터 active wander를 취소하고 빈 point로 이동하는지 확인한다.
+- returned key가 exact drop point 우선·local XY 후보에서 기존 key와 겹치지 않게 physics로 전환되고 blocked 상태에서는 session/key를 보존하는지 확인한다.
+- 같은 assigned key instance가 `OnCounter`로 돌아오며 새 key가 복제되지 않는지 확인한다.
 - 이동 실패, timeout, StateTree 중단과 actor destruction에서 slot/queue가 정리되는지 확인한다.
 - Bath approach point만 NavMesh 위에 있고 action point가 NavMesh 밖이어도 입·퇴탕과 다음 MoveTo가 성공하는지 확인한다.
 - BathStay 만료와 technical abort가 action point에서 slot을 먼저 풀지 않고 approach point 복귀를 시도하는지 확인한다.

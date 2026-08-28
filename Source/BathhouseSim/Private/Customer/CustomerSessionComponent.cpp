@@ -6,6 +6,7 @@
 #include "Components/StateTreeAIComponent.h"
 #include "Customer/BathhouseCustomerAIController.h"
 #include "Customer/BathhouseCustomerCharacter.h"
+#include "Customer/CustomerQueueNavigationComponent.h"
 #include "Customer/CustomerRoutineDefinition.h"
 #include "Economy/BathhouseCashPaymentActor.h"
 #include "Engine/World.h"
@@ -188,6 +189,13 @@ bool UCustomerSessionComponent::JoinQueue(const EBathhouseCounterLane Lane)
 void UCustomerSessionComponent::LeaveQueue()
 {
 	const EBathhouseCounterLane PreviousLane = QueueLane;
+	if (ABathhouseCustomerCharacter* Customer = Cast<ABathhouseCustomerCharacter>(GetOwner()))
+	{
+		if (UCustomerQueueNavigationComponent* QueueNavigation = Customer->GetCustomerQueueNavigation())
+		{
+			QueueNavigation->CancelForIntentionalQueueLeave();
+		}
+	}
 	QueueLane = EBathhouseCounterLane::None;
 	CancelCheckInWait();
 	EndCheckoutOffer();
@@ -204,8 +212,15 @@ bool UCustomerSessionComponent::IsQueueFront() const
 
 bool UCustomerSessionComponent::GetQueueTargetTransform(FTransform& OutTransform) const
 {
-	return Counter && QueueLane != EBathhouseCounterLane::None
-		&& Counter->GetQueueTargetTransform(QueueLane, GetOwner(), OutTransform);
+	FBathhouseQueueAssignment Assignment;
+	if (!Counter || QueueLane == EBathhouseCounterLane::None
+		|| !Counter->ResolveQueueAssignment(QueueLane, GetOwner(), Assignment)
+		|| !Assignment.IsVisibleAssignment())
+	{
+		return false;
+	}
+	OutTransform = Assignment.TargetTransform;
+	return true;
 }
 
 void UCustomerSessionComponent::BeginWaitingForCheckIn()
@@ -877,19 +892,8 @@ bool UCustomerSessionComponent::TryPlaceCheckoutKey()
 		return true;
 	}
 
-	FTransform SlotTransform;
-	if (!Counter->TryReserveReturnedObjectSlot(GetOwner(), ReturnSlotIndex, SlotTransform))
-	{
-		return false;
-	}
-	USceneComponent* ReturnSlot = Counter->GetReturnSlotComponent(ReturnSlotIndex);
-	if (!ReturnSlot || !AssignedKey->TryPlaceOnCounter(*GetOwner(), *Counter, ReturnSlotIndex, *ReturnSlot))
-	{
-		Counter->ReleaseReturnedObjectReservation(GetOwner(), ReturnSlotIndex);
-		ReturnSlotIndex = INDEX_NONE;
-		return false;
-	}
-	return true;
+	return AssignedKey->TryPlaceOnCounter(*GetOwner(), *Counter)
+		&& AssignedKey->GetKeyState() == EBathhouseKeyState::OnCounter;
 }
 
 bool UCustomerSessionComponent::TryCreateCashOffer(TSubclassOf<ABathhouseCashPaymentActor> CashClass)

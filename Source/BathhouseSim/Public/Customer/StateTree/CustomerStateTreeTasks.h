@@ -58,7 +58,7 @@ struct FCustomerQueueTargetTaskInstanceData
 	FRotator Facing = FRotator::ZeroRotator;
 };
 
-USTRUCT(meta = (DisplayName = "Get Customer Queue Target", Category = "Bathhouse|Customer"))
+USTRUCT(meta = (DisplayName = "Get Customer Queue Target (Deprecated)", Category = "Bathhouse|Customer", Deprecated, DeprecationMessage = "Replace with Move To Current Queue Assignment."))
 struct BATHHOUSESIM_API FCustomerQueueTargetTask : public FStateTreeTaskCommonBase
 {
 	GENERATED_BODY()

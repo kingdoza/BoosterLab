@@ -29,9 +29,12 @@ private:
 	friend class FBathhouseCustomerInterruptionTest;
 
 	uint64 AllocateNonZeroToken(uint64& Counter);
+	void CompleteSoftInterruptionResume();
+	void HandleQueueRecoveryFinished(bool bSucceeded);
 
 	uint64 InterruptionSerial = 0;
 	uint64 NextOperationToken = 1;
 	uint64 ActiveOperationToken = 0;
 	bool bSoftInterrupted = false;
+	bool bQueueRecoveryPending = false;
 };
