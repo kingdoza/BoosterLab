@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-1인칭 이동, sprint, camera, Interaction/Carry 조립, E primary, F secondary, 모든 현재 physical carryable의 G free drop과 LMB `PrimaryUseAction`의 Computer pointer/held equipment 배타적 routing이 현재 Source에 구현되어 있다. G는 item kind를 판정하지 않고 camera forward만 carry coordinator에 전달한다.
+1인칭 이동, sprint, camera, Interaction/Carry와 Computer/Equipment LMB routing은 현재 구현되어 있다. Placement target은 Q recovery, LCtrl snap, wheel rotation과 `Computer > Placement > Equipment` LMB ownership을 같은 composition root에 추가한다.
 
 ## Responsibilities
 
@@ -20,6 +20,7 @@ Character System은 범용 1인칭 조작 템플릿의 플레이어 조작을 �
 - player computer-use component와 widget interaction 조립
 - computer focus 중 1인칭 입력 gate와 click action 라우팅
 - player equipment-use component 조립과 LMB Started/Triggered/Completed/Canceled routing
+- player facility-placement component 조립과 Q/LCtrl/MouseWheel intent routing
 
 현재 문서화된 Character 책임 밖의 도메인 gameplay logic은 Character System 책임이 아니다.
 
@@ -55,8 +56,9 @@ Source/BathhouseSim/Private/Character/
 - `DropCarryAction` G의 Started를 camera forward와 함께 generic held-item free-drop intent로 전달한다.
 - `UPlayerComputerUseComponent`와 mouse-source `UWidgetInteractionComponent`를 조립한다.
 - `UPlayerEquipmentUseComponent`를 조립하고 camera, carry와 interaction query/result context를 주입한다.
-- computer session이 capture 중이면 E Started는 focus-out으로, LMB primary use는 widget pointer로 보내고 Move/Look/Jump/Sprint/F/G를 차단한다.
-- 일반 상태 LMB는 현재 held Actor의 generic equipment-use lifecycle로 전달하며 Character가 wrench/mop을 cast하지 않는다.
+- target `UPlayerFacilityPlacementComponent`를 조립하고 camera, carry와 interaction에 context를 주입한다.
+- computer session이 capture 중이면 E Started는 focus-out으로, LMB는 widget pointer로 보내고 Move/Look/Jump/Sprint/F/G/Q/LCtrl/휠을 차단한다.
+- 일반 상태 LMB는 active placement가 있으면 placement confirm, 없으면 held Actor의 equipment-use lifecycle로 전달한다.
 - 진입에 사용한 E의 Completed/Canceled가 즉시 focus-out 또는 기존 hold lifecycle로 재전달되지 않도록 press ownership을 보존한다.
 - Character는 towel, stain, mop, basket, monkey wrench의 사용 가능 여부와 key drop 가능 여부를 직접 판정하지 않는다.
 
@@ -134,12 +136,13 @@ Source/BathhouseSim/Private/Character/
 3. 새 E Started는 focus-out을 시작하고 해당 press lifecycle을 소비한다.
 4. focus-out 완료 뒤 movement와 일반 interaction을 복구한다.
 
-### Primary Equipment Use
+### Primary Use Ownership
 
-1. `PrimaryUseAction` Started에서 현재 input owner를 Computer 또는 Equipment으로 정확히 한 번 결정한다.
+1. `PrimaryUseAction` Started에서 현재 input owner를 Computer, Placement 또는 Equipment으로 정확히 한 번 결정한다.
 2. Computer Active이면 pointer press를 시작하고 해당 press의 Completed/Canceled만 pointer release로 소비한다.
-3. 일반 상태면 `UPlayerEquipmentUseComponent` Begin/Update/End로 전달한다. 몽키스패너는 Started 한 번, 물걸레는 Hold lifecycle을 사용한다.
-4. press owner를 중간에 바꾸지 않고 End/Cancel을 시작 owner에만 전달한다.
+3. packaged facility preview가 active면 Placement confirm으로 전달한다.
+4. 나머지는 `UPlayerEquipmentUseComponent` Begin/Update/End로 전달한다. 몽키스패너는 Started 한 번, 물걸레는 Hold lifecycle을 사용한다.
+5. press owner를 중간에 바꾸지 않고 End/Cancel을 시작 owner에만 전달한다.
 
 Native reflected property 이관은 `PrimaryUseAction`을 최우선으로 사용하되 기존 `ComputerClickAction`을 deprecated fallback으로 한 migration cycle 보존한다. 둘 다 설정되면 `PrimaryUseAction`만 binding하여 LMB를 중복 처리하지 않는다.
 
@@ -150,6 +153,7 @@ Native reflected property 이관은 `PrimaryUseAction`을 최우선으로 사용
 - Character System -> Camera System
 - Character System -> Interaction System
 - Character System -> Computer System
+- Character System -> Placement System
 - Character System -> Enhanced Input
 - Character System -> InputCore
 - Character System -> UMG widget interaction
@@ -188,6 +192,9 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - `AFirstPersonCharacter::SecondaryInteractAction`
 - `AFirstPersonCharacter::DropCarryAction`
 - `AFirstPersonCharacter::PrimaryUseAction`
+- `AFirstPersonCharacter::RecoverFacilityAction`
+- `AFirstPersonCharacter::PlacementSnapAction`
+- `AFirstPersonCharacter::PlacementRotateAction`
 - `AFirstPersonCharacter::ComputerClickAction` (deprecated Editor migration fallback)
 - `AFirstPersonCharacter::MoveSpeedScale`
 - `AFirstPersonCharacter::LookSpeedScale`
@@ -200,10 +207,10 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - Character는 입력 라우팅과 pawn 조작만 담당하고, sprint의 실제 상태/속도는 MovementComponent가 소유한다.
 - Character는 component composition과 input routing만 담당하고 focus/key transaction을 직접 소유하지 않는다.
 - computer의 phase, camera blend, cursor/input mode와 reservation은 Computer component/Actor가 소유하며 Character에 상태를 복제하지 않는다.
-- E/F/G는 intent mapping이며 fixed slot, key, Cleaning/Towel 상태를 Character에 추가하지 않는다.
+- E/F/G/Q/LCtrl/휠은 intent mapping이며 fixed slot, key, Placement, Cleaning/Towel 상태를 Character에 추가하지 않는다.
 - LMB도 intent mapping이며 Character에 wrench attack, mop cleaning 또는 prompt domain state를 추가하지 않는다.
 - `ComputerClickAction` property를 즉시 rename/delete하지 않고 `PrimaryUseAction` 이관 후 후속 제거 단계에서 Property Redirect를 검토한다.
-- serialized `HeldKeyAnchor` 이름은 기존 Blueprint 호환성을 위해 유지하되 key/mop/basket/monkey wrench의 공용 held anchor로 사용한다. rename하지 않는다.
+- serialized `HeldKeyAnchor` 이름은 기존 Blueprint 호환성을 위해 유지하되 key/mop/basket/monkey wrench/packaged facility의 공용 held anchor로 사용한다. rename하지 않는다.
 - Controller는 mapping context 등록/해제 외 책임을 갖지 않는다.
 - Sprint 시작 조건은 전방 가속과 지상 상태를 요구한다.
 - 현재 카메라는 capsule 기준 고정 offset을 사용한다. skeletal mesh socket 기반 카메라나 weapon/hand mesh는 별도 시스템이 생길 때 설계한다.
@@ -220,9 +227,10 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - InteractAction이 Started 한 번마다 한 번만 실행되는지 확인한다.
 - E hold target이 Completed/Canceled를 받으며 기존 instant interaction이 release 때 재실행되지 않는지 확인한다.
 - F와 G가 각각 한 번만 routing되고 G가 concrete kind 판단 없이 key를 포함한 held carryable에 도달하는지 확인한다.
-- computer 사용 중 Move/Look/Jump/Sprint/F/G가 기존 component나 domain에 도달하지 않는지 확인한다.
+- computer 사용 중 Move/Look/Jump/Sprint/F/G/Q/LCtrl/휠이 기존 component나 domain에 도달하지 않는지 확인한다.
 - `PrimaryUseAction`과 deprecated fallback이 동시에 LMB를 중복 binding하지 않는지 확인한다.
-- Computer pointer press와 Equipment use press owner가 섞이지 않고 Completed/Canceled가 시작 owner에 한 번만 도달하는지 확인한다.
+- Computer/Placement/Equipment press owner가 섞이지 않고 Completed/Canceled가 시작 owner에 한 번만 도달하는지 확인한다.
+- Q Hold와 LCtrl/휠이 placement component에만 도달하고 Character가 설비 상태를 판정하지 않는지 확인한다.
 - 진입 E release와 종료 E press/release가 각각 한 번만 소비되며 world interaction을 오발하지 않는지 확인한다.
 - pawn 종료/교체 시 interaction focus와 held key attachment가 정리되는지 확인한다.
 - Blueprint native parent rename이 필요한 경우 Core Redirect 필요 여부를 먼저 검토한다.

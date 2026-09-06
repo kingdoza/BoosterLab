@@ -1,0 +1,46 @@
+MCP server started on 127.0.0.1:9876, press Ctrl+C to exit.
+
+FBX export starting... 'C:\\UnrealProjects\\BathhouseSim\\ArtSource\\Bathhouse\\Bath_01\\SM_Bath_01_Body.fbx'
+export finished in 0.0693 sec.
+
+FBX export starting... 'C:\\UnrealProjects\\BathhouseSim\\ArtSource\\Bathhouse\\Bath_01\\SM_Bath_01_Hardware.fbx'
+export finished in 0.0188 sec.
+
+FBX export starting... 'C:\\UnrealProjects\\BathhouseSim\\ArtSource\\Bathhouse\\Bath_01\\SM_Bath_01_Water.fbx'
+export finished in 0.0182 sec.
+INFO Draco is available, use library at C:\Program Files\Blender Foundation\Blender 5.2\5.2\scripts\addons_core\io_scene_gltf2\bf_intern_draco_bridge.dll
+INFO MeshOptimizer is available, use library at C:\Program Files\Blender Foundation\Blender 5.2\5.2\scripts\addons_core\io_scene_gltf2\bf_intern_meshopt_bridge.dll
+17:27:14 | INFO: Starting glTF 2.0 export
+17:27:14 | INFO: Extracting primitive: Structural basin walls
+17:27:15 | INFO: Primitives created: 13
+17:27:15 | INFO: Extracting primitive: Cube.512
+17:27:15 | INFO: Primitives created: 4
+17:27:15 | INFO: Extracting primitive: Continuous entrance handrail
+17:27:15 | INFO: Primitives created: 4
+17:27:15 | INFO: Extracting primitive: Water surface
+17:27:15 | INFO: Primitives created: 2
+17:27:15 | INFO: Finished glTF 2.0 export in 0.22891640663146973 s
+
+
+FBX export starting... 'C:\\UnrealProjects\\BathhouseSim\\ArtSource\\Bathhouse\\Bath_01\\SM_Bath_01_Body.fbx'
+export finished in 0.0624 sec.
+
+FBX export starting... 'C:\\UnrealProjects\\BathhouseSim\\ArtSource\\Bathhouse\\Bath_01\\SM_Bath_01_Hardware.fbx'
+export finished in 0.0174 sec.
+
+FBX export starting... 'C:\\UnrealProjects\\BathhouseSim\\ArtSource\\Bathhouse\\Bath_01\\SM_Bath_01_Water.fbx'
+export finished in 0.0044 sec.
+17:29:41 | INFO: Starting glTF 2.0 export
+17:29:41 | INFO: Extracting primitive: Structural basin walls
+17:29:41 | INFO: Primitives created: 13
+17:29:41 | INFO: Extracting primitive: Cube.507
+17:29:41 | INFO: Primitives created: 4
+17:29:41 | INFO: Extracting primitive: Continuous entrance handrail
+17:29:41 | INFO: Primitives created: 4
+17:29:41 | INFO: Extracting primitive: Water surface
+17:29:41 | INFO: Primitives created: 2
+17:29:41 | INFO: Finished glTF 2.0 export in 0.14277005195617676 s
+
+FBX version: 7400
+FBX version: 7400
+FBX version: 7400

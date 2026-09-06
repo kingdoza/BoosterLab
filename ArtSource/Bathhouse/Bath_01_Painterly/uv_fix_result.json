@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "result": {
+    "uv_channels": {
+      "SM_Bath_01_Painterly_Body": [
+        "UV0",
+        "UV1_Lightmap"
+      ],
+      "SM_Bath_01_Painterly_Hardware": [
+        "UV0",
+        "UV1_Lightmap"
+      ],
+      "SM_Bath_01_Painterly_Details": [
+        "UV0",
+        "UV1_Lightmap"
+      ],
+      "SM_Bath_01_Painterly_Water": [
+        "UV0",
+        "UV1_Lightmap"
+      ]
+    }
+  },
+  "stdout": "\nFBX export starting... 'C:\\\\UnrealProjects\\\\BathhouseSim\\\\ArtSource\\\\Bathhouse\\\\Bath_01_Painterly\\\\SM_Bath_01_Painterly_Body.fbx'\nexport finished in 0.0689 sec.\n\nFBX export starting... 'C:\\\\UnrealProjects\\\\BathhouseSim\\\\ArtSource\\\\Bathhouse\\\\Bath_01_Painterly\\\\SM_Bath_01_Painterly_Hardware.fbx'\nexport finished in 0.0187 sec.\n\nFBX export starting... 'C:\\\\UnrealProjects\\\\BathhouseSim\\\\ArtSource\\\\Bathhouse\\\\Bath_01_Painterly\\\\SM_Bath_01_Painterly_Water.fbx'\nexport finished in 0.0047 sec.\n17:52:29 | INFO: Starting glTF 2.0 export\n17:52:29 | INFO: Extracting primitive: Structural basin walls\n17:52:30 | INFO: Primitives created: 13\n17:52:30 | INFO: Extracting primitive: Cube.507\n17:52:30 | INFO: Primitives created: 4\n17:52:30 | INFO: Extracting primitive: Continuous entrance handrail\n17:52:30 | INFO: Primitives created: 4\n17:52:30 | INFO: Extracting primitive: Water surface\n17:52:30 | INFO: Primitives created: 2\n17:52:30 | INFO: Finished glTF 2.0 export in 0.7293369770050049 s\n\n"
+}

@@ -41,6 +41,8 @@ UE 5.8 customer loop 구현은 실제 include/use site와 함께 다음 runtime 
 - `GameplayStateTreeModule`
 - `UMG`
 
+Placement target은 `UFacilityPlacementSettings`를 위해 runtime `DeveloperSettings` 의존성을 실제 include/use site와 함께 추가한다. GameplayTags와 NavigationSystem은 기존 의존성을 재사용한다.
+
 `BathhouseSim.uproject`에는 UE 5.8 `StateTree`, `GameplayStateTree` plugin이 활성화되어 있다. Computer의 `UWidgetComponent`, `UWidgetInteractionComponent`와 native sample widget은 기존 `UMG`/`InputCore` 의존성으로 구현되어 있다. direct API 사용처가 없는 `StateTreeEditorModule`, `Slate`, `SlateCore`는 runtime module에 추가하지 않는다.
 
 ## Runtime Entry
@@ -79,6 +81,7 @@ Core System은 고정된 native class inventory를 유지하지 않는다. 구�
 - `InteractionSystem.md`: player trace, primary/secondary intent와 equipment-use 경계
 - `PhysicalCarrySystem.md`: Interaction Source 안의 fixed slot, free-drop transaction과 physical item recovery 경계
 - `FacilitySystem.md`: facility slot과 counter queue 경계
+- `PlacementSystem.md`: 설비 mode/preview/placement/recovery, 확장 단계와 락커 capacity lease 경계
 - `EconomySystem.md`: wallet과 cash claim 경계
 - `CustomerSystem.md`: StateTree routine과 customer session 경계
 - `UISystem.md`: native Widget/Widget Blueprint 경계
@@ -106,11 +109,14 @@ Cleaning/Towel/Computer, Combat/Customer Recovery와 Physical Carry는 현재 ru
 - `UPlayerInteractionComponent`는 focus/query/result 표시 경계를 유지하고 concrete weapon/cleaning mutation은 equipment actor와 domain owner에 위임한다.
 - 공통 physical carry Actor/Component는 만들지 않고 `IPhysicalCarryable`을 유지한다. generic fixed slot은 world interaction Actor로, atomic placement의 commit owner는 `UPlayerCarryComponent`에 두며 snapshot/rollback mechanics는 private non-UObject helper로 분리한다.
 - 재사용 가능한 held motion은 carry 소유권과 분리된 표현 Component로 유지한다.
+- 설비 placement/recovery의 session·preview·rollback은 `UPlayerFacilityPlacementComponent`에 두고 contents/water/slot 조건은 원래 domain owner가 판정한다.
+- 설치 락커 용량, customer lease와 임시 action-slot 후보는 `ULockerCapacitySubsystem`에 두며 Customer Session이나 설비 Actor에 전역 합계를 복제하지 않는다.
 
 ## Manual Review Points
 
 - 새 모듈 의존성을 추가할 때 실제 include/use site가 있는지 확인한다.
 - StateTree/GameplayStateTree plugin과 runtime module을 UE 5.8 기준으로 확인한다.
+- `DeveloperSettings` 추가가 `UFacilityPlacementSettings` 실제 사용과 일치하는지 확인한다.
 - UCLASS/USTRUCT/UENUM rename/delete 시 Blueprint 참조와 Core Redirect 필요 여부를 확인한다.
 - Config 변경은 실제 gameplay 연결 또는 migration 목적이 분명할 때만 수행한다.
 - 문서가 Source 구조와 어긋나면 Source 재대조 후 시스템 문서를 갱신한다.

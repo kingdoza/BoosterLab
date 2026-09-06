@@ -1,0 +1,100 @@
+{
+  "SM_Bath_01_Painterly_Body": {
+    "vertices": 34496,
+    "triangles": 66448,
+    "materials": 13,
+    "uv_channels": [
+      "UV0",
+      "UV1_Lightmap"
+    ]
+  },
+  "SM_Bath_01_Painterly_Hardware": {
+    "vertices": 4542,
+    "triangles": 8928,
+    "materials": 4,
+    "uv_channels": [
+      "UV0",
+      "UV1_Lightmap"
+    ]
+  },
+  "SM_Bath_01_Painterly_Details": {
+    "vertices": 2808,
+    "triangles": 3400,
+    "materials": 4,
+    "uv_channels": [
+      "UV0",
+      "UV1_Lightmap"
+    ]
+  },
+  "SM_Bath_01_Painterly_Water": {
+    "vertices": 574,
+    "triangles": 1058,
+    "materials": 2,
+    "uv_channels": [
+      "UV0",
+      "UV1_Lightmap"
+    ]
+  },
+  "collision_hulls": 12,
+  "nominal_basin_dimensions_m": [
+    4.56,
+    3.56,
+    1.13
+  ],
+  "overall_depth_with_steps_m": 4.4255,
+  "measured_bounds_m": {
+    "SM_Bath_01_Painterly_Body": [
+      [
+        -2.2829999923706055,
+        -2.6424999237060547,
+        0.0
+      ],
+      [
+        2.2829999923706055,
+        1.7829999923706055,
+        1.6119999885559082
+      ]
+    ],
+    "SM_Bath_01_Painterly_Hardware": [
+      [
+        -1.5550000667572021,
+        -2.4750001430511475,
+        0.35199999809265137
+      ],
+      [
+        1.2799999713897705,
+        1.261000156402588,
+        1.8070125579833984
+      ]
+    ],
+    "SM_Bath_01_Painterly_Details": [
+      [
+        0.6749999523162842,
+        -1.785599946975708,
+        0.3259999752044678
+      ],
+      [
+        1.2450000047683716,
+        -0.5149999856948853,
+        0.8075000047683716
+      ]
+    ],
+    "SM_Bath_01_Painterly_Water": [
+      [
+        -1.8125,
+        -1.3125,
+        0.8650000095367432
+      ],
+      [
+        1.8125,
+        1.3125,
+        0.8711650967597961
+      ]
+    ]
+  },
+  "total_render_triangles": 79834,
+  "variant": "Painterly surface refinement; separate from Bath_01",
+  "uv0": "Intentional face-local overlap for repeating painted surfaces",
+  "uv1": "Separate packed lightmap UV",
+  "comparison": "Same camera, lights and exposure as Bath_01"
+}

@@ -1,0 +1,218 @@
+{
+  "M_Grout_WarmGrey": {
+    "base_color_linear": [
+      0.23999999463558197,
+      0.27000001072883606,
+      0.23000000417232513
+    ],
+    "base_color_texture": null,
+    "roughness": 0.8600000143051147,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Edge_DeepTeal": {
+    "base_color_linear": [
+      0.07500000298023224,
+      0.1899999976158142,
+      0.1599999964237213
+    ],
+    "base_color_texture": "textures/M_Edge_DeepTeal_BaseColor.png",
+    "roughness": 0.5,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Coping_Ivory": {
+    "base_color_linear": [
+      0.7599999904632568,
+      0.6800000071525574,
+      0.49000000953674316
+    ],
+    "base_color_texture": "textures/M_Coping_Ivory_BaseColor.png",
+    "roughness": 0.5199999809265137,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Glaze_Jade_5": {
+    "base_color_linear": [
+      0.3400000035762787,
+      0.5199999809265137,
+      0.4300000071525574
+    ],
+    "base_color_texture": "textures/M_Glaze_Jade_5_BaseColor.png",
+    "roughness": 0.3199999928474426,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Glaze_Jade_1": {
+    "base_color_linear": [
+      0.1899999976158142,
+      0.4000000059604645,
+      0.3400000035762787
+    ],
+    "base_color_texture": "textures/M_Glaze_Jade_1_BaseColor.png",
+    "roughness": 0.3199999928474426,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Glaze_Jade_3": {
+    "base_color_linear": [
+      0.28999999165534973,
+      0.49000000953674316,
+      0.4000000059604645
+    ],
+    "base_color_texture": "textures/M_Glaze_Jade_3_BaseColor.png",
+    "roughness": 0.3199999928474426,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Glaze_Jade_4": {
+    "base_color_linear": [
+      0.17000000178813934,
+      0.3499999940395355,
+      0.3100000023841858
+    ],
+    "base_color_texture": "textures/M_Glaze_Jade_4_BaseColor.png",
+    "roughness": 0.3199999928474426,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Glaze_Jade_2": {
+    "base_color_linear": [
+      0.25,
+      0.46000000834465027,
+      0.3799999952316284
+    ],
+    "base_color_texture": "textures/M_Glaze_Jade_2_BaseColor.png",
+    "roughness": 0.3199999928474426,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Glaze_Celadon_2": {
+    "base_color_linear": [
+      0.5199999809265137,
+      0.699999988079071,
+      0.5899999737739563
+    ],
+    "base_color_texture": "textures/M_Glaze_Celadon_2_BaseColor.png",
+    "roughness": 0.3400000035762787,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Glaze_Celadon_1": {
+    "base_color_linear": [
+      0.46000000834465027,
+      0.6499999761581421,
+      0.550000011920929
+    ],
+    "base_color_texture": "textures/M_Glaze_Celadon_1_BaseColor.png",
+    "roughness": 0.3400000035762787,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Glaze_Celadon_3": {
+    "base_color_linear": [
+      0.38999998569488525,
+      0.5799999833106995,
+      0.49000000953674316
+    ],
+    "base_color_texture": "textures/M_Glaze_Celadon_3_BaseColor.png",
+    "roughness": 0.3400000035762787,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Coping_Light": {
+    "base_color_linear": [
+      0.8399999737739563,
+      0.7699999809265137,
+      0.5899999737739563
+    ],
+    "base_color_texture": "textures/M_Coping_Light_BaseColor.png",
+    "roughness": 0.47999998927116394,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Edge_ExposedClay": {
+    "base_color_linear": [
+      0.4699999988079071,
+      0.3799999952316284,
+      0.23000000417232513
+    ],
+    "base_color_texture": null,
+    "roughness": 0.8199999928474426,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Metal_SatinNickel": {
+    "base_color_linear": [
+      0.4000000059604645,
+      0.47999998927116394,
+      0.44999998807907104
+    ],
+    "base_color_texture": null,
+    "roughness": 0.23000000417232513,
+    "metallic": 0.8600000143051147,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Metal_AgedBrass": {
+    "base_color_linear": [
+      0.41999998688697815,
+      0.2800000011920929,
+      0.10499999672174454
+    ],
+    "base_color_texture": null,
+    "roughness": 0.30000001192092896,
+    "metallic": 0.7699999809265137,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Enamel_Oxblood": {
+    "base_color_linear": [
+      0.3499999940395355,
+      0.06499999761581421,
+      0.05400000140070915
+    ],
+    "base_color_texture": null,
+    "roughness": 0.3799999952316284,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  },
+  "M_Water_Turquoise": {
+    "base_color_linear": [
+      0.11999999731779099,
+      0.4300000071525574,
+      0.36000001430511475
+    ],
+    "base_color_texture": null,
+    "roughness": 0.12999999523162842,
+    "metallic": 0.0,
+    "transmission_weight": 0.6800000071525574,
+    "ior": 1.3329999446868896
+  },
+  "M_Water_Ripple": {
+    "base_color_linear": [
+      0.46000000834465027,
+      0.7099999785423279,
+      0.6000000238418579
+    ],
+    "base_color_texture": null,
+    "roughness": 0.2199999988079071,
+    "metallic": 0.0,
+    "transmission_weight": 0.0,
+    "ior": 1.5
+  }
+}

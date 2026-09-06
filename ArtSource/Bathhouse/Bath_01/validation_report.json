@@ -1,0 +1,329 @@
+{
+  "source_reload": true,
+  "checks": [
+    {
+      "check": "SM_Bath_01_Body finite vertices",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Body UV channels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Body applied scale",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Body shared origin",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Body valid material indices",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Hardware finite vertices",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Hardware UV channels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Hardware applied scale",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Hardware shared origin",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Hardware valid material indices",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Details finite vertices",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Details UV channels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Details applied scale",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Details shared origin",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Details valid material indices",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Water finite vertices",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Water UV channels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Water applied scale",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Water shared origin",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Water valid material indices",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "source images packed",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Body.fbx mesh count",
+      "passed": true,
+      "detail": 13
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_08.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_10.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Body.001 recognized",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Body FBX bounds error < 0.1 mm",
+      "passed": true,
+      "detail": 2.384185791015625e-07
+    },
+    {
+      "check": "SM_Bath_01_Body FBX UV channels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_05.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_00.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_02.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_03.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_07.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_09.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_01.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_04.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_06.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "UCX_SM_Bath_01_Body_11.001 closed collision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Hardware.fbx mesh count",
+      "passed": true,
+      "detail": 2
+    },
+    {
+      "check": "SM_Bath_01_Hardware.001 recognized",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Hardware FBX bounds error < 0.1 mm",
+      "passed": true,
+      "detail": 2.384185791015625e-07
+    },
+    {
+      "check": "SM_Bath_01_Hardware FBX UV channels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Details.001 recognized",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Details FBX bounds error < 0.1 mm",
+      "passed": true,
+      "detail": 1.1920928955078125e-07
+    },
+    {
+      "check": "SM_Bath_01_Details FBX UV channels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Water.fbx mesh count",
+      "passed": true,
+      "detail": 1
+    },
+    {
+      "check": "SM_Bath_01_Water.001 recognized",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SM_Bath_01_Water FBX bounds error < 0.1 mm",
+      "passed": true,
+      "detail": 1.1920928955078125e-07
+    },
+    {
+      "check": "SM_Bath_01_Water FBX UV channels",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "temporary objects removed",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "Bath_01_Hero.png exists",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "Bath_01_Empty.png exists",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "Bath_01.glb exists",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "components": {
+    "SM_Bath_01_Body": {
+      "bounds_m": [
+        [
+          -2.2829999923706055,
+          -2.6424999237060547,
+          0.0
+        ],
+        [
+          2.2829999923706055,
+          1.7829999923706055,
+          1.6119999885559082
+        ]
+      ]
+    },
+    "SM_Bath_01_Hardware": {
+      "bounds_m": [
+        [
+          -1.5550000667572021,
+          -2.4750001430511475,
+          0.35199999809265137
+        ],
+        [
+          1.2799999713897705,
+          1.261000156402588,
+          1.8070125579833984
+        ]
+      ]
+    },
+    "SM_Bath_01_Details": {
+      "bounds_m": [
+        [
+          0.6749999523162842,
+          -1.785599946975708,
+          0.3259999752044678
+        ],
+        [
+          1.2450000047683716,
+          -0.5149999856948853,
+          0.8075000047683716
+        ]
+      ]
+    },
+    "SM_Bath_01_Water": {
+      "bounds_m": [
+        [
+          -1.8125,
+          -1.3125,
+          0.8650000095367432
+        ],
+        [
+          1.8125,
+          1.3125,
+          0.8711650967597961
+        ]
+      ]
+    }
+  },
+  "passed": true,
+  "limitations": [
+    "FBX roundtrip validated in Blender, not imported into Unreal Editor.",
+    "Unreal water shader must be assigned independently; FBX does not preserve Cycles transmission.",
+    "UV1 contains packed geometry islands; lightmap resolution/padding still needs Unreal lighting validation."
+  ]
+}

@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 목욕탕 손님의 입장부터 퇴장까지 현재 구현된 C++ gameplay loop와 UE 5.8 StateTree 실행 계약을 정의한다. queue assignment navigation, checkout overflow wander와 physical key return Source는 구현되었으며 Facility 경계는 [FacilitySystem.md](FacilitySystem.md), knockdown 복귀는 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)에 둔다.
+이 문서는 현재 customer loop와 UE 5.8 StateTree 계약을 정의하고 신발 제거, unnumbered locker 활동과 capacity lease target을 추가한다. Facility 경계는 [FacilitySystem.md](FacilitySystem.md), 배치/수용량은 [PlacementSystem.md](PlacementSystem.md), knockdown은 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)를 따른다.
 
 ## Source Scope
 
@@ -45,7 +45,7 @@ Source/BathhouseSim/Private/Tests/
 - customer별 key/session, queue, facility reservation과 bath stay 상태
 - StateTree 기반 routine orchestration과 gameplay event 전달
 - check-in 60초 timeout과 미응대 퇴장
-- 번호 시설, shower, random bath loop, checkout과 정상 퇴장
+- unnumbered locker, shower, random bath loop, checkout과 정상 퇴장
 - 완료·timeout·기술 실패의 대칭 cleanup
 - clean towel token 획득·사용·반납과 shortage fallback
 - customer session satisfaction와 towel cleanup
@@ -58,7 +58,7 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 | 책임 | Owner |
 |---|---|
 | 현재 routine state와 transition | `ST_CustomerRoutine` StateTree |
-| key number, key reference, timer와 runtime handles | `UCustomerSessionComponent` |
+| key token reference, clothes/lease, timer와 runtime handles | `UCustomerSessionComponent` |
 | 일반 navigation request | native `FCustomerRestartableMoveToTask`와 AIController |
 | queue 이동·도착 회전·overflow wander | `UCustomerQueueNavigationComponent`; Counter assignment를 읽고 mutation하지 않음 |
 | queue | `ABathhouseCounterActor` |
@@ -72,6 +72,7 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 | towel count, overflow와 transfer | Towel System |
 | health/depleted | Combat `UHealthComponent` |
 | ragdoll/soft interruption/restart serial | Customer Recovery components |
+| 설치 locker capacity와 active lease registry | `ULockerCapacitySubsystem` |
 
 ## `UCustomerRoutineDefinition`
 
@@ -81,8 +82,7 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 - `BathStayDurationSeconds = 60`
 - `BathDwellMinSeconds = 10`
 - `BathDwellMaxSeconds = 20`
-- store shoes, undress, pre-shower, main shower 시간
-- drying, towel return, dress, wear shoes 시간
+- undress, pre-shower, main shower, drying, towel return과 dress 시간
 - facility retry 간격과 navigation 최대 재시도
 - queue 이동 허용 반경, 도착 Yaw 회전 속도와 허용 오차
 - checkout overflow wander 도착 반경과 지점 재선택 대기 범위
@@ -92,9 +92,13 @@ Customer는 towel endpoint count/overflow, facility slot, key actor lifecycle, p
 
 값은 Editor에서 조정하지만 runtime 도중 시설이나 Widget이 변경하지 않는다. 향후 성격·만족도 같은 인과요인은 별도 modifier로 추가하며 현재는 고정 bath stay 값을 그대로 사용한다.
 
+기존 `StoreShoesSeconds`, `WearShoesSeconds`는 StateTree asset migration 동안 deprecated reflected property로 보존하되 신규 routine에서 읽지 않는다.
+
 ## `UCustomerSessionComponent`
 
-- assigned `ABathhouseKeyActor`와 `KeyNumber`
+- assigned `ABathhouseKeyActor`와 token 표시용 `KeyNumber`; locker lookup에는 사용하지 않음
+- opaque locker capacity lease handle과 idempotent release guard
+- `ClothesStored`; locker slot은 의류 inventory를 소유하지 않음
 - current counter lane/queue handle
 - current facility slot reservation
 - current Bath action-point snap 여부, 예약 당시 발바닥 기준 approach/action transform과 collision-independent snap/return
@@ -161,6 +165,7 @@ Native C++이 소유하는 것:
 - session transaction과 cleanup
 - cached Bath 발바닥 transform에 scaled capsule half height를 한 번 더하는 actor/capsule-center 변환과 unswept teleport
 - queue/facility/key/wallet API 호출
+- locker capacity lease와 random action-slot API 호출
 - gameplay event 발행
 - montage 후보 검증, 단일 선택과 실제 playback 종료 판정
 - soft interruption serial, restartable MoveTo와 기존 Task local restart
@@ -174,6 +179,7 @@ Blueprint StateTree Task와 Blueprint graph에 domain mutation을 구현하지 �
 - `FCustomerMoveToCurrentQueueAssignmentTask`: service/queue/overflow를 한 실행으로 처리하고 service point 위치·Yaw 정렬 뒤에만 성공
 - check-in key 대기와 timeout 시작·취소
 - facility/slot 선택·예약·release
+- 탈의/착의용 random locker action-slot 선택과 행동 단위 release
 - native `FCustomerRestartableMoveToTask`는 기존 목적지 binding을 수용하며, `ST_CustomerRoutine` asset의 built-in `FStateTreeMoveToTask` 교체는 Editor 단계에서 수행
 - Bath action/approach point의 collision-independent snap과 movement mode 복구
 - logical activity begin, finish와 timer-only fallback
@@ -193,36 +199,34 @@ Queue removal은 session membership와 wait/service guard를 먼저 지운 뒤 c
 1. Spawner가 entry에 customer를 생성하고 routine definition/counter를 주입한다.
 2. Customer가 check-in lane에 enqueue하고 최신 assignment 위치로 이동한 뒤 authored Yaw로 정렬한다.
 3. Front service point 위치·회전 완료 후 `WaitingForKey`가 되고 60초 timeout을 시작한다.
-4. Player가 유효한 번호 key를 주면 key/session을 commit하고 timeout을 취소한다.
+4. Player가 유효한 physical key를 주면 capacity lease, key와 session을 한 transaction으로 commit하고 timeout을 취소한다.
 5. Timeout이면 check-in lane을 떠나 exit로 이동한 뒤 소멸한다.
-6. 성공하면 같은 번호 shoe locker slot에서 store-shoes timed activity를 수행한다.
-7. 같은 번호 clothes locker slot에서 undress timed activity를 수행한다.
-8. `TowelShelf` slot에서 clean towel 한 장 획득을 시도한다.
-9. 없으면 authorable limit 동안 availability를 기다리고 만료 시 towel 없이 진행하며 satisfaction을 감소시킨다.
-10. Shower slot에서 pre-shower timed activity를 수행한다.
-11. Pre-shower 완료 순간 고정 60초 bath stay timer를 시작한다.
-12. Available bath 중 random slot을 예약하고 NavMesh 위 approach point까지 이동한다.
-13. 이동을 정지하고 발바닥 action point를 capsule-center actor transform으로 변환한 뒤 blocking collision 사전 검사 없이 unswept snap하여 입욕을 시작한다.
-14. 탕마다 `10~20초` random dwell 동안 EnterState에서 선택한 montage 하나만 반복하고 시간이 남으면 다른 available bath를 선택한다.
-15. 다른 bath가 있으면 직전 bath를 제외하며 모든 bath가 점유 중이면 reservation 없이 availability event를 기다린다.
-16. dwell 완료 또는 60초 만료 시 montage를 중단하고 approach point로 복귀한 뒤 slot을 release한다.
-17. Shower slot에서 main-shower activity를 수행한다.
-18. towel handle이 있으면 Drying에서 Used로 mark하고 기존 `TowelBasket` facility의 used bin에 반환한다.
-19. used bin full이면 bin 주변 valid floor의 individual used towel로 commit하고, 즉시 spawn 불가면 PendingSpill ledger로 이전한다.
-20. towel handle이 없으면 towel-dependent drying/return을 건너뛴다.
-21. clothes locker와 shoe locker에서 dress/wear-shoes activity를 수행한다.
-22. Checkout lane에 enqueue한다. visible capacity 안에서는 고유 service/queue point로 이동·정렬하고 초과 시 FIFO 순번을 유지한 채 전용 NavMesh volume을 배회한다.
-23. service point 도착 후 동일한 assigned key를 counter drop point에서 physical `OnCounter` 상태로 전환하고 cash claim을 처리한다.
-24. Cash claim 성공 즉시 checkout lane을 떠나 exit로 이동하고 소멸한다.
+6. random available locker action slot을 탈의 동안만 reserve/use하고 완료 시 `ClothesStored=true`로 commit한 뒤 release한다.
+7. `TowelShelf` slot에서 clean towel 한 장 획득을 시도한다.
+8. 없으면 authorable limit 동안 availability를 기다리고 만료 시 towel 없이 진행하며 satisfaction을 감소시킨다.
+9. Shower slot에서 pre-shower timed activity를 수행하고 완료 순간 고정 60초 bath stay timer를 시작한다.
+10. Available bath 중 random slot을 예약하고 NavMesh 위 approach point까지 이동한다.
+11. 발바닥 action point를 capsule-center transform으로 변환한 뒤 blocking collision 검사 없이 unswept snap하여 입욕한다.
+12. 탕마다 `10~20초` random dwell 동안 선택 montage 하나만 반복하고 시간이 남으면 다른 available bath를 선택한다.
+13. 다른 bath가 있으면 직전 bath를 제외하고 모두 점유 중이면 reservation 없이 availability event를 기다린다.
+14. dwell 완료 또는 60초 만료 시 montage를 중단하고 approach point 복귀 뒤 slot을 release한다.
+15. Shower slot에서 main-shower activity를 수행한다.
+16. towel handle이 있으면 Drying에서 Used로 mark하고 기존 `TowelBasket` facility의 used bin에 반환한다.
+17. used bin full이면 주변 floor의 individual used towel, spawn 불가면 PendingSpill ledger로 보존한다.
+18. towel handle이 없으면 towel-dependent drying/return을 건너뛴다.
+19. 그 시점의 random available locker action slot을 착의 동안만 사용하고 `ClothesStored=false`로 commit한 뒤 release한다.
+20. Checkout lane에 enqueue한다. visible capacity 안에서는 고유 service/queue point로 이동·정렬하고 초과 시 FIFO를 유지한 채 전용 volume을 배회한다.
+21. service point 도착 후 동일 key를 counter에서 `OnCounter`로 전환하고 cash actor를 제시한다.
+22. Cash claim 성공 시 capacity lease를 release하고 checkout lane을 떠나 exit로 이동한 뒤 소멸한다.
 
 Player의 key pickup/rack 반환은 customer 퇴장 조건이 아니다.
 
 ## Check-In Transaction
 
 - check-in lane front customer만 key query를 제공한다.
-- player가 `HeldByPlayer` key를 들고 있고 key hook/두 numbered facility가 valid해야 한다.
-- 성공 시 key actor를 `AssignedToCustomer`로 전이하고 player hand를 비운 뒤 session에 저장한다.
-- key 번호는 player가 선택한 번호이며 customer가 미리 배정받지 않는다.
+- player가 자신의 exact hook과 연결된 `HeldByPlayer` key를 들고 있어야 한다. locker 번호 topology는 검사하지 않는다.
+- `ULockerCapacitySubsystem`이 provisional lease를 확보한 뒤 key를 `AssignedToCustomer`로 전이하고 player hand/session을 commit한다.
+- key/session commit 실패는 lease와 key를 rollback하며 성공 후 key number는 token identity/표시에만 남는다.
 - key receive와 timeout이 같은 frame에 경쟁하면 game thread에서 먼저 commit한 terminal event만 유효하다.
 
 ## Checkout Queue And Key Transaction
@@ -274,6 +278,7 @@ Navigation이 설정된 횟수만큼 반복 실패하면 gameplay 분기가 아�
 - active timer와 StateTree wait 취소
 - Bath action point에 있으면 collision 사전 검사 없이 cached approach point 복귀와 movement mode 복구
 - current slot release
+- locker capacity lease를 idempotent하게 release
 - queue entry 제거
 - assigned key를 원래 hook으로 복구
 - towel handle을 used stage에 따라 clean stack 또는 used bin/overflow/recovery ledger로 정리
@@ -292,6 +297,7 @@ Check-in 외 gameplay timeout은 두지 않는다.
 - Customer -> Interaction
 - Customer -> Economy
 - Customer -> Towel
+- Customer -> Placement/Facility locker capacity public API
 - Customer -> Combat health/damage public 계약
 - Customer -> UE 5.8 GameplayStateTree/AI/Navigation
 - Customer montage playback -> Engine Animation/AnimInstance
@@ -302,7 +308,9 @@ Check-in 외 gameplay timeout은 두지 않는다.
 - check-in timeout이 front 도착 후 시작되고 key 수령 시 취소되는지 확인한다.
 - check-in/checkout customer가 queue point의 위치뿐 아니라 Yaw까지 정렬하며, knockdown 기립 후 최신 assignment로 복귀한 뒤 routine을 재개하는지 확인한다.
 - checkout overflow customer가 FIFO 순번을 잃지 않고 전용 volume 안을 배회하며 promotion 때 active wander를 중단하는지 확인한다.
-- player가 준 key 번호와 두 numbered facility가 전체 routine에서 일치하는지 확인한다.
+- player가 준 key가 token으로 유지되지만 locker slot 선택과 번호 대응하지 않는지 확인한다.
+- check-in key/lease가 함께 commit 또는 rollback되고 checkout/timeout/cleanup에서 lease가 한 번만 반환되는지 확인한다.
+- 탈의/착의가 서로 독립된 random locker action slot을 행동 동안만 사용하고 `ClothesStored`를 session에만 기록하는지 확인한다.
 - bath timer가 pre-shower 완료 시 시작하고 정확히 60초에 current montage를 중단한 뒤 approach 복귀와 release를 수행하는지 확인한다.
 - blocking collision이 action point를 점유해도 snap이 성공하고 정확한 cached transform, `MOVE_None`과 기존 collision enabled 상태를 유지하는지 확인한다.
 - blocked action snap 후 정상 release/technical abort가 cached approach로 복귀하고 movement mode를 복원하는지 확인한다.
@@ -312,7 +320,7 @@ Check-in 외 gameplay timeout은 두지 않는다.
 - montage 후보가 0/1/여러 개인 경우 각각 failure/단일 선택/random 단일 선택으로 동작하는지 확인한다.
 - duration-loop가 처음 선택한 montage만 반복하고 StateTree exit에서 다른 playback을 중단하지 않는지 확인한다.
 - montage가 없는 timer-only 상태의 기존 logical loop가 유지되는지 확인한다.
-- 신발·의상 mesh, visibility, AnimNotify와 appearance state가 이번 범위에 추가되지 않았는지 확인한다.
+- 신발 상태/시설/StateTree 전이가 제거되고 의상 mesh/visibility/AnimNotify는 이번 범위에 추가되지 않았는지 확인한다.
 - `CustomerSession`이 외부 C++에서 직접 접근되지 않고 Blueprint/StateTree 읽기 binding과 public getter가 유지되는지 확인한다.
 - clean towel shortage가 authorable wait 뒤 routine을 계속하고 satisfaction penalty를 한 번만 적용하는지 확인한다.
 - used bin full이 customer를 막지 않고 individual overflow/PendingSpill로 token을 보존하는지 확인한다.

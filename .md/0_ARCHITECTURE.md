@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-08-26(KST) counter queue transform/overflow와 physical key return 확정 설계 기준
-- 상태: 기존 physical carry/recovery 구현 위에 최신 queue assignment, checkout overflow wander, queue-pose recovery gate와 단일 physical key drop 구현 대기
+- 기준일: 2026-09-06(KST) 설비 배치·회수, 확장 단계와 locker capacity lease 확정 설계 기준
+- 상태: 기존 gameplay Source 위에 Placement/Locker/Key-pool target 구현 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -36,6 +36,7 @@
 - [InteractionSystem.md](Architecture/InteractionSystem.md): camera trace, primary/secondary intent와 equipment-use routing
 - [PhysicalCarrySystem.md](Architecture/PhysicalCarrySystem.md): exact fixed slot, held-position free drop, key/equipment placement와 recovery
 - [FacilitySystem.md](Architecture/FacilitySystem.md): 다중 facility slot, transform 기반 counter queue assignment, checkout overflow와 key drop point
+- [PlacementSystem.md](Architecture/PlacementSystem.md): 설비 package/preview/placement/Q 회수, 확장 단계와 locker capacity lease
 - [EconomySystem.md](Architecture/EconomySystem.md): PlayerState wallet과 일회성 cash 획득
 - [CustomerSystem.md](Architecture/CustomerSystem.md): UE 5.8 StateTree customer routine, session과 cleanup
 - [UISystem.md](Architecture/UISystem.md): native Widget/Widget Blueprint 경계와 E/F/LMB interaction prompt 계약
@@ -84,7 +85,8 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
   - Character: 1인칭 캐릭터, 플레이어 컨트롤러, movement/sprint 책임
   - Camera: 이동 상태와 착지 상태 기반 camera shake, camera manager 기반 pitch limit 책임
   - Interaction: player focus, equipment use와 single physical carry transaction 책임
-  - Facility: facility slot, numbered lookup와 counter queue 책임
+  - Facility: facility/action slot, generic lookup와 counter queue 책임
+  - Placement(target): 설비 mode/preview/placement/recovery, 확장 단계와 locker capacity 책임
   - Economy: player money와 cash claim 책임
   - Customer: StateTree routine과 customer session 책임
   - UI: interaction query의 local HUD 표현 책임
@@ -104,12 +106,13 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Camera는 owner의 이동 상태, sprint 상태, falling/landing 상태를 읽고 camera shake 재생/중단을 결정한다.
 - Camera는 player camera manager를 통해 상하 시야각 제한 기본값을 제공하고, Blueprint 파생 class에서 값을 조정할 수 있게 한다.
 - Camera는 비로컬 플레이어에서 Tick interval 조정과 shake 중단으로 비용을 줄인다.
-- Character는 E/F/G와 범용 LMB `PrimaryUseAction`을 Interaction에 의도로 전달하고 carry/equipment-use component를 조립한다. Computer focus중 LMB는 monitor pointer가, 일반 상태에서는 held equipment가 소유한다.
-- Interaction은 camera trace, 범용 equipment-use routing과 held motion 표현을 소유한다. Physical Carry는 key/wet mop/towel basket/monkey wrench 중 하나의 held state, exact fixed slot과 free-drop transaction을 소유한다.
+- Character는 E/F/G/Q, LCtrl/MouseWheel과 범용 LMB를 의도로 전달한다. LMB owner는 `Computer > Placement > Equipment` 순서이며 Character가 domain 상태를 변경하지 않는다.
+- Interaction은 camera trace, equipment/placement/recovery prompt 합성과 held motion 표현을 소유한다. Physical Carry는 key/wet mop/towel basket/monkey wrench/packaged facility 중 하나의 held state, exact fixed slot과 free-drop transaction을 소유한다.
 - 모든 일반 carryable은 별도 예외가 없으면 G free drop과 exact assigned fixed slot을 모두 지원한다. free drop은 actual held pose에서 질량 무시 약한 velocity change로 시작하며 free-world item은 Pawn을 무시하고 CCD를 사용한다.
 - Facility는 다중 use slot, check-in/checkout 독립 FIFO와 revision을 소유한다. queue point는 Location/Yaw 전체를 사용하고 checkout visible capacity를 넘은 entry는 같은 FIFO 순번을 유지한 채 전용 NavMesh volume assignment를 받는다.
+- Placement target은 동일 설비 Actor의 `Placed/Packaged` mode, 별도 ghost preview, zone-local 10cm grid, LCtrl snap, wheel Yaw와 Q Hold 회수를 원자적으로 조율한다. 공통 grid/Yaw/hold 값은 `UFacilityPlacementSettings`가 소유한다.
 - Economy는 PlayerState wallet을 소유하고 cash claim을 한 번만 반영한다.
-- Customer StateTree는 routine을 조율하고 session/queue/facility/key/wallet API에 실행을 위임한다. native queue Task와 queue navigation component가 assignment 재조회, MoveTo, 도착 회전, overflow wander와 promotion을 처리한다.
+- Customer StateTree는 routine을 조율하고 session/queue/facility/key/wallet API에 실행을 위임한다. 신발 단계와 key-locker 대응은 제거하고 탈의·착의마다 임의의 unnumbered locker action slot을 잠시 사용한다.
 - Customer bath stay는 pre-shower 완료부터 고정 60초이며 그동안 available bath를 random 이동한다.
 - Bath의 `ApproachPoint`와 `ActionPoint`는 모두 캐릭터 발바닥 transform으로 authoring하며, Customer Session이 scaled capsule half height를 한 번 더해 실제 actor/capsule-center transform으로 변환한다. 고객은 NavMesh 위 `ApproachPoint`까지 이동한 뒤 blocking collision 사전 검사 없이 `ActionPoint`로 unswept snap하고, 퇴탕 시 같은 방식으로 `ApproachPoint`에 복귀한 뒤 navigation을 재개한다.
 - Customer 행동 montage는 native StateTree Task가 유효 후보 중 하나를 EnterState에서 선택하며 one-shot 종료 또는 선택된 한 montage의 duration loop를 완료 기준으로 사용한다.
@@ -120,6 +123,7 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Cleaning의 wet mop은 LMB Hold중 target 유무와 관계없이 mopping state/motion을 유지하고 유효한 정면 water stain에만 제거 progress를 commit한다.
 - Customer Recovery는 health 0을 death가 아닌 일시 래그돌로 처리한다. session 타이머·자원·예약과 StateTree hierarchy를 보존하고, 기립 후 queue member는 최신 visible point 위치·Yaw 복귀 gate를 완료한 다음 미완료 국소 행동을 재시작한다.
 - Checkout key return은 새 Actor나 점유 슬롯을 만들지 않는다. 손님에게 할당된 동일 key instance를 Counter drop point 주변의 충돌 없는 후보에서 공통 free-world physics transaction으로 `OnCounter` 전환한다.
+- 구조적 customer capacity는 설치된 locker action slot 총수이고 check-in key 전달과 capacity lease를 함께 commit한다. 물리 key 수는 expansion tier에만 종속되며 locker 배치·회수로 번호나 수량을 바꾸지 않는다.
 - Towel은 homogeneous count, atomic transfer, used-bin overflow와 washer/dryer state를 소유한다.
 - Towel Presentation은 inventory snapshot을 읽어 clean stack/used bin/basket의 Stack과 기존 washer/dryer의 Pile을 표시한다. Stack/Pile/Slot은 transient CallInEditor preview를 제공하며 Slot은 gameplay actor에 연결하지 않는다.
 - 사용 수건통 내부는 container 단위 E/F interaction이고, overflow world towel만 개별 E interaction이다.
@@ -128,20 +132,15 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 
 ## 주요 의존 방향
 
-- Character -> Camera
-- Character -> Interaction
-- Character -> Computer
-- Character -> EnhancedInput
-- Character -> Engine Character/Movement
-- Camera -> Character
-- Camera -> Engine Camera/CameraShake
-- Camera -> Engine PlayerCameraManager
-- Interaction -> Facility validation
+- Character -> Camera/Interaction/Placement/Computer
+- Character -> EnhancedInput/Engine Character/Movement
+- Camera -> Character/Engine Camera/CameraShake/PlayerCameraManager
+- Interaction -> Facility public query
+- Placement -> Interaction public carry/prompt-provider contract
+- Facility/Towel -> Placement placeable-facility contract
 - Combat -> Interaction
 - Economy -> Interaction
-- Customer -> Facility
-- Customer -> Interaction
-- Customer -> Economy
+- Customer -> Facility/Interaction/Economy
 - Customer -> UE GameplayStateTree/AI/Navigation
 - Facility overflow volume -> UE NavigationSystem
 - UI -> Interaction
@@ -178,9 +177,9 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - UCLASS/USTRUCT/UENUM rename 또는 삭제는 Core Redirect, Editor 재시작, Blueprint compile/save, post-migration scan까지 한 세트로 계획한다.
 - 새 시스템, 새 의존 방향, Blueprint/API 계약 변경은 이 문서와 관련 `.md/Architecture/*System.md`를 함께 갱신한다.
 - Content asset 수정이나 resave가 필요한 변경은 별도 사용자 지시와 Editor 검증 계획 없이는 진행하지 않는다.
-- Player carry는 inventory/hotbar가 아닌 key/wet mop/towel basket/monkey wrench 중 physical actor 하나만 허용한다. key의 hook/customer transaction, equipment exact slot, free-world CCD와 cash 비소지 계약을 유지한다.
-- physical carryable 공통 Actor/Component를 만들지 않고 `IPhysicalCarryable` 계약을 유지한다. `HeldTransform`은 key/mop/basket/monkey wrench 각 Actor의 class default authoring 값이다.
-- E는 world primary와 fixed-slot take/store, F는 world secondary, G는 held item free drop, LMB는 computer click 또는 held equipment primary-use intent다. Character는 intent만 routing한다.
+- Player carry는 inventory/hotbar가 아닌 key/wet mop/towel basket/monkey wrench/packaged facility 중 physical actor 하나만 허용한다. key transaction, exact slot, free-world CCD와 cash 비소지 계약을 유지한다.
+- physical carryable 공통 Actor/Component를 만들지 않고 `IPhysicalCarryable` 계약을 유지한다. placeable facility는 기존 Actor가 interface와 placement component를 조합해 같은 instance에서 mode를 바꾼다.
+- E는 world primary/fixed slot, F는 world secondary, G는 free drop, Q Hold는 facility recovery, LCtrl/휠/LMB는 placement snap/rotation/confirm이다. Character는 intent만 routing한다.
 - 모든 towel endpoint 이동은 source 감소와 destination 증가를 단일 native transaction으로 commit한다.
 - Customer routine의 gameplay 상태 변경은 native C++ API를 통해 수행하고 StateTree/Blueprint asset에 domain mutation을 두지 않는다.
 - Counter는 FIFO와 assignment만 소유하고 Customer Queue Navigation이 AI request·도착 Yaw·overflow wander·knockdown recovery gate를 소유한다. checkout overflow를 별도 queue로 복제하지 않는다.
@@ -198,3 +197,4 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Combat Source, `PrimaryUseAction` 호환 이관, LMB mop use, equipment prompt row, customer knockdown/soft interruption과 restartable MoveTo는 Source와 native automation까지 구현되었다. `IA_PrimaryUse`, `IMC_FirstPerson`, wrench/customer Blueprint, `WBP_InteractionPrompt`와 `ST_CustomerRoutine` 교체는 코드 리뷰 후 Editor 단계로 인계한다.
 - exact equipment slot, key free drop과 actual-held-pose weak release는 Source와 native automation까지 구현되었다. equipment slot Blueprint/instance, exact item/anchor, key physics bounds와 기존 Blueprint release velocity 값은 코드 리뷰 후 Editor 단계로 인계한다.
 - counter queue transform/overflow, shared queue navigation, recovery pose gate와 physical checkout key drop은 Source와 native automation까지 구현되었다. StateTree/Counter/overflow volume/Blueprint authoring과 PIE 통합은 후속 Editor 단계이며 기존 queue target Task와 returned-key reflected symbol은 asset migration 동안 deprecated compatibility로 보존한다.
+- Placement, bath-water state, locker capacity lease, expansion/key-rack Source는 미구현 target이다. 구현 뒤 InputAction/IMC, WBP prompt, zone/Definition/설비 Blueprint와 신발 제거·locker slot StateTree migration을 별도 Unreal 단계로 인계한다.

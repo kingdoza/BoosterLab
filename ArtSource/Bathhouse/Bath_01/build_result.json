@@ -1,0 +1,56 @@
+{
+  "status": "ok",
+  "result": {
+    "saved": "C:\\UnrealProjects\\BathhouseSim\\ArtSource\\Bathhouse\\Bath_01\\Bath_01.blend",
+    "statistics": {
+      "SM_Bath_01_Body": {
+        "vertices": 34496,
+        "triangles": 66448,
+        "materials": 13,
+        "uv_channels": [
+          "UV0",
+          "UV1_Lightmap"
+        ]
+      },
+      "SM_Bath_01_Hardware": {
+        "vertices": 4542,
+        "triangles": 8928,
+        "materials": 4,
+        "uv_channels": [
+          "UV0",
+          "UV1_Lightmap"
+        ]
+      },
+      "SM_Bath_01_Details": {
+        "vertices": 2808,
+        "triangles": 3400,
+        "materials": 4,
+        "uv_channels": [
+          "UV0",
+          "UV1_Lightmap"
+        ]
+      },
+      "SM_Bath_01_Water": {
+        "vertices": 574,
+        "triangles": 1058,
+        "materials": 2,
+        "uv_channels": [
+          "UV0",
+          "UV1_Lightmap"
+        ]
+      },
+      "collision_hulls": 12,
+      "nominal_basin_dimensions_m": [
+        4.56,
+        3.56,
+        1.13
+      ],
+      "overall_depth_with_steps_m": 4.415
+    },
+    "previews": [
+      "Bath_01_Hero.png",
+      "Bath_01_Empty.png"
+    ]
+  },
+  "stdout": "\nFBX export starting... 'C:\\\\UnrealProjects\\\\BathhouseSim\\\\ArtSource\\\\Bathhouse\\\\Bath_01\\\\SM_Bath_01_Body.fbx'\nexport finished in 0.0624 sec.\n\nFBX export starting... 'C:\\\\UnrealProjects\\\\BathhouseSim\\\\ArtSource\\\\Bathhouse\\\\Bath_01\\\\SM_Bath_01_Hardware.fbx'\nexport finished in 0.0174 sec.\n\nFBX export starting... 'C:\\\\UnrealProjects\\\\BathhouseSim\\\\ArtSource\\\\Bathhouse\\\\Bath_01\\\\SM_Bath_01_Water.fbx'\nexport finished in 0.0044 sec.\n17:29:41 | INFO: Starting glTF 2.0 export\n17:29:41 | INFO: Extracting primitive: Structural basin walls\n17:29:41 | INFO: Primitives created: 13\n17:29:41 | INFO: Extracting primitive: Cube.507\n17:29:41 | INFO: Primitives created: 4\n17:29:41 | INFO: Extracting primitive: Continuous entrance handrail\n17:29:41 | INFO: Primitives created: 4\n17:29:41 | INFO: Extracting primitive: Water surface\n17:29:41 | INFO: Primitives created: 2\n17:29:41 | INFO: Finished glTF 2.0 export in 0.14277005195617676 s\n\n"
+}

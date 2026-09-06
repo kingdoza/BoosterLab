@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 primary/secondary/hold interaction intent, Computer focus suppression, 범용 LMB equipment-use, held motion과 equipment prompt intent를 정의한다. single physical carry의 exact fixed slot과 held-position free drop은 [PhysicalCarrySystem.md](PhysicalCarrySystem.md)가 상세히 정의한다.
+이 문서는 현재 구현된 primary/secondary/hold interaction, Computer suppression과 LMB equipment-use를 정의하고 Placement target의 LMB confirm/Q Hold prompt 합성 경계를 추가한다. carry 상세는 [PhysicalCarrySystem.md](PhysicalCarrySystem.md), placement 실행은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
 
 ## Source Scope
 
@@ -50,7 +50,7 @@ Source/BathhouseSim/Private/Tests/
 - LMB 장비 사용의 side-effect-free query, Begin/Update/End/Cancel routing
 - one-shot/hold equipment use 공통 lifecycle와 held Actor transform 표현
 - E/F world target과 별도인 LMB equipment-use prompt/result 표시 데이터
-- 번호 key actor의 domain lifecycle과 physical placement 연결
+- key token/hook lifecycle과 physical placement 연결; locker 번호 topology에는 의존하지 않음
 - focus와 held key 변화의 UI용 delegate
 - 외부 focus mode가 활성화된 동안 active hold, trace와 prompt를 중단하는 C++ suppression 경계
 
@@ -70,7 +70,7 @@ Interaction은 cleaning progress, attack/damage/health, towel count/machine, cus
 
 `FPlayerInteractionContext`는 interactor, `UPlayerCarryComponent`, hit actor/component와 hit 정보를 가진다. `FPlayerInteractionQuery`와 결과 문구는 localization 가능한 `FText`를 사용한다.
 
-`FPlayerInteractionQuery`는 기존 E primary/F secondary 필드를 유지하고 optional LMB equipment row의 visibility/can-use/action/failure, activation mode와 progress를 추가한다. `EPlayerInteractionIntent::EquipmentUse`와 `EPhysicalCarryKind::MonkeyWrench`는 기존 reflected ordinal을 보존하도록 각 enum 끝에 추가한다.
+`FPlayerInteractionQuery`는 기존 E primary/F secondary/LMB equipment 필드를 유지하고 optional LMB placement와 Q recovery의 visibility/can-use/action/failure/progress를 추가한다. `EPlayerInteractionIntent::PlacementConfirm`, `FacilityRecovery`와 `EPhysicalCarryKind::Facility`는 기존 ordinal을 보존하도록 각 enum 끝에 추가한다.
 
 ## Held Equipment Use Contract
 
@@ -100,6 +100,7 @@ Equipment row 합성은 현재 held Actor가 `IHeldEquipmentUsable`이면 해당
 - execute 뒤에는 query를 먼저 refresh한 다음 attempt result를 방송하므로 UI는 최신 지속 상태 위에 일시 실행 피드백을 표시할 수 있다.
 - key, mop, basket, towel, stain, customer, cash 같은 구체 domain type을 직접 판별하지 않는다.
 - focus target의 world query와 held Actor의 equipment query를 합성해 E/F/LMB row의 단일 `FPlayerInteractionQuery`를 방송한다.
+- Interaction package가 소유한 supplemental intent-source interface를 통해 placement/recovery presentation state를 합성한다. concrete Placement component에 의존하거나 설비 mode/progress를 직접 변경하지 않는다.
 - equipment-use attempt result를 `EquipmentUse` intent로 받아 기존 query/result delegate에 합성하되 domain mutation을 대행하지 않는다.
 - active hold는 target/input/focus/carry/EndPlay invalidation에서 정확히 한 번 cancel한다.
 - pawn 종료·교체 시 focus를 지우고 query/result delegate를 정리한다.
@@ -129,7 +130,7 @@ Cash는 carry 대상이 아니며 Economy System의 즉시 획득 interaction으
 
 ## Key And Fixed-Slot Target
 
-`ABathhouseKeyActor`의 number/customer/counter transaction과 `ABathhouseKeyHookActor`의 topology validation은 유지한다. target은 `DroppedInWorld`을 enum 끝에 추가하고 key hook도 fixed-slot interface를 구현한다. generic equipment slot과 key physics root를 포함한 상세 계약은 [PhysicalCarrySystem.md](PhysicalCarrySystem.md)를 따른다.
+`ABathhouseKeyActor`의 number/customer/counter transaction과 exact `ABathhouseKeyHookActor` binding은 유지한다. key-hook validation은 같은 key instance/number만 확인하고 shoe/clothes locker 존재를 검사하지 않는다. 상세 계약은 [PhysicalCarrySystem.md](PhysicalCarrySystem.md)를 따른다.
 
 ## Character Integration
 
@@ -138,8 +139,10 @@ Cash는 carry 대상이 아니며 Economy System의 즉시 획득 interaction으
 - `UPlayerInteractionComponent`
 - `UPlayerCarryComponent`
 - `UPlayerEquipmentUseComponent`
+- target `UPlayerFacilityPlacementComponent`
 - first-person camera 하위 `HeldKeyAnchor`
-- existing instant primary 호환을 유지하면서 E Started/Completed/Canceled, F Started, G Started와 LMB Started/Triggered/Completed/Canceled를 Interaction/Equipment/Carry intent API에 전달한다.
+- E Started/Completed/Canceled, F/G Started, Q Started/Triggered/Completed/Canceled, LCtrl Started/Completed, MouseWheel axis와 LMB lifecycle을 Interaction/Carry/Placement/Equipment에 의도로 전달한다.
+- LMB owner는 `Computer > Placement > Equipment` 순서로 하나만 선택한다.
 - computer session이 input을 capture하면 해당 session이 E lifecycle을 소비하고 Interaction에는 전달하지 않는다.
 
 Character는 focus 규칙과 key transaction을 직접 구현하지 않는다. PlayerController는 mapping context 등록·해제 책임을 유지한다.
@@ -160,6 +163,7 @@ Blueprint 조회·표현 API:
 - generic held object와 held kind 조회, `OnHeldObjectChanged`
 - exact fixed-slot take/store와 actual-held-pose free-drop result
 - combined equipment-use query/result의 optional LMB action/failure/mode/progress
+- combined placement LMB action/failure와 recovery Q action/failure/hold progress
 - `ABathhouseKeyActor::OnKeyStateChanged`
 - `ABathhouseKeyActor::OnHeldPresentationChanged`
 - `APhysicalCarryFixedSlotActor::OnSlotOccupancyChanged`
@@ -170,6 +174,9 @@ Editor authoring 값:
 - `AFirstPersonCharacter::SecondaryInteractAction`
 - `AFirstPersonCharacter::DropCarryAction`
 - `AFirstPersonCharacter::PrimaryUseAction`
+- `AFirstPersonCharacter::RecoverFacilityAction`
+- `AFirstPersonCharacter::PlacementSnapAction`
+- `AFirstPersonCharacter::PlacementRotateAction`
 - trace 거리와 collision channel
 - `HeldKeyAnchor` transform
 - key, wet mop, towel basket, monkey wrench Blueprint class default의 개별 `HeldTransform`
@@ -178,12 +185,13 @@ Editor authoring 값:
 - equipment fixed slot의 exact `AssignedItem`, `bStartOccupied`, `ItemAnchor`
 - key `KeyPhysicsRoot` bounds와 collision
 - key actor mesh/number presentation
-- key hook의 번호와 key actor 연결
+- key hook의 번호와 정확한 key actor 연결; locker reference 없음
 
 ## Dependencies
 
 - Interaction -> Engine actor/component/collision
-- Interaction -> Facility registry의 번호 검증 API
+- Interaction -> Facility의 generic key-hook/facility query
+- Placement -> Interaction의 supplemental intent-source/query-result 계약
 - Cleaning -> Interaction public query/equipment-use/motion/carry 계약
 - Combat -> Interaction public carry/equipment-use/motion 계약
 - Towel -> Interaction public intent/carry 계약
@@ -196,22 +204,24 @@ Editor authoring 값:
 ## Manual Review Points
 
 - 어떤 경로에서도 player가 두 key를 동시에 들지 않는지 확인한다.
-- 어떤 경로에서도 key/mop/basket/monkey wrench를 둘 이상 동시에 들지 않는지 확인한다.
+- 어떤 경로에서도 key/mop/basket/monkey wrench/packaged facility를 둘 이상 동시에 들지 않는지 확인한다.
 - E hold cancel과 F/G attempt가 기존 primary result를 중복 방송하지 않는지 확인한다.
 - key의 기존 state transition과 GetHeldKey/OnHeldKeyChanged 계약이 generic carry 확장 뒤에도 유지되는지 확인한다.
 - query가 상태를 바꾸지 않고 execute가 조건을 재검증하는지 확인한다.
 - 같은 query에서 UI delegate가 매 Tick 반복되지 않는지 확인한다.
 - 한 번의 `TryInteract()`에서 result delegate가 중복 방송되지 않고 반환값과 동일한 성공·실패 이유를 전달하는지 확인한다.
-- dropped key가 복제·소실되거나 허용되지 않은 번호 hook에 반환되지 않는지 확인한다.
+- dropped key가 복제·소실되거나 자신의 exact hook 이외에 반환되지 않는지 확인한다.
 - player/customer 비정상 종료 시 key가 원래 hook으로 복구되는지 확인한다.
 - key number가 HUD text가 아니라 first-person 3D key에 표시되는지 확인한다.
-- 네 carryable의 slot/store/free-drop이 같은 carry component commit 경로를 사용하고 concrete actor가 transaction을 복제하지 않는지 확인한다.
-- Identity `HeldTransform`이 기존 anchor 부착을 보존하고, 네 아이템의 서로 다른 location/rotation이 player-held 상태에만 적용되는지 확인한다.
+- 모든 carryable의 slot/store/free-drop이 같은 carry component commit 경로를 사용하고 concrete actor가 transaction을 복제하지 않는지 확인한다.
+- Identity `HeldTransform`이 기존 anchor 부착을 보존하고 item별 location/rotation이 player-held 상태에만 적용되는지 확인한다.
 - held transform이 hook/counter/world drop transform과 physical bounds scale을 오염시키지 않는지 확인한다.
 - suppression 시작이 hold를 한 번만 cancel하고 query/prompt를 지우며, 해제 직후 최신 target을 다시 조회하는지 확인한다.
 - LMB use press owner가 Computer/Equipment 사이에서 섞이지 않고 active use가 release/cancel/drop/EndPlay에 한 번만 종료되는지 확인한다.
 - equipment query/result가 E/F row를 덮어쓰지 않고 empty hand/invalid target의 정확한 실패 이유를 제공하는지 확인한다.
 - suppress 중 E/F/G 직접 호출도 domain mutation이나 stale attempt feedback을 만들지 않는지 확인한다.
+- placement가 active면 LMB equipment use가 시작되지 않고 Computer focus가 둘 모두보다 우선하는지 확인한다.
+- Q recovery hold가 release/gaze/조건 변경에서 한 번만 cancel되고 Interaction은 progress를 복제하지 않는지 확인한다.
 - free drop이 camera target으로 teleport하지 않고 actual held pose에서 시작하는지 확인한다.
 - held pose world overlap 실패가 attachment, carrier와 presentation을 보존하는지 확인한다.
 - free-world item이 Pawn을 영구 무시하고 질량과 무관한 약한 velocity change 및 CCD를 받는지 확인한다.

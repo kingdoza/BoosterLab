@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 facility slot과 번호 시설, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point 경계를 정의한다. Source와 native automation은 구현되었고 Editor authoring은 후속 단계다.
+이 문서는 현재 구현된 facility slot, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point를 정의한다. 번호 기반 신발장/락커 topology는 폐기 target이며 배치·회수·락커 수용량은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
 
 ## Source Scope
 
@@ -30,7 +30,7 @@ Source/BathhouseSim/Private/Tests/
 
 - 배치된 bathhouse facility와 다중 use slot 등록
 - slot reservation, occupancy, release와 대기 notification
-- 번호 기반 shoe locker/clothes locker lookup과 유효성 검사
+- unnumbered locker action slot과 generic facility 후보 조회
 - check-in/checkout의 독립 FIFO queue, revision과 service 순서
 - service/queue/overflow assignment와 queue point 전체 transform 제공
 - checkout overflow customer의 authoring된 NavMesh 배회 범위 제공
@@ -52,7 +52,7 @@ Facility는 towel 수량/overflow/machine, customer phase, key actor state·물�
 - `Exit`
 - `TowelShelf`  # 기존 ordinal 보존을 위해 enum 끝에 추가
 
-`ShoeLocker`와 `ClothesLocker`는 `FacilityNumber`가 필수다. 나머지는 `INDEX_NONE`을 사용한다.
+`ShoeLocker`는 reflected ordinal 보존용 deprecated 값이며 신규 runtime에서 사용하지 않는다. `ClothesLocker`는 번호 없는 locker bank/action-slot 분류로 사용하고 `FacilityNumber`는 `INDEX_NONE`이다.
 
 기존 reflected `TowelBasket` 값은 rename하지 않고 customer의 used towel return 위치로 유지한다. `TowelShelf`는 clean towel 획득 위치를 위해 enum 끝에 추가한다.
 
@@ -75,7 +75,7 @@ Facility는 Montage, AnimNotify, Motion Warping과 prop socket 계약을 소유�
 ## `ABathhouseFacilityActor`
 
 - 시설 Blueprint의 native base다.
-- `FacilityType`, `FacilityNumber`와 `SelectionWeight`를 소유한다.
+- `FacilityType`과 `SelectionWeight`를 소유한다. `FacilityNumber`는 asset migration용 deprecated compatibility로만 보존한다.
 - 소유한 모든 `UBathhouseFacilitySlotComponent`를 등록·검증한다.
 - 시설의 domain state는 slot component가 소유하고 Blueprint는 표현 event만 받는다.
 - actor destruction 시 모든 reservation을 해제하고 subsystem에서 등록 해제한다.
@@ -93,19 +93,23 @@ Blueprint event:
 `UWorldSubsystem`으로 동작한다.
 
 - facility BeginPlay/EndPlay 등록·해제
-- facility type별 후보 조회
-- 번호별 shoe locker/clothes locker 조회
-- key number가 두 numbered facility를 정확히 하나씩 가지는지 검증
-- key hook과 numbered locker 등록 순서에 의존하지 않도록 topology 변경을 방송하고 hook이 재검증할 수 있게 함
+- type/tag 기반 facility와 available slot 후보 조회
+- legacy numbered lookup/topology API는 migration wrapper로만 보존하고 신규 customer/key flow에서는 사용하지 않음
 - 예약 가능한 slot 중 random 선택
 - Bath 선택 시 다른 빈 탕이 있으면 직전 bath actor를 제외
 - 모든 slot이 점유 중이면 availability delegate 기반 재시도 지원
 
 Customer와 key hook이 반복적인 world actor scan을 하지 않게 한다.
 
+## Locker Action Slots
+
+1/4/8칸 묶음 락커는 하나의 `ABathhouseFacilityActor` 아래에 `ULockerActionSlotComponent`를 칸 수만큼 둔다. 이 component는 기존 slot 예약/점유 계약을 재사용하고 내부 stable `LockerSlotId`만 가지며 플레이어 표시 번호와 key number는 갖지 않는다.
+
+탈의와 착의는 각각 random available slot 하나를 행동 동안만 reserve/use/release한다. 설치된 operational slot 총합, customer capacity lease와 묶음 회수 gate는 Placement System의 `ULockerCapacitySubsystem`이 소유하고 Facility는 lease 수를 복제하지 않는다.
+
 ## Reservation Flow
 
-1. Customer StateTree Task가 subsystem에 facility type/number 조건을 전달한다.
+1. Customer StateTree Task가 subsystem에 facility type/tag 조건을 전달한다.
 2. Subsystem이 등록되고 enabled된 actor와 available slot 후보를 찾는다.
 3. 후보가 있으면 weight random 선택 후 `TryReserve`한다.
 4. 일반 facility는 authored navigation target으로 이동하고 Bath는 NavMesh 위 approach point로 이동한다.
@@ -206,6 +210,7 @@ Blueprint 조회·표현 API:
 
 - 기존 `FCustomerQueueTargetTask` reflected type은 StateTree asset 교체가 끝날 때까지 deprecated 상태로 보존한다.
 - `ReturnedKeyPointReferences`, `OnReturnedKeySlotsChanged`는 deprecated compatibility이며 새 runtime의 source of truth가 아니다.
+- `ShoeLocker`, `FacilityNumber`, numbered facility/key-topology API는 한 migration cycle 보존하되 신규 StateTree와 key validation에서 사용하지 않는다.
 - reflected symbol rename/delete가 없으므로 Core Redirect를 추가하지 않는다.
 
 ## Dependencies
@@ -214,12 +219,14 @@ Blueprint 조회·표현 API:
 - Facility overflow volume -> NavigationSystem query
 - Customer -> Facility
 - Towel -> Facility actor/slot contract
-- Interaction -> Facility의 numbered facility validation
+- Interaction -> Facility의 generic facility/key-hook validation
+- Facility -> Placement의 placeable-facility mode/query 계약
 - Facility는 Customer, Interaction과 UI concrete class에 의존하지 않는다.
 
 ## Manual Review Points
 
-- key number마다 shoe locker와 clothes locker가 정확히 하나씩 존재하는지 확인한다.
+- key number와 locker slot이 대응하지 않고 `ShoeLocker`가 신규 runtime에서 선택되지 않는지 확인한다.
+- 1/4/8칸 locker bank의 action slot이 독립적으로 reserve/use되고 플레이어 표시 번호를 만들지 않는지 확인한다.
 - 하나의 slot을 두 customer가 동시에 reserve/use하지 않는지 확인한다.
 - check-in/checkout queue가 독립적으로 전진하는지 확인한다.
 - 각 lane의 front customer만 service 가능한지 확인한다.

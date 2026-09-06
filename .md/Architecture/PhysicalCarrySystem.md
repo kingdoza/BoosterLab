@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-Q47~Q52의 exact fixed slot과 actual-held-position free drop이 Source와 native automation에 구현되었다. key/wet mop/towel basket/monkey wrench는 공통 single carry coordinator를 사용하고 기본적으로 전용 fixed slot과 G free drop을 지원한다. free drop은 camera-origin 목표 위치로 이동하지 않고 실제 held world pose에서 질량 독립 `120/15 cm/s` velocity change를 적용하며, 모든 physical carry root는 free-world physics에서 CCD를 사용한다. checkout key도 같은 physical transaction으로 단일 Counter drop point 주변에 동일 인스턴스를 반환한다.
+Q47~Q52의 exact fixed slot과 actual-held-position free drop은 구현되어 있다. Placement target은 동일 설비 Actor의 `Packaged` mode를 새 carry kind로 추가하며 기존 single carry, exact slot, held pose drop과 CCD 계약을 그대로 사용한다.
 
 equipment slot Blueprint/instance 배치, exact `AssignedItem`/anchor, key physics bounds와 기존 Blueprint release velocity 값은 코드 리뷰 후 Editor 단계에서 authoring한다.
 
@@ -31,7 +31,7 @@ Source/BathhouseSim/Private/Tests/
   PhysicalCarryFixedSlotAutomationTests.cpp
 ```
 
-Concrete carryable 확장 대상은 `Cleaning/WetMopActor`, `Towel/TowelBasketActor`, `Combat/MonkeyWrenchActor`다. Source 폴더를 이동하거나 공통 carry Actor/Component를 만들지 않는다.
+Concrete carryable은 key, `Cleaning/WetMopActor`, `Towel/TowelBasketActor`, `Combat/MonkeyWrenchActor`와 target placeable facility Actor다. Source 폴더를 이동하거나 모든 carryable의 공통 Actor/Component를 만들지 않는다.
 
 ## Responsibilities
 
@@ -43,7 +43,7 @@ Concrete carryable 확장 대상은 `Cleaning/WetMopActor`, `Towel/TowelBasketAc
 - 질량 무시 약한 forward/upward velocity-change impulse
 - 모든 physical carry root의 free-world CCD 기본 활성화
 - fixed-slot 우선 비정상 복구와 last-safe fallback
-- key의 number/customer/counter lifecycle과 물리 placement의 공존
+- key의 token/customer/counter lifecycle과 packaged facility mode의 물리 placement 공존
 
 Physical Carry는 input mapping, cleaning/damage/towel count, customer routine와 UI layout을 소유하지 않는다.
 
@@ -166,7 +166,7 @@ Forward velocity change: 120 cm/s
 Upward velocity change: 15 cm/s
 ```
 
-합성값은 camera forward와 world up을 사용하고 `AddImpulse(..., bVelChange=true)`로 적용한다. 질량은 결과 속도에 영향을 주지 않는다. 값은 item class default에서 조정할 수 있지만 현재 네 carryable의 기본값은 모두 약하게 통일한다.
+합성값은 camera forward와 world up을 사용하고 `AddImpulse(..., bVelChange=true)`로 적용한다. 질량은 결과 속도에 영향을 주지 않는다. 값은 concrete item class default에서 조정할 수 있지만 모든 carryable의 기본값은 약하게 통일한다.
 
 기존 reflected `ThrowImpulseStrength`는 rename/delete하지 않고 forward velocity-change 값으로 유지한다. `ThrowSpawnDistance`, `DropSweepChannel`, `DropSweepClearance`는 호환을 위해 deprecated 상태로 한 migration cycle 보존하되 canonical placement 계산에는 사용하지 않는다. upward 값은 신규 reflected authoring property로 추가한다.
 
@@ -178,7 +178,7 @@ held/fixed-slot 상태는 collision과 physics가 꺼져 있으므로 CCD 플래
 
 ## Key Extension
 
-`ABathhouseKeyHookActor`는 번호 topology와 customer flow 때문에 generic equipment slot로 교체하지 않고 `IPhysicalCarryFixedSlot`을 추가 구현한다. 기존 `KeyNumber`, `KeyActor`, `KeyAnchor`와 facility validation을 보존한다.
+`ABathhouseKeyHookActor`는 generic equipment slot로 교체하지 않고 `IPhysicalCarryFixedSlot`을 계속 구현한다. 기존 `KeyNumber`, `KeyActor`, `KeyAnchor`는 보존하지만 validation은 exact key/hook identity만 확인하고 shoe/clothes locker topology는 검사하지 않는다.
 
 `EBathhouseKeyState` 끝에 `DroppedInWorld`를 추가한다.
 
@@ -194,6 +194,8 @@ held/fixed-slot 상태는 collision과 physics가 꺼져 있으므로 CCD 플래
 
 free drop은 `KeyNumber`, original `KeyHook`과 unique token identity를 바꾸지 않는다. dropped key를 hook에 자동 반환하지 않고 player가 다시 들고 E로 반환한다. checkout도 새 key를 spawn하지 않고 같은 hidden `AssignedKey`를 Counter의 후보 transform으로 옮긴 뒤 `FPhysicalCarryPlacementTransaction::ApplyFreeWorld` 계약으로 physics를 켠다. velocity change는 player free drop과 동일한 key authoring 값을 사용하되 방향은 Counter drop point forward와 world up이다.
 
+Key number는 physical token/hook 식별과 3D 표시에만 사용한다. locker slot lookup, customer capacity와 번호 재할당에는 사용하지 않으며 key pool 수는 Placement System의 expansion tier가 결정한다.
+
 checkout commit 전에 key root bounds로 WorldStatic/WorldDynamic blocking overlap을 검사한다. exact point를 먼저 시도하고 Counter의 authorable local XY 범위에서 제한 횟수만 탐색한다. 성공해야 `AssignedToCustomer -> OnCounter`와 customer checkout key-return guard를 commit하며, 실패하면 transform, visibility, collision/physics와 key/session state를 모두 유지한다. Counter slot reservation이나 occupancy는 사용하지 않는다.
 
 key의 `KeyPhysicsRoot: UBoxComponent`만 free-world collision/physics를 담당하고 기존 `SceneRoot`/`WorldMesh`는 그 아래에서 presentation을 담당한다. 기존 reflected component 이름은 삭제·rename하지 않으며 Blueprint hierarchy/relative transform은 Editor에서 재검증한다.
@@ -207,6 +209,17 @@ Wet mop, towel basket과 monkey wrench는 exact `APhysicalCarryFixedSlotActor`�
 - Towel basket store/drop은 inventory state/count/revision과 Stack presentation을 그대로 유지한다.
 
 fixed-slot placement는 cleaning, combat 또는 towel transaction이 아니다. slot/carry ownership만 변경한다.
+
+## Packaged Facility Extension
+
+`EPhysicalCarryKind` 끝에 `Facility`를 추가한다. `ABathhouseFacilityActor` 계열과 `ATowelProcessingMachineActor`가 `IPhysicalCarryable`을 직접 구현하고 자신의 `UFacilityPlacementComponent`에 package primitive, held transform과 exact fixed-slot binding을 위임한다. 별도 공통 facility-item Actor를 만들지 않는다.
+
+- `Placed` mode는 carry query를 숨기고 package primitive physics를 끈다.
+- `Packaged` world mode는 E pickup과 exact-slot interaction을 제공한다.
+- held package는 기존 anchor/`HeldTransform`/G transaction을 사용한다.
+- G 성공 또는 E fixed-slot store는 active placement preview를 cancel한다.
+- Q recovery는 현재 held Actor를 바꾸지 않고 target facility를 같은 위치의 packaged free-world mode로 전환하며 impulse를 주지 않는다.
+- LMB placement는 `UPlayerFacilityPlacementComponent`가 carry snapshot과 facility registry를 포함해 원자적으로 commit/rollback한다.
 
 ## Recovery And EndPlay
 
@@ -226,7 +239,8 @@ EndPlay, fall recovery와 transaction retry는 delegate, timer, attachment와 sl
 - `OnSlotOccupancyChanged`
 - key `KeyPhysicsRoot`
 - item별 upward velocity-change authoring 값
-- 네 carryable physical root의 `BodyInstance.bUseCCD=true`
+- 모든 concrete carryable physical root의 `BodyInstance.bUseCCD=true`
+- placeable facility의 package primitive reference와 `EPhysicalCarryKind::Facility`
 
 보존 계약:
 
@@ -241,20 +255,23 @@ EndPlay, fall recovery와 transaction retry는 delegate, timer, attachment와 sl
 
 - Physical Carry는 Interaction Source package와 Engine collision/physics를 사용한다.
 - Cleaning/Towel/Combat은 concrete item state에서 Physical Carry public 계약을 구현한다.
+- Placement는 placeable facility Actor mode에서 같은 public carry 계약을 구현한다.
 - Character는 Interaction을 통해 E/G intent만 전달한다.
 - UI는 Interaction query/result만 표시한다.
 - 신규 runtime module dependency는 필요하지 않다.
 
 ## Manual Review Points
 
-- key/mop/basket/wrench가 모두 exact slot과 G free drop을 지원하는지 확인한다.
+- key/mop/basket/wrench/packaged facility가 모두 exact slot과 G free drop을 지원하는지 확인한다.
 - 같은 kind의 다른 instance와 duplicate assigned slot이 거부되는지 확인한다.
 - G가 slot 근처에서 snap하지 않고 actual held pose에서 출발하는지 확인한다.
 - wall overlap 실패가 attachment, carry reference와 presentation을 보존하는지 확인한다.
 - 모든 질량에서 약한 동일 velocity change를 얻고 free-world item이 Pawn을 영구 무시하는지 확인한다.
-- 네 carryable class default와 Blueprint physical root에서 CCD가 켜지고, free drop 및 slot 파괴 free-world 전환에서도 유지되는지 확인한다.
+- 모든 carryable class default와 Blueprint physical root에서 CCD가 켜지고, free drop 및 slot 파괴 free-world 전환에서도 유지되는지 확인한다.
 - 강제된 late free-drop 실패가 이전 attachment/collision/physics와 함께 이전 CCD 값도 복구하는지 확인한다.
 - dropped key의 number/hook/customer/counter transaction이 보존되는지 확인한다.
 - non-empty basket의 inventory와 presentation revision이 slot 이동으로 바뀌지 않는지 확인한다.
 - store/drop이 active mop/wrench use를 한 번 cancel하고 다음 사용이 정상 복구되는지 확인한다.
 - carrier/slot/item/fall cleanup에서 item과 slot occupancy가 소실·복제되지 않는지 확인한다.
+- facility가 `Placed/Packaged`를 왕복해도 같은 Actor identity, assigned slot과 held transform을 유지하는지 확인한다.
+- Q recovery가 기존 held item을 교체하지 않고 회수 대상에 impulse도 주지 않는지 확인한다.

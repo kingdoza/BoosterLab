@@ -1,198 +1,199 @@
-# Implementation Prompt — Counter Queue Transform, Overflow Wander And Physical Key Return
+# Codex Agent — Implementation Task
 
-## 목적
+## Objective
 
-현재 player interaction, single physical carry, customer routine, facility, checkout cash와 recovery 계약을 보존하면서 다음 target을 native C++로 구현한다.
+현재 player interaction, single physical carry, customer routine, facility/towel machine, native Interaction Prompt 계약을 보존하면서 설비 배치·Q Hold 회수, locker capacity lease와 expansion-owned key pool Source를 구현하라. 설치된 설비의 별도 이동 기능은 만들지 않고 동일 Actor instance가 `Placed`와 `Packaged` mode를 전환한다.
 
-- check-in/checkout queue point의 Location/Yaw를 모두 적용하고, checkout visible capacity 초과 customer는 같은 FIFO 순번을 유지하며 전용 NavMesh volume을 배회한다.
-- knockdown 기립 후 queue member는 최신 visible assignment로 복귀한 뒤 routine을 재개하며, checkout key는 단일 Counter drop point 주변에서 동일 key instance의 free-world physics를 활성화한다.
+## Required Reading
 
-기준 문서:
+`.md/AGENT_WORKFLOW.md`, `.md/AGENT_IMPLEMENTATION.md`, `.md/PROMPT_IMPLEMENTATION.md`, `.md/0_ARCHITECTURE.md`, 관련 Core/Placement/Interaction/PhysicalCarry/Character/Facility/Customer/Towel/UI System 문서와 `.md/QNA_IMPLEMENTATION.md`를 전부 읽는다.
 
-- `.md/AGENT_WORKFLOW.md`
-- `.md/AGENT_IMPLEMENTATION.md`
-- `.md/0_ARCHITECTURE.md`
-- `.md/Architecture/CoreSystem.md`
-- `.md/Architecture/FacilitySystem.md`
-- `.md/Architecture/CustomerSystem.md`
-- `.md/Architecture/CustomerRecoverySystem.md`
-- `.md/Architecture/PhysicalCarrySystem.md`
+아키텍처와 구현이 충돌하거나 실제 UE 5.8 API 확인 뒤에도 선택이 남으면 `QNA_IMPLEMENTATION.md`에 질문 하나당 결정 하나로 작성하고 중단한다.
 
-이 파일은 이전 physical-carry CCD 구현 프롬프트를 대체한다.
+## Scope
 
-## 보존 및 금지 범위
+- 허용: `Source/BathhouseSim/Public`, `Source/BathhouseSim/Private`, `BathhouseSim.Build.cs`, 관련 정본 상태 갱신
+- 금지: `Content/` 수정/resave, InputAction/IMC/WBP/StateTree asset 변경, 설치 설비 이동 모드, 신발 gameplay 신규 구현
+- `Config/`는 이번 Source 단계에서 변경하지 않는다.
+- 기존 reflected type/property/function/component를 rename/delete하지 않는다.
 
-- 구현 단계는 `Source/`와 native automation만 수정한다. `Content/`, `Config/`와 StateTree/Blueprint asset은 수정하지 않는다.
-- check-in과 checkout은 독립 lane이며 front만 service interaction을 실행하는 기존 계약을 유지한다.
-- checkout overflow를 별도 queue로 만들거나 FIFO entry를 dequeue/re-enqueue하지 않는다.
-- Customer Session에 queue index, assignment 또는 wander position의 복제 상태를 추가하지 않는다.
-- StateTree Blueprint graph, Blueprint Task, Tick 기반 Counter, 전체 Level NavMesh fallback을 추가하지 않는다.
-- checkout key를 새로 spawn하거나 복제하지 않는다. check-in에서 받은 동일 `AssignedKey`를 사용한다.
-- player G free drop, exact fixed slot, key number/hook, cash claim과 interaction prompt 계약을 변경하지 않는다.
-- 공용 carry Actor/Component와 신규 runtime module dependency를 추가하지 않는다.
+## Fixed Decisions
 
-## 1. Facility Queue Assignment
+- 공통 값 owner는 `UFacilityPlacementSettings : UDeveloperSettings`다.
+- 기본 grid `10 cm`, wheel tick Yaw 간격, 공통 Q hold 시간과 trace 거리는 Project Settings 값이다.
+- 모든 zone은 공통 grid size를 쓰고 local origin/axes/bounds와 allowed facility tags만 소유한다.
+- LMB owner 순서는 `Computer > Placement > Equipment`다.
+- facility item을 들면 즉시 preview, LCtrl Hold는 위치 snap, wheel은 Yaw, LMB는 confirm이다.
+- E exact slot, G weak held-position free drop은 유지하고 ESC는 placement에서 no-op다.
+- Q Hold 회수는 현재 held item과 무관하고 회수품을 자동 pickup하지 않으며 impulse도 주지 않는다.
+- key와 locker는 대응하지 않는다. key 수는 expansion tier, customer capacity는 placed locker action slot 총수다.
+- active lease보다 용량이 작아지는 locker 회수는 실패한다.
+- target locker bank의 slot이 하나라도 Reserved/Occupied면 회수는 실패한다.
+- 신발 상태와 시설은 신규 runtime에서 사용하지 않는다.
 
-`BathhouseFacilityTypes.h`에 reflected assignment type/struct를 추가한다.
+## 1. Module And Types
 
-- type: `Invalid`, `ServicePoint`, `QueuePoint`, `OverflowWander`
-- data: full `FTransform`, logical index, queue point index, lane revision
+- `DeveloperSettings` runtime module dependency를 실제 `UDeveloperSettings` include/use와 함께 추가한다.
+- `Placement` Public/Private 폴더와 `FacilityPlacementTypes.h`를 추가한다.
+- 기존 ordinal 뒤에 `EPhysicalCarryKind::Facility`, `EPlayerInteractionIntent::PlacementConfirm`, `FacilityRecovery`를 append한다.
+- `EPlaceableFacilityMode`는 authoritative하게 `Placed`, `Packaged`만 둔다. Held/Preview는 carry/player session에서 파생한다.
+- transaction result는 success, localized `FText` failure와 rollback 가능한 failure code를 제공한다.
 
-`ABathhouseCounterActor`를 다음 규칙으로 변경한다.
+## 2. Global Settings And Definition
 
-- queue entry actor를 weak reference로 유지한다.
-- lane mutation 전에 invalid actor entry를 compact한다.
-- lane별 nonzero monotonic revision을 유지한다.
-- index 0은 service point, index 1..N은 queue point 0..N-1이다.
-- checkout index N+1 이상은 `OverflowWander`다.
-- check-in 범위 초과는 `Invalid`이며 마지막 queue point clamp를 제거한다.
-- `ResolveQueueAssignment(Lane, Actor, OutAssignment)`과 revision 조회 API를 제공한다.
-- 기존 `OnQueueChanged`/native delegate는 유지하고 한 logical mutation에 한 번만 방송한다.
-- `GetQueueTargetTransform`은 asset/source migration 기간의 deprecated visible-assignment wrapper로 보존한다.
+`UFacilityPlacementSettings`:
 
-queue point의 full transform을 보존하고 Customer가 Location/Yaw를 나눠 사용하게 한다. Pitch/Roll은 character facing에 적용하지 않는다.
+- `GridSizeCm = 10.0f`
+- `RotationStepDegrees`
+- `RecoveryHoldSeconds`
+- `PlacementTraceDistance`, `RecoveryTraceDistance`
+- 모든 값에 유효 clamp와 category/display metadata를 둔다.
 
-## 2. Checkout Overflow Volume
+`UFacilityPlacementDefinition : UPrimaryDataAsset`:
 
-`ACustomerQueueOverflowWanderVolume`을 Facility에 신규 작성한다.
+- stable id, facility Gameplay Tags, preview Actor class
+- footprint X/Y cell count
+- locker Definition이면 `LockerSlotCount`
+- immutable authoring data와 asset validation
 
-- stable root와 authorable Box 범위
-- NavMesh projection extent와 sample attempt count
-- Box local random sample → NavMesh projection → volume containment/reachability 검증
-- 유효 point를 찾지 못하면 false를 반환하고 Level 전체 NavMesh로 fallback하지 않음
+전역 값을 Definition, Actor와 player component에 복제하지 않는다.
 
-Counter에 `EditInstanceOnly` overflow volume 배열을 추가하고 유효 reference만 사용한다. volume은 queue state나 AI request를 소유하지 않는다.
+## 3. Facility Actor Composition
 
-## 3. Queue Movement Settings
+`IPlaceableFacility`과 `UFacilityPlacementComponent`를 추가한다.
 
-`UCustomerRoutineDefinition`에 다음 Editor authoring 값을 추가한다.
+- side-effect-free placement/recovery query
+- Definition, `PlacementFootprint` Box, `PackagePhysicalRoot`, exact fixed-slot binding resolve/validation
+- `Placed/Packaged` presentation와 domain registration commit hook
+- reentrancy guard, snapshot과 rollback
+- BeginPlay/EndPlay에서 현재 mode에 맞는 registration/cleanup
 
-- queue acceptance radius, facing rotation speed degrees/second와 facing tolerance
-- overflow wander acceptance radius와 pause min/max seconds
+기존 `ABathhouseFacilityActor`와 `ATowelProcessingMachineActor`가 `IPlaceableFacility`, `IPhysicalCarryable`을 직접 구현하고 Component에 위임한다. Facility base는 packaged E pickup용 `IPlayerInteractable`도 제공하고, 기존 derived interactable은 placed query를 유지하되 packaged mode를 base 경로로 보낸다. 중복 interface 상속은 정리하되 reflected class/API는 보존한다. Definition이 없으면 non-placeable이다. 모든 carryable용 공통 Actor/Component와 generic facility-item Actor는 만들지 않는다.
 
-모든 값은 clamp/validation하고 min/max 역전은 명시적으로 정규화하거나 validation error로 처리한다. 구체적인 밸런스 값은 C++ 분기 안에 복제하지 않는다.
+`Placed`에서는 package pickup/physics를 숨기고 `Packaged`에서는 facility/towel-machine use와 Navigation 등록을 숨긴다. Blueprint는 두 표현을 event로 바꾸되 mode 정본을 소유하지 않는다.
 
-## 4. Customer Queue Navigation Component
+## 4. Zone, Preview And Placement
 
-신규 `UCustomerQueueNavigationComponent`를 Customer Character의 private default subobject로 조립한다. `VisibleAnywhere`, `BlueprintReadOnly`, `AllowPrivateAccess="true"`와 public C++ getter를 사용한다.
+`AFacilityPlacementZoneActor`, 표현 전용 `AFacilityPlacementPreviewActor`, `UPlayerFacilityPlacementComponent`를 구현한다.
 
-Component가 소유할 실행 책임:
+- camera-center compatible-zone trace
+- zone local plane/origin/axes transform
+- preview 동안 grid 항상 표시
+- LCtrl일 때만 local XY quantization
+- wheel action value마다 `RotationStepDegrees` 누적, normalized Yaw 유지
+- preview Actor는 collision/domain/facility/Nav/locker 등록 금지
+- Definition tag와 zone allowed tag compatibility
+- footprint 전체의 단일 zone 포함, grid 배수, floor support와 WorldStatic/WorldDynamic/설비/Pawn overlap 검사
+- expansion locker-slot limit 재검증
 
-- Counter queue-change delegate와 active `UAITask_MoveTo` lifecycle, request/result token과 stale callback 차단
-- latest assignment resolve와 material target 변화 비교
-- service/queue point MoveTo 후 yaw-only smooth turn
-- queue point 도착 후 revision 대기
-- checkout overflow destination 선택·MoveTo·pause 반복과 promotion 시 active wander 취소
-- visible assignment 이동과 CharacterMovement 회전 flag snapshot/restore
-- knockdown suspend와 paused-StateTree queue-pose recovery gate
+LMB commit은 carry/Actor/mode/registry snapshot 뒤 transform과 `Placed` registration을 적용하고 마지막에 held reference를 비운다. 어떤 late failure도 attachment, collision, transform, carry, mode와 registry를 복구한다.
 
-정상 queue 실행은 service point의 위치·Yaw 정렬 후에만 완료된다. queue point 정렬은 완료가 아니라 대기 상태다. overflow sample 실패는 현재 위치에서 authorable retry를 기다리며 navigation failure count를 소비하지 않는다.
+G/E 성공, held 대상 변경, suppression과 EndPlay는 preview를 한 번만 정리한다. G/E 실패는 preview와 held state를 유지한다.
 
-Exit/EndPlay/technical failure에서는 AI task, Tick/timer, delegate, token과 임시 movement flag를 대칭 정리한다. Counter FIFO/index는 Component에 저장하지 않는다.
+## 5. Q Hold Recovery
 
-## 5. Native StateTree Queue Task
+`AFirstPersonCharacter`에 `RecoverFacilityAction`, `PlacementSnapAction`, `PlacementRotateAction`을 append하고 `UPlayerFacilityPlacementComponent`를 private default subobject로 조립한다.
 
-이미 큰 `CustomerStateTreeTasks.h/.cpp`에 신규 queue lifecycle을 누적하지 않는다. 신규 파일을 사용한다.
+- Q Started에서 target identity 고정
+- Triggered에서 elapsed/progress 갱신
+- Completed에서 같은 target/range/query 재검증 후 commit
+- release/cancel, gaze/range/조건 변화, suppression, target/owner EndPlay에서 정확히 한 번 cancel
+- current held item은 검사하거나 변경하지 않음
 
-- `Public/Customer/StateTree/CustomerQueueStateTreeTasks.h`
-- `Private/Customer/StateTree/CustomerQueueStateTreeTasks.cpp`
+회수 조건:
 
-`FCustomerMoveToCurrentQueueAssignmentTask`를 구현한다.
+- washer/dryer: inventory count 0, state `Waiting`
+- bath: 모든 use slot Available, native water state Empty
+- locker bank: 모든 action slot Available, `InstalledCapacity - BankSlotCount >= ActiveLeaseCount`
 
-- Context/Parameter: Customer, Session, expected lane
-- Enter/Tick: membership·lane·component 검증 후 시작하고 service 정렬 완료에만 `Succeeded`
-- interruption중 `Running` 유지
-- Exit: 자신의 execution token만 취소
+성공은 같은 Actor의 domain/facility/Nav 등록을 해제하고 설비 위치에서 `Packaged` free-world physics를 켠다. impulse와 auto-pickup은 없다. package collision 또는 unregister/transition 실패는 `Placed`로 rollback한다.
 
-기존 parent `FCustomerQueueTask`가 queue membership lifecycle을 계속 소유한다. 기존 `FCustomerQueueTargetTask` reflected type은 deprecated compatibility로 남겨 Content 교체 전에 asset load를 깨지 않는다.
+Nav blocker는 authored Nav Modifier를 사용하고 project의 `Dynamic Modifiers Only` Editor 설정을 전제로 mode에 맞게 navigation relevance/registration을 전환한다. UE 5.8 실제 API를 확인해 지원되는 경로를 사용한다.
 
-## 6. Knockdown Queue-Pose Gate
+## 6. Bath Water
 
-`BeginSoftInterruption`에서 queue navigation의 active move/turn을 suspend하고, `UCustomerRoutineInterruptionComponent::EndSoftInterruption` 흐름을 다음처럼 확장한다.
+`UBathWaterStateComponent`를 추가한다.
 
-- queue member가 아니면 기존처럼 timer/brain을 즉시 resume한다.
-- current assignment가 `OverflowWander`면 즉시 resume하고 active queue Task가 새 wander point를 고른다.
-- service/queue assignment면 routine timer와 StateTree를 paused 상태로 유지한 채 queue navigation recovery를 시작한다.
-- recovery 이동·Yaw 완료 callback에서 timer와 brain을 정확히 한 번 resume한다.
-- recovery중 revision 변경은 latest assignment로 request를 교체한다.
-- invalid counter/assignment 또는 retry exhaustion은 stale request를 성공시키지 말고 기존 technical-abort 경계로 전달한다.
+- `Empty`, `Filling`, `Filled`, `Draining`
+- side-effect-free `IsEmpty()`와 상태 변경 delegate/Blueprint presentation event
+- optional normalized amount가 있더라도 state 정본은 native Component
+- bath recovery는 mesh visibility나 Blueprint bool을 읽지 않음
 
-ragdoll 종료와 `OnCustomerRecovered` presentation event는 기존 의미를 유지한다. queue recovery는 get-up montage가 아니라 기립 후 보행·회전 gate다. queue membership, key/towel/cash, timers와 StateTree hierarchy를 cleanup하지 않는다.
+## 7. Locker Capacity And Customer
 
-## 7. Single Physical Checkout Key Drop
+`ULockerActionSlotComponent`는 기존 facility-slot 계약을 재사용하고 internal stable `LockerSlotId`를 가진다. player-visible 번호와 key number는 없다.
 
-Counter에 stable `ReturnedKeyDropPoint` default subobject와 authorable local XY extent/attempt count를 추가한다. 후보 순서는 exact point가 첫 번째이고 이후만 local XY random offset이다.
+`ULockerCapacitySubsystem`:
 
-기존 runtime returned-slot array, reservation/occupancy와 player pickup slot release는 canonical path에서 제거한다.
+- Placed locker bank/action-slot registration
+- `InstalledLockerCapacity`, active lease registry/revision/delegate
+- Definition `LockerSlotCount`와 실제 component 수 검증
+- random available action-slot reserve API
+- provisional lease acquire/commit/rollback과 idempotent release
+- 정상 mutation에서 `ActiveLeaseCount <= InstalledLockerCapacity` 강제. locker 비정상 EndPlay는 package를 만들거나 lease를 지우지 않고 admission을 차단하며 invariant fault를 기록
 
-- `ReturnedKeyPointReferences`와 `OnReturnedKeySlotsChanged`는 deprecated reflected compatibility로 한 migration cycle 보존한다.
-- deprecated property/event를 canonical runtime에서 읽거나 호출하지 않는다.
-- 신규 Blueprint presentation event `OnReturnedKeyDropped(AActor* ReturnedKey)`를 성공 후 한 번 호출한다.
+check-in interaction은 lease를 확보한 뒤 기존 physical key/session을 commit한다. key/carry/session의 어느 단계가 실패해도 lease와 key를 이전 상태로 rollback한다. checkout 성공, timeout, technical cleanup과 customer EndPlay는 같은 idempotent release를 호출한다.
 
-`ABathhouseKeyActor`의 checkout placement를 변경한다.
+`UCustomerSessionComponent`에 opaque lease handle/release guard와 `ClothesStored`를 추가한다. key number는 token identity/표시로 보존하되 facility lookup에 사용하지 않는다.
 
-1. `AssignedToCustomer`와 expected customer identity 검증
-2. key `KeyPhysicsRoot` bounds로 WorldStatic/WorldDynamic blocking overlap 검사
-3. transaction snapshot 뒤 동일 Actor를 후보 transform으로 teleport
-4. Counter forward × key forward velocity + world up × key upward velocity 계산
-5. `FPhysicalCarryPlacementTransaction::ApplyFreeWorld`로 detach, Pawn Ignore, CCD, QueryAndPhysics와 simulate physics 적용
-6. 성공 후에만 `AssignedToCustomer -> OnCounter`, Counter owner와 session guard commit
-7. key visibility와 presentation event를 commit 뒤 공개
+탈의/착의용 native StateTree Task 또는 기존 task의 명확한 확장으로 random available locker action slot을 행동 동안만 reserve/use/release한다. 탈의 완료만 `ClothesStored=true`, 착의 완료만 false로 commit한다. 서로 같은 slot일 필요가 없다. slot이 없으면 availability event를 기다린다.
 
-실패하면 key transform, hidden/collision/physics와 owner/state를 그대로 유지한다. `OnCounter` 재호출은 idempotent success이며 같은 key를 다시 투하하지 않는다. `TryTakeFromCounter`는 slot API 없이 key state와 Player Carry transaction만으로 회수한다.
+## 8. Shoe And Numbered Topology Migration
 
-`UCustomerSessionComponent::TryPlaceCheckoutKey`는 slot index를 저장하지 않고 key-owned transaction을 호출한다. key가 `OnCounter`가 된 뒤에만 기존 cash offer를 만든다. checkout offer retry와 cash claim/leave flow는 유지한다.
+- `ShoeLocker`, `StoreShoes`, `WearShoes`, duration property ordinal/name은 한 asset migration cycle 보존하고 deprecated/hidden 처리한다.
+- 신규 C++ routine/query가 위 값을 선택하지 않게 한다.
+- `FacilityNumber`, numbered lookup과 `ValidateKeyNumber` public symbol은 보존한다.
+- `ValidateKeyNumber`의 canonical 검사는 exact key-hook pair/unique number만 확인하고 shoe/clothes locker 존재를 요구하지 않는다.
+- `ClothesLocker`는 번호 없는 locker-bank 분류로 사용한다.
+- Core Redirect는 추가하지 않는다.
 
-기계적 candidate/overlap/placement 코드는 private non-UObject helper로 분리해 이미 큰 Key Actor와 Session cpp의 성장을 제한한다. helper는 gameplay owner state를 저장하지 않는다.
+## 9. Expansion And Key Rack
 
-## 8. Blueprint/API와 Migration
+`UBathhouseExpansionDefinition : UPrimaryDataAsset`, 단계 struct, Facility의 `ABathhouseExpansionAuthority`, Interaction의 `ABathhouseKeyRackActor`를 추가한다.
 
-신규 reflected 계약:
+- tier: `KeyPoolSize`, `MaxInstalledLockerSlots`
+- asset validation: 모든 tier에서 key pool이 max locker slots 이상
+- authority: explicit initial tier, single-world registration과 단계 상승만 지원
+- 기존 `UBathhouseFacilitySubsystem`이 authority weak registry/query와 변경 notification을 제공하며 중복 authority를 거부
+- key rack: authored anchors와 key/hook classes로 current `KeyPoolSize`만큼 pair 구성
+- runtime tier 상승은 pair를 append하고 downgrade/purchase/economy/UI는 구현하지 않음
+- rack-owned Actor만 EndPlay에서 정리하고 기존 key/hook identity/state machine을 재사용
 
-- queue assignment enum/struct
-- `ACustomerQueueOverflowWanderVolume`
-- `UCustomerQueueNavigationComponent`
-- `FCustomerMoveToCurrentQueueAssignmentTask`
-- `ReturnedKeyDropPoint`, drop search settings와 `OnReturnedKeyDropped`
-- `UCustomerRoutineDefinition` queue movement settings
+락커 placement/recovery는 key pool/number/customer key를 절대 변경하지 않는다.
 
-기존 UCLASS/USTRUCT/UENUM 이름과 enum ordinal을 rename/delete하지 않는다. deprecated symbol을 보존하므로 Core Redirect는 추가하지 않는다. implementation은 Content를 resave하지 않는다.
+## 10. Interaction Prompt
 
-## 9. Native Automation
+Interaction package에 supplemental intent-source interface를 추가하고 Placement component가 구현한다. Interaction은 이 interface로 placement/recovery state를 combined `FPlayerInteractionQuery`에 합성하되 Placement concrete class와 domain 상태를 소유하지 않는다.
 
-기존 focused test를 교체·확장한다.
+`UInteractionPromptWidget` 필수 `BindWidget` 추가:
 
-- service/queue assignment가 component의 full Location/Rotation과 revision을 반환하고 checkout `1 + N` 이후 entry는 clamp 없이 FIFO overflow가 된다.
-- dequeue/invalid actor compact 후 가장 빠른 overflow entry가 정확한 queue point로 promotion된다.
-- check-in 범위 초과가 방어적으로 invalid다.
-- overflow point가 configured volume/NavMesh 밖으로 나오지 않고 sample failure가 queue를 변경하지 않는다.
-- queue navigation이 move 완료 후 target Yaw tolerance까지 회전해야 service success한다.
-- knockdown중 revision 변경 후 latest point 복귀·회전 전에는 routine resume가 발생하지 않는다.
-- overflow recovery는 과거 wander point 복귀 없이 queue Task를 재개한다.
-- checkout은 spawn 증가 없이 기존 assigned key 하나를 Pawn Ignore·CCD·질량 독립 velocity의 `OnCounter` physics로 전환한다.
-- blocked exact/random 후보는 key/session/physics를 rollback하고 cash를 만들지 않는다.
-- 여러 반환 key가 collision-free 후보를 사용하고 player pickup이 Counter slot mutation을 요구하지 않는다.
-- 기존 check-in timeout, queue cleanup, cash claim, key hook/free drop/fixed slot과 recovery test가 회귀하지 않는다.
+- `PlacementActionNameText`, `PlacementFailureReasonText`
+- `RecoveryActionNameText`, `RecoveryFailureReasonText`, `RecoveryProgressBar`
 
-테스트 전용 public gameplay API나 Content fixture를 추가하지 않는다.
+C++이 visibility, enabled, localized text, progress와 transient result 우선순위를 적용한다. Equipment/Placement LMB 행은 owner에 따라 하나만 표시한다. 기존 event signature와 BindWidget 이름은 변경하지 않는다. 새 optional presentation hook은 별도 추가한다.
 
-## 10. 검증과 후속 산출물
+## 11. Tests And Validation
 
-- UE 5.8 `Build.bat` Editor target을 `.md/AGENT_WORKFLOW.md`의 exact command로 첫 시도부터 승인 실행한다.
-- 관련 focused automation과 가능한 전체 `BathhouseSim` suite를 실행한다.
-- `.md/PROMPT_REVIEW.md`에 변경 파일, build/test 결과, FIFO·token·rollback·class growth 검토점을 기록한다.
-- `.md/PROMPT_UNREAL.md`에는 다음 Editor 작업만 정확한 asset/instance 경로와 함께 요청한다.
-  - Counter queue point Location/Yaw와 `ReturnedKeyDropPoint`/search 설정
-  - checkout overflow volume 배치와 Counter reference
-  - `ST_CustomerRoutine` check-in/checkout의 기존 Queue Target + MoveTo를 신규 queue Task로 교체·binding
-  - Customer/Key/Counter Blueprint compile-save-reload와 PIE 검증
-- StateTree 예상 Editor 작업량은 낮음이다. 기존 두 queue 이동 구간의 Task 교체와 context/lane binding이며 신규 state/transition은 없다.
-- 자동화 불가능한 사용자 조작이 실제로 확인된 경우에만 `.md/USER_UNREAL.md`를 작성한다.
+최소 native automation coverage:
 
-## 완료 조건
+- settings/default clamp, zone-local snap/rotation과 footprint containment
+- placement success와 각 late-failure rollback
+- E/G/held-change preview cleanup과 LMB owner priority
+- Q complete/cancel/gaze/condition/EndPlay, held-item independence와 zero-impulse recovery
+- washer/dryer, bath와 locker 회수 gate
+- 1/4/8 slot 합계, expansion limit와 active-lease-below-capacity 방지
+- concurrent check-in key/lease commit/rollback, duplicate release와 cleanup
+- random undress/dress slot, `ClothesStored`와 no key-locker mapping
+- expansion validation, tier-up key materialization과 locker-change key invariance
+- deprecated ordinal/symbol preservation
 
-- 모든 visible check-in/checkout customer가 고유 point의 위치와 Yaw를 사용한다.
-- checkout overflow가 FIFO를 유지하며 configured volume에서만 배회하고 빈자리 순서대로 promotion된다.
-- queue member knockdown은 최신 visible assignment 복귀·회전 뒤에만 routine을 재개한다.
-- checkout key가 동일 인스턴스·동일 번호/원래 hook identity로 collision-free physical `OnCounter` 상태가 된다.
-- 실패·EndPlay·동시 revision/interaction에서 customer, queue, key와 cash가 소실·복제되지 않는다.
+기존 numbered topology 테스트는 신규 canonical 정책으로 수정하되 호환 symbol 존재 검사는 유지한다. `git diff --check`, focused `rg`와 UE 5.8 `BathhouseSimEditor Win64 Development` Build.bat 빌드를 수행한다.
+
+## Deliverables
+
+- 구현 Source와 focused tests
+- 실제 구현 상태에 맞춘 관련 architecture status 갱신
+- `.md/PROMPT_REVIEW.md`
+- `.md/PROMPT_UNREAL.md`: InputAction/IMC, WBP BindWidget, zone/Definition/설비 Blueprint, NavMesh 설정, expansion/key rack 배치와 `ST_CustomerRoutine` 신발 제거/locker task 연결을 정확한 Editor 작업으로 작성
+
+완료 보고에는 변경 파일, class growth, Blueprint/API compatibility, build/test 결과와 Editor 미검증 사항을 포함한다.

@@ -198,6 +198,8 @@ World towel interaction은 개별 Primary E만 지원한다.
 
 machine capacity와 process duration은 instance/default authoring 값이다. normalized progress는 stored end time에서 파생하며 Blueprint가 timer 정본을 복제하지 않는다.
 
+Placement target에서 기존 machine Actor는 `IPlaceableFacility`과 `IPhysicalCarryable`을 구현한다. 회수 query는 authoritative inventory count가 0이고 machine state가 `Waiting`인 경우만 성공한다. Placement는 count/state를 복제하거나 강제로 비우지 않으며 자세한 mode/transaction은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
+
 ## Transfer Direction
 
 | Target | Direction |
@@ -252,6 +254,7 @@ Towel actor 표현 event:
 
 - Towel -> Interaction/Physical Carry의 intent/carry/fixed-slot public 계약
 - Towel -> Facility의 generic actor/slot registration
+- Towel -> Placement의 placeable facility interface
 - Customer -> Towel transaction/token API
 - UI -> Interaction prompt data
 - Towel은 Customer concrete StateTree와 UI concrete class에 의존하지 않는다.
@@ -261,6 +264,7 @@ Towel actor 표현 event:
 - 모든 E/F transfer 전후 총 towel token 수가 보존되는지 확인한다.
 - bin 내부 towel은 container 단위 E/F이고 overflow towel만 개별 E인지 확인한다.
 - mixed state, full capacity, processing state와 repeated input이 양쪽 endpoint를 변경하지 않는지 확인한다.
+- count가 남았거나 `Processing`/`Complete`인 machine의 Q 회수가 정확한 이유로 실패하는지 확인한다.
 - bulk stack presentation 중단 뒤 C++ count와 visible count가 재동기화되는지 확인한다.
 - customer interruption과 actor EndPlay에서 token이 정확히 한 owner 또는 recovery ledger에 남는지 확인한다.
 - non-empty basket의 fixed-slot take/store와 G drop이 state/count/revision을 바꾸지 않는지 확인한다.
