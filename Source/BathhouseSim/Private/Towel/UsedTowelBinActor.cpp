@@ -1,4 +1,5 @@
 #include "Towel/UsedTowelBinActor.h"
+#include "Placement/FacilityPlacementComponent.h"
 
 #include "Engine/World.h"
 #include "Interaction/PlayerCarryComponent.h"
@@ -35,6 +36,11 @@ void AUsedTowelBinActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 FPlayerInteractionQuery AUsedTowelBinActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
+	if (GetFacilityPlacementComponent()
+		&& GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+	{
+		return ABathhouseFacilityActor::QueryInteraction(Context);
+	}
 	FPlayerInteractionQuery Query;
 	Query.bVisible = true;
 	Query.TargetName = LOCTEXT("UsedBin", "사용 수건통");
@@ -60,6 +66,11 @@ FPlayerInteractionQuery AUsedTowelBinActor::QueryInteraction(const FPlayerIntera
 
 FPlayerInteractionResult AUsedTowelBinActor::ExecuteInteraction(const FPlayerInteractionContext& Context)
 {
+	if (GetFacilityPlacementComponent()
+		&& GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+	{
+		return ABathhouseFacilityActor::ExecuteInteraction(Context);
+	}
 	return TransferToHeldBasket(Context, 1, EPlayerInteractionIntent::Primary);
 }
 

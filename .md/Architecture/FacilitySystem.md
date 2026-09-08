@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 facility slot, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point를 정의한다. 번호 기반 신발장/락커 topology는 폐기 target이며 배치·회수·락커 수용량은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
+이 문서는 현재 구현된 facility slot, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point를 정의한다. 번호 기반 신발장/락커 topology는 deprecated compatibility로만 남고 신규 배치·회수·락커 수용량은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
 
 ## Source Scope
 

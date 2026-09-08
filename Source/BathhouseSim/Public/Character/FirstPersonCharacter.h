@@ -15,6 +15,7 @@ class UFirstPersonMovementComponent;
 class UInputAction;
 class UPlayerCarryComponent;
 class UPlayerInteractionComponent;
+class UPlayerFacilityPlacementComponent;
 class USceneComponent;
 class UWidgetInteractionComponent;
 struct FInputActionValue;
@@ -50,6 +51,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	UPlayerEquipmentUseComponent* GetPlayerEquipmentUse() const { return PlayerEquipmentUse; }
 
+	UFUNCTION(BlueprintPure, Category = "Facility Placement")
+	UPlayerFacilityPlacementComponent* GetPlayerFacilityPlacement() const { return PlayerFacilityPlacement; }
+
 protected:
 	void MoveInput(const FInputActionValue& Value);
 	void LookInput(const FInputActionValue& Value);
@@ -64,6 +68,13 @@ protected:
 	void PrimaryUseEndInput();
 	void ComputerClickStartInput();
 	void ComputerClickEndInput();
+	void RecoverFacilityStartInput();
+	void RecoverFacilityTriggeredInput();
+	void RecoverFacilityCompletedInput();
+	void RecoverFacilityCanceledInput();
+	void PlacementSnapStartInput();
+	void PlacementSnapEndInput();
+	void PlacementRotateInput(const FInputActionValue& Value);
 
 	UFUNCTION(BlueprintCallable, Category = "Input")
 	void DoMove(float Right, float Forward);
@@ -108,6 +119,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UPlayerEquipmentUseComponent> PlayerEquipmentUse;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UPlayerFacilityPlacementComponent> PlayerFacilityPlacement;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> MoveAction;
 
@@ -132,6 +146,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> PrimaryUseAction;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> RecoverFacilityAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> PlacementSnapAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> PlacementRotateAction;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (DeprecatedProperty, DeprecationMessage = "Use PrimaryUseAction. This property remains as the IA_ComputerClick migration fallback."))
 	TObjectPtr<UInputAction> ComputerClickAction;
 
@@ -153,6 +176,7 @@ private:
 	{
 		None,
 		Computer,
+		Placement,
 		Equipment
 	};
 

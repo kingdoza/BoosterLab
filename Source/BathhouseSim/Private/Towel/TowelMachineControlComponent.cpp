@@ -1,5 +1,6 @@
 #include "Towel/TowelMachineControlComponent.h"
 
+#include "Placement/FacilityPlacementComponent.h"
 #include "Towel/TowelProcessingMachineActor.h"
 
 #define LOCTEXT_NAMESPACE "TowelMachineControlComponent"
@@ -13,10 +14,15 @@ UTowelMachineControlComponent::UTowelMachineControlComponent()
 FPlayerInteractionQuery UTowelMachineControlComponent::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
 	FPlayerInteractionQuery Query;
+	const ATowelProcessingMachineActor* Machine = Cast<ATowelProcessingMachineActor>(GetOwner());
+	if (Machine && Machine->GetFacilityPlacementComponent()
+		&& Machine->GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+	{
+		return Query;
+	}
 	Query.bVisible = true;
 	Query.TargetName = LOCTEXT("MachineControl", "수건 처리기 조작부");
 	Query.ActionName = LOCTEXT("StartMachine", "작동 시작");
-	const ATowelProcessingMachineActor* Machine = Cast<ATowelProcessingMachineActor>(GetOwner());
 	FText FailureReason;
 	Query.bCanInteract = Machine && Machine->CanStartProcessing(FailureReason);
 	Query.FailureReason = Query.bCanInteract ? FText::GetEmpty() : FailureReason;

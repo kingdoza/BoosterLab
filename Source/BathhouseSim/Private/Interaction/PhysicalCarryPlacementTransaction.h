@@ -22,6 +22,7 @@ public:
 	bool ApplyHeld(USceneComponent& HeldAnchor, const FTransform& HeldTransform);
 	bool ApplyFixedSlot(USceneComponent& ItemAnchor);
 	bool ApplyFreeWorld(const FVector& VelocityChange);
+	bool ApplyPlacedWorld(const FTransform& WorldTransform);
 	bool ApplySlotOccupancy(bool bOccupied);
 	void Commit() { bCommitted = true; }
 	void Rollback();

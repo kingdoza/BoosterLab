@@ -3,13 +3,28 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Facility/BathhouseFacilityTypes.h"
+#include "Interaction/PhysicalCarryable.h"
+#include "Interaction/PlayerInteractable.h"
+#include "Interaction/SupplementalInteractionIntentSource.h"
+#include "Placement/PlaceableFacility.h"
 #include "BathhouseFacilityActor.generated.h"
 
 class UBathhouseFacilitySlotComponent;
+class UBathWaterStateComponent;
+class UBoxComponent;
+class UFacilityPlacementComponent;
+class UNavModifierComponent;
+class UPlayerCarryComponent;
+class UPrimitiveComponent;
 class USceneComponent;
 
 UCLASS(Blueprintable)
-class BATHHOUSESIM_API ABathhouseFacilityActor : public AActor
+class BATHHOUSESIM_API ABathhouseFacilityActor
+	: public AActor
+	, public IPlayerInteractable
+	, public ISupplementalInteractionIntentSource
+	, public IPlaceableFacility
+	, public IPhysicalCarryable
 {
 	GENERATED_BODY()
 
@@ -18,6 +33,36 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void FellOutOfWorld(const UDamageType& DamageType) override;
+
+	virtual FPlayerInteractionQuery QueryInteraction(const FPlayerInteractionContext& Context) const override;
+	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
+	virtual FPlayerInteractionQuery MergeSupplementalInteractionQuery(const FPlayerInteractionQuery& BaseQuery) const override;
+	virtual UFacilityPlacementComponent* GetFacilityPlacementComponent() const override { return FacilityPlacement; }
+	virtual FFacilityPlacementTransactionResult QueryFacilityPlacement(const FTransform& CandidateTransform, const class AFacilityPlacementZoneActor& Zone) const override;
+	virtual FFacilityPlacementTransactionResult QueryFacilityRecovery() const override;
+	virtual bool CommitPlaceableFacilityMode(EPlaceableFacilityMode NewMode, FText& OutFailureReason) override;
+	virtual EPhysicalCarryKind GetPhysicalCarryKind() const override { return EPhysicalCarryKind::Facility; }
+	virtual FText GetPhysicalCarryDisplayName() const override;
+	virtual FTransform GetHeldTransform() const override;
+	virtual bool CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const override;
+	virtual bool HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor) override;
+	virtual bool CanFreeDrop(FText& OutFailureReason) const override;
+	virtual UPrimitiveComponent* GetPhysicalCarryPrimitive() const override;
+	virtual float GetThrowImpulseStrength() const override;
+	virtual float GetUpwardThrowImpulseStrength() const override;
+	virtual AActor* GetAssignedPhysicalCarryFixedSlot() const override;
+	virtual bool TryBindPhysicalCarryFixedSlot(AActor& SlotActor, FText& OutFailureReason) override;
+	virtual void ClearPhysicalCarryFixedSlotBinding(AActor& ExpectedSlot) override;
+	virtual void NotifyPhysicalCarryFixedSlotBindingConflict() override;
+	virtual bool IsStoredInAssignedPhysicalCarryFixedSlot() const override;
+	virtual bool NotifyTakenFromFixedSlotCommitted(UPlayerCarryComponent& Carry, AActor& SlotActor) override;
+	virtual bool NotifyStoredInFixedSlotCommitted(UPlayerCarryComponent& Carry, AActor& SlotActor) override;
+	virtual bool NotifyRecoveredToFixedSlotCommitted(AActor& SlotActor) override;
+	virtual void NotifyFixedSlotDestroyed(AActor& SlotActor) override;
+	virtual bool NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry) override;
+	virtual void PublishPhysicalCarryCommit(EPhysicalCarryCommitTransition Transition) override;
+	virtual void RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry) override;
 
 	UFUNCTION(BlueprintPure, Category = "Bathhouse Facility")
 	EBathhouseFacilityType GetFacilityType() const { return FacilityType; }
@@ -32,6 +77,7 @@ public:
 	bool IsFacilityEnabled() const { return bEnabled; }
 
 	const TArray<TObjectPtr<UBathhouseFacilitySlotComponent>>& GetFacilitySlots() const { return FacilitySlots; }
+	UBathWaterStateComponent* GetBathWaterState() const { return BathWaterState; }
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Bathhouse Facility")
 	void OnSlotReservationChanged(UBathhouseFacilitySlotComponent* Slot, EBathhouseFacilitySlotState NewState);
@@ -44,9 +90,25 @@ public:
 
 protected:
 	friend class FBathhouseKeyTopologyInitializationTest;
+	friend class FBathhouseFacilityPlacementRuntimeTest;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bathhouse Facility")
 	TObjectPtr<USceneComponent> SceneRoot;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
+	TObjectPtr<UBoxComponent> PackagePhysicalRoot;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
+	TObjectPtr<UBoxComponent> PlacementFootprint;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
+	TObjectPtr<UFacilityPlacementComponent> FacilityPlacement;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
+	TObjectPtr<UNavModifierComponent> PlacementNavModifier;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bathhouse Facility")
+	TObjectPtr<UBathWaterStateComponent> BathWaterState;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bathhouse Facility")
 	EBathhouseFacilityType FacilityType = EBathhouseFacilityType::Bath;
@@ -63,7 +125,14 @@ protected:
 private:
 	UFUNCTION()
 	void HandleSlotStateChanged(UBathhouseFacilitySlotComponent* Slot, EBathhouseFacilitySlotState PreviousState, EBathhouseFacilitySlotState NewState);
+	void HandleExpansionAuthorityChanged(class ABathhouseExpansionAuthority* Authority);
+	bool ValidatePlacedDomain(FText& OutFailureReason) const;
+	bool RegisterPlacedDomain(FText& OutFailureReason, bool bPublish = true);
+	void UnregisterPlacedDomain(bool bUnexpectedEndPlay, bool bPublish = true);
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBathhouseFacilitySlotComponent>> FacilitySlots;
+	bool bPlacedDomainRegistered = false;
+	bool bEndingPlay = false;
+	FDelegateHandle ExpansionAuthorityChangedHandle;
 };

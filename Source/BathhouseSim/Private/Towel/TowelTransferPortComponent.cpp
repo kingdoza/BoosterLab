@@ -1,6 +1,7 @@
 #include "Towel/TowelTransferPortComponent.h"
 
 #include "Interaction/PlayerCarryComponent.h"
+#include "Placement/FacilityPlacementComponent.h"
 #include "Towel/TowelBasketActor.h"
 #include "Towel/TowelInventoryComponent.h"
 #include "Towel/TowelProcessingMachineActor.h"
@@ -17,12 +18,17 @@ UTowelTransferPortComponent::UTowelTransferPortComponent()
 FPlayerInteractionQuery UTowelTransferPortComponent::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
 	FPlayerInteractionQuery Query;
+	const ATowelProcessingMachineActor* Machine = Cast<ATowelProcessingMachineActor>(GetOwner());
+	if (Machine && Machine->GetFacilityPlacementComponent()
+		&& Machine->GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+	{
+		return Query;
+	}
 	Query.bVisible = true;
 	Query.TargetName = LOCTEXT("MachinePort", "수건 투입구");
 	Query.ActionName = LOCTEXT("TransferOne", "수건 한 장 옮기기");
 	Query.bSecondaryVisible = true;
 	Query.SecondaryActionName = LOCTEXT("TransferMax", "가능한 만큼 옮기기");
-	const ATowelProcessingMachineActor* Machine = Cast<ATowelProcessingMachineActor>(GetOwner());
 	const ATowelBasketActor* Basket = Context.CarryComponent
 		? Cast<ATowelBasketActor>(Context.CarryComponent->GetHeldObject())
 		: nullptr;

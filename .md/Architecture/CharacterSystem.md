@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-1인칭 이동, sprint, camera, Interaction/Carry와 Computer/Equipment LMB routing은 현재 구현되어 있다. Placement target은 Q recovery, LCtrl snap, wheel rotation과 `Computer > Placement > Equipment` LMB ownership을 같은 composition root에 추가한다.
+1인칭 이동, sprint, camera, Interaction/Carry와 Computer/Equipment/Placement routing은 현재 구현되어 있다. Q recovery, LCtrl snap, wheel rotation과 `Computer > Placement > Equipment` LMB ownership을 같은 composition root가 조립한다.
 
 ## Responsibilities
 

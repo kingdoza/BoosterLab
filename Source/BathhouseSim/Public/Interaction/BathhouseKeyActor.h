@@ -78,9 +78,11 @@ public:
 	ABathhouseKeyHookActor* GetKeyHook() const { return KeyHook; }
 
 	bool InitializeAtHook(ABathhouseKeyHookActor* InHook);
+	bool ConfigureRackIdentity(int32 InKeyNumber, ABathhouseKeyHookActor* InHook);
 	bool TryTakeFromHook(UPlayerCarryComponent& Carry, ABathhouseKeyHookActor& Hook);
 	bool TryReturnToHook(UPlayerCarryComponent& Carry, ABathhouseKeyHookActor& Hook);
 	bool TryAssignToCustomer(UPlayerCarryComponent& Carry, AActor& Customer);
+	bool TryRollbackAssignmentToPlayer(AActor& Customer, UPlayerCarryComponent& Carry);
 	bool TryPlaceOnCounter(AActor& Customer, ABathhouseCounterActor& Counter);
 	UE_DEPRECATED(5.8, "Returned keys now use the Counter drop point and free-world placement transaction.")
 	bool TryPlaceOnCounter(AActor& Customer, ABathhouseCounterActor& Counter, int32 ReturnSlotIndex, USceneComponent& ReturnSlot);

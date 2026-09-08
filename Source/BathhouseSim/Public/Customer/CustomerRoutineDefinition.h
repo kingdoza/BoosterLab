@@ -29,7 +29,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Bath", meta = (ClampMin = "0.1"))
 	float BathDwellMaxSeconds = 20.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Activities", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Activities", meta = (ClampMin = "0.0", DeprecatedProperty, DeprecationMessage = "Shoe gameplay is no longer used by the canonical routine."))
 	float StoreShoesSeconds = 2.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Activities", meta = (ClampMin = "0.0"))
@@ -50,7 +50,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Activities", meta = (ClampMin = "0.0"))
 	float DressSeconds = 3.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Activities", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Activities", meta = (ClampMin = "0.0", DeprecatedProperty, DeprecationMessage = "Shoe gameplay is no longer used by the canonical routine."))
 	float WearShoesSeconds = 2.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Retry", meta = (ClampMin = "0.05"))

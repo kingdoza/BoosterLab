@@ -6,10 +6,12 @@
 #include "BathhouseFacilitySubsystem.generated.h"
 
 class ABathhouseFacilityActor;
+class ABathhouseExpansionAuthority;
 class UBathhouseFacilitySlotComponent;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnFacilityAvailabilityChangedNative, EBathhouseFacilityType);
 DECLARE_MULTICAST_DELEGATE(FOnKeyTopologyChangedNative);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnExpansionAuthorityChangedNative, ABathhouseExpansionAuthority*);
 
 UCLASS()
 class BATHHOUSESIM_API UBathhouseFacilitySubsystem : public UWorldSubsystem
@@ -17,8 +19,9 @@ class BATHHOUSESIM_API UBathhouseFacilitySubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
-	void RegisterFacility(ABathhouseFacilityActor* Facility);
-	void UnregisterFacility(ABathhouseFacilityActor* Facility);
+	bool RegisterFacility(ABathhouseFacilityActor* Facility, bool bPublish = true);
+	bool UnregisterFacility(ABathhouseFacilityActor* Facility, bool bPublish = true);
+	bool IsFacilityRegistered(const ABathhouseFacilityActor* Facility) const;
 	void NotifyFacilityAvailabilityChanged(EBathhouseFacilityType FacilityType);
 
 	void RegisterKeyHook(AActor* KeyHook, int32 KeyNumber);
@@ -27,6 +30,11 @@ public:
 	bool ValidateKeyNumber(int32 KeyNumber, const AActor* ExpectedKeyHook = nullptr, FText* OutFailureReason = nullptr) const;
 	ABathhouseFacilityActor* FindNumberedFacility(EBathhouseFacilityType FacilityType, int32 FacilityNumber) const;
 	void GetFacilitiesOfType(EBathhouseFacilityType FacilityType, TArray<ABathhouseFacilityActor*>& OutFacilities) const;
+	bool RegisterExpansionAuthority(ABathhouseExpansionAuthority* Authority, FText& OutFailureReason);
+	void UnregisterExpansionAuthority(ABathhouseExpansionAuthority* Authority);
+	ABathhouseExpansionAuthority* GetExpansionAuthority() const { return ExpansionAuthority.Get(); }
+	int32 GetMaxInstalledLockerSlots() const;
+	int32 GetCurrentKeyPoolSize() const;
 
 	bool TryReserveRandomSlot(
 		EBathhouseFacilityType FacilityType,
@@ -38,10 +46,12 @@ public:
 
 	FOnFacilityAvailabilityChangedNative OnFacilityAvailabilityChanged;
 	FOnKeyTopologyChangedNative OnKeyTopologyChanged;
+	FOnExpansionAuthorityChangedNative OnExpansionAuthorityChanged;
 
 private:
 	void CompactRegistrations();
 
 	TArray<TWeakObjectPtr<ABathhouseFacilityActor>> RegisteredFacilities;
 	TMultiMap<int32, TWeakObjectPtr<AActor>> RegisteredKeyHooks;
+	TWeakObjectPtr<ABathhouseExpansionAuthority> ExpansionAuthority;
 };

@@ -56,6 +56,21 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> EquipmentProgressBar = nullptr;
 
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> PlacementActionNameText = nullptr;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> PlacementFailureReasonText = nullptr;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> RecoveryActionNameText = nullptr;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> RecoveryFailureReasonText = nullptr;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UProgressBar> RecoveryProgressBar = nullptr;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction Prompt", meta = (ClampMin = "0.1", UIMin = "0.1"))
 	float FailureDisplayDurationSeconds = 1.5f;
 
@@ -85,6 +100,15 @@ protected:
 		bool bHoldVisible,
 		float Progress);
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction Prompt")
+	void OnFacilityPlacementPromptChanged(
+		bool bPlacementVisible,
+		bool bCanPlace,
+		const FText& PlacementFailureReason,
+		bool bRecoveryVisible,
+		bool bCanRecover,
+		float RecoveryProgress);
+
 private:
 	friend class FBathhouseInteractionPromptPresentationTest;
 
@@ -98,6 +122,8 @@ private:
 	void HandlePrimaryTransientFailureExpired();
 	void HandleSecondaryTransientFailureExpired();
 	void HandleEquipmentTransientFailureExpired();
+	void HandlePlacementTransientFailureExpired();
+	void HandleRecoveryTransientFailureExpired();
 	void BindInteraction();
 	void UnbindInteraction();
 	void PresentQuery(const FPlayerInteractionQuery& Query, bool bForceRefresh = false);
@@ -120,10 +146,18 @@ private:
 	UPROPERTY(Transient)
 	FText EquipmentTransientFailureReason;
 
+	UPROPERTY(Transient)
+	FText PlacementTransientFailureReason;
+
+	UPROPERTY(Transient)
+	FText RecoveryTransientFailureReason;
+
 	FDelegateHandle InteractionResultHandle;
 	FTimerHandle PrimaryFailureTimerHandle;
 	FTimerHandle SecondaryFailureTimerHandle;
 	FTimerHandle EquipmentFailureTimerHandle;
+	FTimerHandle PlacementFailureTimerHandle;
+	FTimerHandle RecoveryFailureTimerHandle;
 	bool bIsQueryBound = false;
 	bool bHasPresentedQuery = false;
 };

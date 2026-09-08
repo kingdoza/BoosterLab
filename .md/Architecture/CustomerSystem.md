@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 customer loop와 UE 5.8 StateTree 계약을 정의하고 신발 제거, unnumbered locker 활동과 capacity lease target을 추가한다. Facility 경계는 [FacilitySystem.md](FacilitySystem.md), 배치/수용량은 [PlacementSystem.md](PlacementSystem.md), knockdown은 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)를 따른다.
+이 문서는 현재 customer loop와 UE 5.8 StateTree 계약을 정의한다. native session은 신발 단계를 deprecated 처리하고 unnumbered locker 활동과 capacity lease를 구현한다. Facility 경계는 [FacilitySystem.md](FacilitySystem.md), 배치/수용량은 [PlacementSystem.md](PlacementSystem.md), knockdown은 [CustomerRecoverySystem.md](CustomerRecoverySystem.md)를 따른다.
 
 ## Source Scope
 

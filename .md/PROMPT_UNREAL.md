@@ -1,46 +1,29 @@
-# Unreal Prompt — Verify Key Hook Initialization Order Fix
+# Unreal 작업 프롬프트 — 회수 프롬프트와 낙하 위치 검증
 
-## Status
+## 상태
 
-Native code, UE 5.8 Editor build, focused initialization-order automation and the full `BathhouseSim.Interaction` test group are complete.
+에셋 수정은 필요 없다. 새 native 코드와 config property를 읽도록 Editor를 새로 시작한 뒤 Compile/PIE 검증만 수행한다. Widget Blueprint에 recovery 로직을 추가하지 않는다.
 
-No Blueprint, level, Data Asset, StateTree or Config edit is required. Do not save or resave any package for this fix.
+## 설정 확인
 
-## Preflight
+Project Settings > Game > Facility Placement에서 다음 값을 확인한다.
 
-1. Use UE 5.8 and ensure PIE/SIE is stopped.
-2. Restart the BathhouseSim Editor so the newly built `UnrealEditor-BathhouseSim.dll` is loaded. Live Coding is not the acceptance path for this lifecycle change.
-3. Open `/Game/Maps/DefaultMap` without changing or saving it.
-4. Confirm the existing number-2 topology remains exactly:
-   - one `KeyHook_2` linked to the exact `Key_2` instance;
-   - one enabled `ShoeLocker_2` with `FacilityNumber = 2`;
-   - one enabled `ClothesLocker_2` with `FacilityNumber = 2`.
-5. If any count is zero or greater than one, stop and report the exact actor paths. The code intentionally keeps invalid topology disabled.
+- `Recovery Drop ZOffset Cm = 100.0`
 
-The current map may also contain a number-3 key/hook without matching number-3 shoe/clothes facilities. That pair is expected to remain disabled and is outside this fix; do not add or delete actors under this prompt.
+필요하면 프로젝트 전체 설비에 공통으로 적용할 높이만 이 값에서 조정한다. 개별 설비 Blueprint에 별도 recovery offset을 만들지 않는다.
 
-## PIE Verification
+## PIE 검증
 
-1. Start PIE normally.
-2. Look directly at the number-2 key/hook with an empty hand.
-3. Verify the take-key interaction is available and taking the key succeeds.
-4. Return the exact key to `KeyHook_2` and verify it snaps back and can be taken again.
-5. Repeat PIE at least three times to exercise different Actor BeginPlay ordering.
-6. Verify number 1 continues to work and no key is duplicated, dropped, hidden or reassigned during startup.
-7. Check Output Log for unexpected topology, fixed-slot binding, duplicate assignment or access errors.
+1. 빈 목욕탕, 빈 세탁기, 빈 건조기를 각각 포커스한다.
+2. 일반 상호작용 prompt와 같은 HUD에서 `Q 설비 회수` row가 즉시 보이는지 확인한다.
+3. 목욕탕 물이 있거나 slot이 사용 중인 상태, 기계가 비어 있지 않거나 processing 중인 상태에서도 Q row와 정확한 실패 사유가 보이는지 확인한다.
+4. 회수 가능한 설비에서 Q를 누르고 유지해 progress가 증가하는지 확인한다.
+5. 회수 성공 시 package가 `PlacementFootprint` 중심 X/Y와 footprint 월드 바닥 Z + `100 cm` 위치에서 시작해 중력으로 떨어지는지 확인한다.
+6. 그 예정 위치에 blocking object를 놓으면 Q row는 유지되면서 `포장 설비가 다른 물체와 겹쳐 회수할 수 없습니다.`가 표시되고 회수가 실패하는지 확인한다.
 
-## Optional Editor Automation
+## 수용 기준
 
-Run:
-
-- `BathhouseSim.Interaction.KeyTopologyInitializationOrder`
-- `BathhouseSim.Interaction.KeyRecovery`
-- `BathhouseSim.Interaction.PhysicalCarryFixedSlotHeldPoseAndRecovery`
-
-All must succeed. Do not treat unrelated existing montage authoring warnings as a key-topology failure.
-
-## Save And Handoff
-
-- Do not use Save All.
-- The expected newly dirty/saved package count is zero.
-- Report the number-2 actor paths, three PIE outcomes, automation results and unexpected log entries.
+- recovery row는 성공 가능 여부와 관계없이 포커스 중 표시된다.
+- Q hold 중 progress가 표시되고 취소 시 0으로 돌아간다.
+- 성공 회수는 자동 pickup/impulse 없이 같은 Actor를 packaged physics로 전환한다.
+- 충돌 실패 시 설비 transform, placed mode와 domain 등록이 유지된다.

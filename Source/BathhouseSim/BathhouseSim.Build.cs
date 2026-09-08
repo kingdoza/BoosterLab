@@ -21,7 +21,8 @@ public class BathhouseSim : ModuleRules
 			"GameplayTags",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
-			"UMG"
+			"UMG",
+			"DeveloperSettings"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

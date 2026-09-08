@@ -28,6 +28,7 @@ public:
 
 	void Configure(UCameraComponent* InCamera, UPlayerCarryComponent* InCarryComponent);
 	void ConfigureEquipmentUse(UPlayerEquipmentUseComponent* InEquipmentUseComponent);
+	void ConfigureSupplementalIntentSource(UObject* InSupplementalIntentSource);
 	void SetInteractionSuppressed(bool bSuppressed);
 	bool IsInteractionSuppressed() const { return bInteractionSuppressed; }
 
@@ -75,6 +76,9 @@ private:
 	friend class FBathhouseComputerSessionTest;
 
 	bool BuildInteraction(FPlayerInteractionContext& OutContext, IPlayerInteractable*& OutInteractable, UObject*& OutTargetObject) const;
+	FPlayerInteractionQuery MergeFocusedSupplementalQuery(
+		const FPlayerInteractionContext& Context,
+		const FPlayerInteractionQuery& BaseQuery) const;
 	bool TraceFocus(FHitResult& OutHit) const;
 	FPlayerInteractionResult FinishInteractionAttempt(const FPlayerInteractionResult& Result);
 	void TickActiveHold(float DeltaTime);
@@ -93,6 +97,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UPlayerEquipmentUseComponent> EquipmentUseComponent = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UObject> SupplementalIntentSource = nullptr;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UObject> CurrentTarget = nullptr;

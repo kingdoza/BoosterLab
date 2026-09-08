@@ -117,6 +117,24 @@ bool FPhysicalCarryPlacementTransaction::ApplyFreeWorld(const FVector& VelocityC
 		&& RootPrimitive->BodyInstance.bUseCCD;
 }
 
+bool FPhysicalCarryPlacementTransaction::ApplyPlacedWorld(const FTransform& WorldTransform)
+{
+	AActor* CurrentItem = Item.Get();
+	UPrimitiveComponent* RootPrimitive = Primitive.Get();
+	if (!bSnapshotValid || !CurrentItem || !RootPrimitive || WorldTransform.ContainsNaN())
+	{
+		return false;
+	}
+
+	RootPrimitive->SetSimulatePhysics(false);
+	RootPrimitive->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	RootPrimitive->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+	CurrentItem->SetActorTransform(WorldTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	return RootPrimitive->GetAttachParent() == nullptr
+		&& !RootPrimitive->IsSimulatingPhysics()
+		&& RootPrimitive->GetCollisionEnabled() == ECollisionEnabled::NoCollision;
+}
+
 bool FPhysicalCarryPlacementTransaction::ApplySlotOccupancy(const bool bOccupied)
 {
 	AActor* CurrentItem = Item.Get();

@@ -198,7 +198,7 @@ World towel interaction은 개별 Primary E만 지원한다.
 
 machine capacity와 process duration은 instance/default authoring 값이다. normalized progress는 stored end time에서 파생하며 Blueprint가 timer 정본을 복제하지 않는다.
 
-Placement target에서 기존 machine Actor는 `IPlaceableFacility`과 `IPhysicalCarryable`을 구현한다. 회수 query는 authoritative inventory count가 0이고 machine state가 `Waiting`인 경우만 성공한다. Placement는 count/state를 복제하거나 강제로 비우지 않으며 자세한 mode/transaction은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
+기존 machine Actor는 `IPlaceableFacility`과 `IPhysicalCarryable`을 구현한다. 회수 query는 authoritative inventory count가 0이고 machine state가 `Waiting`인 경우만 성공한다. Placement는 count/state를 복제하거나 강제로 비우지 않으며 자세한 mode/transaction은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
 
 ## Transfer Direction
 

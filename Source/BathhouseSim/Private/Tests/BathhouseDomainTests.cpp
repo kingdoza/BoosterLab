@@ -547,41 +547,11 @@ bool FBathhouseKeyTopologyInitializationTest::RunTest(const FString& Parameters)
 	BeginActor(Key);
 
 	FText FailureReason;
-	TestFalse(TEXT("A key hook that begins before its numbered facilities is initially unavailable"),
+	TestTrue(TEXT("An exact unique key-hook pair is operational without numbered lockers"),
 		Hook->IsPhysicalCarrySlotOperational(&FailureReason));
-	TestTrue(TEXT("The early failure identifies the missing numbered facility"), !FailureReason.IsEmpty());
-
-	ABathhouseFacilityActor* ShoeLocker = World->SpawnActorDeferred<ABathhouseFacilityActor>(
-		ABathhouseFacilityActor::StaticClass(),
-		Identity,
-		nullptr,
-		nullptr,
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	ShoeLocker->FacilityType = EBathhouseFacilityType::ShoeLocker;
-	ShoeLocker->FacilityNumber = 2;
-	ShoeLocker->bEnabled = true;
-	UGameplayStatics::FinishSpawningActor(ShoeLocker, Identity);
-	BeginActor(ShoeLocker);
-	TestFalse(TEXT("One numbered facility is not enough to activate the key hook"),
-		Hook->IsPhysicalCarrySlotOperational());
-
-	ABathhouseFacilityActor* ClothesLocker = World->SpawnActorDeferred<ABathhouseFacilityActor>(
-		ABathhouseFacilityActor::StaticClass(),
-		Identity,
-		nullptr,
-		nullptr,
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	ClothesLocker->FacilityType = EBathhouseFacilityType::ClothesLocker;
-	ClothesLocker->FacilityNumber = 2;
-	ClothesLocker->bEnabled = true;
-	UGameplayStatics::FinishSpawningActor(ClothesLocker, Identity);
-	BeginActor(ClothesLocker);
-
-	TestTrue(TEXT("The final numbered facility registration reactivates the existing key hook"),
-		Hook->IsPhysicalCarrySlotOperational(&FailureReason));
-	TestEqual(TEXT("The reactivated hook stores its exact authored key"),
+	TestEqual(TEXT("The operational hook stores its exact authored key"),
 		Hook->GetStoredPhysicalCarryItem(), static_cast<AActor*>(Key));
-	TestEqual(TEXT("Reactivation preserves the key's AtHook domain state"),
+	TestEqual(TEXT("Initialization preserves the key's AtHook domain state"),
 		Key->GetKeyState(), EBathhouseKeyState::AtHook);
 
 	World->DestroyWorld(false);

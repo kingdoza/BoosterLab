@@ -41,7 +41,7 @@ UE 5.8 customer loop 구현은 실제 include/use site와 함께 다음 runtime 
 - `GameplayStateTreeModule`
 - `UMG`
 
-Placement target은 `UFacilityPlacementSettings`를 위해 runtime `DeveloperSettings` 의존성을 실제 include/use site와 함께 추가한다. GameplayTags와 NavigationSystem은 기존 의존성을 재사용한다.
+Placement는 `UFacilityPlacementSettings`를 위해 runtime `DeveloperSettings` 의존성을 실제 include/use site와 함께 추가한다. GameplayTags와 NavigationSystem은 기존 의존성을 재사용한다.
 
 `BathhouseSim.uproject`에는 UE 5.8 `StateTree`, `GameplayStateTree` plugin이 활성화되어 있다. Computer의 `UWidgetComponent`, `UWidgetInteractionComponent`와 native sample widget은 기존 `UMG`/`InputCore` 의존성으로 구현되어 있다. direct API 사용처가 없는 `StateTreeEditorModule`, `Slate`, `SlateCore`는 runtime module에 추가하지 않는다.
 

@@ -1,10 +1,10 @@
 # Placement System
 
-## Target Status
+## Implementation Status
 
-이 문서는 아직 Source에 없는 설비 배치·회수, 확장 단계와 락커 수용량의 확정 target을 정의한다. 이번 범위는 packaged 설비의 신규 배치와 설치된 설비의 Q Hold 회수만 포함한다. 설치된 원본을 유지한 별도 이동 프리뷰는 만들지 않는다.
+설비 배치·회수, 확장 단계와 락커 수용량의 native Source와 automation은 구현되었다. 배치 commit은 carry, physical state, facility mode와 registry를 하나의 원자적 경계로 다루며 외부 event는 최종 상태가 확정된 뒤에만 발행한다. 이번 범위는 packaged 설비의 신규 배치와 설치된 설비의 Q Hold 회수만 포함한다. 설치된 원본을 유지한 별도 이동 프리뷰는 만들지 않는다. Input/Widget/Data Asset/Blueprint/Level authoring은 `.md/PROMPT_UNREAL.md`의 Editor 단계다.
 
-## Planned Source Scope
+## Source Scope
 
 ```text
 Source/BathhouseSim/Public/Placement/
@@ -18,11 +18,13 @@ Source/BathhouseSim/Public/Placement/
   PlayerFacilityPlacementComponent.h
 
 Source/BathhouseSim/Private/Placement/
+  FacilityPlacementCollisionUtils.h/.cpp
   FacilityPlacementSettings.cpp
   FacilityPlacementComponent.cpp
   FacilityPlacementZoneActor.cpp
   FacilityPlacementPreviewActor.cpp
   PlayerFacilityPlacementComponent.cpp
+  PlayerFacilityPlacementValidation.cpp
 
 Source/BathhouseSim/Public/Facility/
   BathWaterStateComponent.h
@@ -32,6 +34,7 @@ Source/BathhouseSim/Public/Facility/
   BathhouseExpansionAuthority.h
 
 Source/BathhouseSim/Private/Facility/
+  BathhouseFacilityPlacementDomain.cpp
   BathWaterStateComponent.cpp
   LockerActionSlotComponent.cpp
   LockerCapacitySubsystem.cpp
@@ -63,7 +66,7 @@ Placement는 세탁기 수건 수량, 목욕탕 물 상태, customer 행동, key
 
 | 책임 | Owner |
 |---|---|
-| grid 크기, 휠 Yaw 간격, 공통 회수 시간/거리 | `UFacilityPlacementSettings` |
+| grid 크기, 휠 Yaw 간격, 공통 회수 시간/거리/낙하 Z 오프셋 | `UFacilityPlacementSettings` |
 | 설비 tag, preview class, footprint cell 수 | `UFacilityPlacementDefinition` |
 | 설비 `Placed`/`Packaged`, footprint/physical root/fixed-slot binding | `UFacilityPlacementComponent` |
 | preview session, 누적 Yaw, Q target/경과 시간과 transaction | `UPlayerFacilityPlacementComponent` |
@@ -83,6 +86,7 @@ Placement는 세탁기 수건 수량, 목욕탕 물 상태, customer 행동, key
 - `GridSizeCm = 10.0`
 - `RotationStepDegrees`
 - `RecoveryHoldSeconds`
+- `RecoveryDropZOffsetCm = 100.0`
 - `PlacementTraceDistance`
 - `RecoveryTraceDistance`
 
@@ -123,18 +127,20 @@ Held 여부는 `UPlayerCarryComponent`가 소유하고 placement mode에 복제�
 
 Preview Actor는 표현 전용 ghost다. collision/domain Tick, facility/Navigation/locker 등록을 하지 않는다. C++이 transform, validity와 failure를 제공하고 Blueprint는 valid/invalid material, grid와 효과만 표현한다.
 
+preview class 누락, spawn 실패 또는 session 도중 preview 파괴는 fail-closed다. session은 disabled placement prompt와 실패 사유를 유지하거나 안전하게 종료하며, live preview가 없는 상태에서는 commit할 수 없다. preview와 recovery target은 weak reference 및 `OnDestroyed`로 추적하고, 활성 preview/recovery session이 없으면 player placement component Tick은 꺼진다.
+
 ## Placement Validation And Commit
 
 LMB commit 직전에 다음을 같은 frame 상태로 다시 검증한다.
 
-1. player가 해당 `Packaged` Actor를 실제로 들고 있고 session owner가 일치한다.
+1. local player가 해당 `Packaged` Actor를 실제로 들고 있고 session owner가 일치하며 computer/suppression이 활성화되지 않았다.
 2. 정확히 하나의 compatible zone이 resolve된다.
-3. footprint 전체가 그 zone bounds 안에 포함된다.
-4. footprint가 WorldStatic/WorldDynamic, 다른 설비와 player/customer Pawn에 겹치지 않고 유효 floor support를 가진다.
+3. footprint의 네 world corner를 zone local space로 변환했을 때 전체가 실제 scaled/rotated zone bounds 안에 포함된다.
+4. package primitive의 object type과 collision response가 `Block`으로 판정하는 object에 footprint가 겹치지 않고 유효 floor support를 가진다. non-blocking trigger overlap은 배치를 막지 않으며 PhysicsBody 등 실제 blocking channel은 막는다.
 5. footprint 크기와 Definition cell 수가 전역 grid 계약을 만족한다.
 6. 설비 domain precondition과 확장 단계 설치 제한을 만족한다.
 
-성공 시 carry/Actor/registry snapshot을 잡고 후보 transform, `Placed` mode, facility/NavModifier/locker 등록을 적용한 뒤에만 held reference를 해제한다. 어느 단계든 실패하면 attachment, transform, collision, held reference, mode와 registry를 모두 rollback한다.
+성공 시 physical snapshot을 잡고 후보 transform을 기계적으로 적용한 뒤, carry owner가 held reference를 silent stage한다. 그 callback 안에서 facility는 domain을 재검증하고 mode/facility/locker registry를 silent stage한 다음 모든 내부 상태가 최종값일 때 mode, facility, capacity event를 발행한다. 따라서 facility observer가 설치 알림을 받을 때 손은 이미 비어 있고 모든 registry는 최종 상태다. notification 중 재진입 transition은 guard가 거부하며, callback 도중 Actor가 파괴되면 더 이상 해당 instance에 접근하지 않는다. 어느 단계든 실패하면 held owner와 attachment/socket, relative/world transform, collision mode/response/object type, simulation/gravity/CCD, linear/angular velocity를 snapshot으로 정확히 복구한다.
 
 ## Input Ownership
 
@@ -151,7 +157,9 @@ LMB owner 우선순위는 `Computer > Placement > Equipment`다. Placement가 LM
 
 ## Recovery Transaction
 
-Q Started에서 현재 target을 고정하고 Triggered에서 elapsed를 누적한다. `Elapsed / RecoveryHoldSeconds`가 prompt progress다. Q release, gaze/range 이탈, suppression, target/owner EndPlay 또는 회수 조건 변경 시 정확히 한 번 cancel하고 progress를 0으로 만든다.
+설비 Actor는 포커스된 일반 `IPlayerInteractable` query에 recovery 표시·가능 여부·실패 사유를 supplemental row로 합친다. 따라서 회수 prompt는 별도 player-global recovery trace 결과에 의존하지 않는다. `UPlayerFacilityPlacementComponent`는 활성 Q hold의 target과 elapsed만 소유하고 같은 combined query의 progress를 보충한다.
+
+Q Started에서 현재 target을 고정하고 Triggered에서 elapsed를 누적한다. `Elapsed / RecoveryHoldSeconds`가 prompt progress다. Q release, gaze/range 이탈, suppression, target/owner EndPlay 또는 회수 조건 변경 시 정확히 한 번 cancel하고 progress를 0으로 만든다. target `OnDestroyed`는 다음 Tick을 기다리지 않고 즉시 session을 취소하며, Q Complete 직전에도 local owner와 suppression을 재검증한다.
 
 회수 precondition:
 
@@ -160,7 +168,9 @@ Q Started에서 현재 target을 고정하고 Triggered에서 elapsed를 누적�
 - Locker bank: 모든 action slot `Available`, 회수 뒤 설치 용량이 활성 lease 수 이상
 - 공통: `Placed`, 유효 Definition/footprint/package primitive/fixed-slot binding, transaction 미실행
 
-성공 시 설비 위치에서 domain/facility/NavModifier 등록을 해제하고 같은 Actor를 `Packaged` free-world physics로 전환한다. 자동 pickup, held item 변경과 impulse는 없다. package collision 활성화나 registry 전환에 실패하면 모두 `Placed`로 rollback한다.
+회수 낙하 transform은 현재 `PlacementFootprint` 월드 중심의 X/Y와 월드 bounds 바닥 Z에 공통 `RecoveryDropZOffsetCm`를 더한 위치를 사용한다. package collision은 현재 설치 위치가 아니라 이 예정 transform에서 먼저 검사한다.
+
+성공 시 domain/facility/NavModifier 등록을 해제하고 같은 Actor를 위 낙하 위치에서 `Packaged` free-world physics로 전환한다. 자동 pickup, held item 변경과 impulse는 없다. 예정 위치 이동, package collision 활성화나 registry 전환에 실패하면 transform과 mode를 포함해 모두 `Placed`로 rollback한다.
 
 ## Bath Water State
 
@@ -168,7 +178,7 @@ Q Started에서 현재 target을 고정하고 Triggered에서 elapsed를 누적�
 
 ## Locker Bank And Capacity
 
-1/4/8칸 락커는 하나의 `ABathhouseFacilityActor`와 자식 `ULockerActionSlotComponent` N개다. 각 component는 기존 slot 예약/점유 계약을 재사용하고 내부 stable `LockerSlotId`만 가지며 플레이어 번호와 key number는 갖지 않는다.
+1/4/8칸 락커는 하나의 `ABathhouseFacilityActor`와 자식 `ULockerActionSlotComponent` N개다. 각 component는 기존 slot 예약/점유 계약을 재사용하고 author가 명시한 non-empty stable `LockerSlotId`만 가지며 플레이어 번호와 key number는 갖지 않는다. component 이름 fallback은 허용하지 않고 count/ID 중복/누락/확장 상한을 side-effect-free preparation에서 모두 검증한다.
 
 `ULockerCapacitySubsystem`은 `Placed`인 locker bank의 operational action slot만 등록한다.
 
@@ -179,7 +189,7 @@ Q Started에서 현재 target을 고정하고 Triggered에서 elapsed를 누적�
 
 check-in key 전달 transaction에서 provisional lease를 먼저 확보하고 key/session commit이 실패하면 rollback한다. checkout, timeout, technical cleanup과 EndPlay는 idempotent release를 호출한다. lease 없는 check-in timeout은 안전한 no-op다.
 
-locker Actor의 비정상 EndPlay는 player recovery로 처리하거나 package item을 생성하지 않는다. slot은 registry에서 제거하되 기존 customer lease는 보존하고 신규 check-in을 차단하며, 용량이 lease보다 작아진 invariant fault를 기록하고 locker 재배치 또는 customer cleanup까지 유지한다.
+locker Actor의 비정상 EndPlay는 player recovery로 처리하거나 package item을 생성하지 않는다. weak registry compaction은 사라진 bank/slot을 용량에서 제거하되 유효 customer lease는 보존하고 신규 check-in을 차단하며, 용량이 lease보다 작아진 invariant fault를 기록하고 locker 재배치 또는 customer cleanup까지 유지한다. customer owner가 사라진 lease는 compaction으로 제거되고, facility registry 역시 invalid weak entry를 외부 query에 노출하지 않는다.
 
 탈의와 착의는 각각 random available locker action slot을 행동 동안만 reserve/use/release한다. 같은 슬롯일 필요가 없고 `CustomerSession`이 `ClothesStored`만 소유한다. 회수 대상 bank에 Reserved/Occupied slot이 하나라도 있으면 실패한다. Draining, 자동 회수와 montage 강제 중단은 만들지 않는다.
 
@@ -225,7 +235,9 @@ Blueprint는 preview/grid, mode 변경, recovery progress, water state와 capaci
 
 - grid가 항상 보이고 LCtrl이 위치 quantization만 바꾸는지 확인한다.
 - zone-local axes, 10cm 기본 grid, footprint full containment와 collision failure를 확인한다.
-- LMB 실패가 held Actor와 registry를 보존하고 성공만 설치 상태로 전환하는지 확인한다.
+- scaled/rotated zone과 package collision response 기준 blocking/non-blocking overlap을 확인한다.
+- missing/lost preview가 fail-closed이고 LMB 실패가 held Actor의 물리 snapshot과 registry를 보존하는지 확인한다.
+- 성공 notification에서 observer가 empty hand와 완성된 registry만 보고, 동기 재진입/파괴에도 stale entry나 invalid access가 없는지 확인한다.
 - Q 취소 조건과 held item 독립성, 동일 Actor의 무충격 package 전환을 확인한다.
 - washer/dryer contents, bath water/customer, locker action/capacity 감소가 각각 회수를 막는지 확인한다.
 - 1/4/8 bank component 수, Definition slot 수와 확장 제한 합계가 일치하는지 확인한다.

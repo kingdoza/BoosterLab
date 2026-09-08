@@ -14,7 +14,9 @@ enum class EPlayerInteractionIntent : uint8
 	Primary,
 	Secondary,
 	DropCarry,
-	EquipmentUse
+	EquipmentUse,
+	PlacementConfirm,
+	FacilityRecovery
 };
 
 UENUM(BlueprintType)
@@ -119,6 +121,33 @@ struct BATHHOUSESIM_API FPlayerInteractionQuery
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float EquipmentUseProgress = 0.0f;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	bool bPlacementVisible = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	bool bCanPlace = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FText PlacementActionName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FText PlacementFailureReason;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	bool bRecoveryVisible = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	bool bCanRecover = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FText RecoveryActionName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FText RecoveryFailureReason;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float RecoveryProgress = 0.0f;
+
 	bool Equals(const FPlayerInteractionQuery& Other) const
 	{
 		return bVisible == Other.bVisible
@@ -137,7 +166,16 @@ struct BATHHOUSESIM_API FPlayerInteractionQuery
 			&& EquipmentActionName.EqualTo(Other.EquipmentActionName)
 			&& EquipmentFailureReason.EqualTo(Other.EquipmentFailureReason)
 			&& EquipmentActivationMode == Other.EquipmentActivationMode
-			&& FMath::IsNearlyEqual(EquipmentUseProgress, Other.EquipmentUseProgress);
+			&& FMath::IsNearlyEqual(EquipmentUseProgress, Other.EquipmentUseProgress)
+			&& bPlacementVisible == Other.bPlacementVisible
+			&& bCanPlace == Other.bCanPlace
+			&& PlacementActionName.EqualTo(Other.PlacementActionName)
+			&& PlacementFailureReason.EqualTo(Other.PlacementFailureReason)
+			&& bRecoveryVisible == Other.bRecoveryVisible
+			&& bCanRecover == Other.bCanRecover
+			&& RecoveryActionName.EqualTo(Other.RecoveryActionName)
+			&& RecoveryFailureReason.EqualTo(Other.RecoveryFailureReason)
+			&& FMath::IsNearlyEqual(RecoveryProgress, Other.RecoveryProgress);
 	}
 };
 

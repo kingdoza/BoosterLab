@@ -1,4 +1,5 @@
 #include "Towel/CleanTowelStackActor.h"
+#include "Placement/FacilityPlacementComponent.h"
 
 #include "Interaction/PlayerCarryComponent.h"
 #include "Towel/TowelBasketActor.h"
@@ -31,6 +32,11 @@ void ACleanTowelStackActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 FPlayerInteractionQuery ACleanTowelStackActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
+	if (GetFacilityPlacementComponent()
+		&& GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+	{
+		return ABathhouseFacilityActor::QueryInteraction(Context);
+	}
 	FPlayerInteractionQuery Query;
 	Query.bVisible = true;
 	Query.TargetName = LOCTEXT("CleanStack", "깨끗한 수건 선반");
@@ -63,6 +69,11 @@ FPlayerInteractionQuery ACleanTowelStackActor::QueryInteraction(const FPlayerInt
 
 FPlayerInteractionResult ACleanTowelStackActor::ExecuteInteraction(const FPlayerInteractionContext& Context)
 {
+	if (GetFacilityPlacementComponent()
+		&& GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+	{
+		return ABathhouseFacilityActor::ExecuteInteraction(Context);
+	}
 	return TransferFromHeldBasket(Context, 1, EPlayerInteractionIntent::Primary);
 }
 

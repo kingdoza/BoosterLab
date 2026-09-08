@@ -330,6 +330,17 @@ bool ABathhouseKeyActor::InitializeAtHook(ABathhouseKeyHookActor* InHook)
 	return FixedSlot.Get() == InHook;
 }
 
+bool ABathhouseKeyActor::ConfigureRackIdentity(const int32 InKeyNumber, ABathhouseKeyHookActor* InHook)
+{
+	if (HasActorBegunPlay() || InKeyNumber < 0 || !IsValid(InHook))
+	{
+		return false;
+	}
+	KeyNumber = InKeyNumber;
+	KeyHook = InHook;
+	return true;
+}
+
 bool ABathhouseKeyActor::TryTakeFromHook(UPlayerCarryComponent& Carry, ABathhouseKeyHookActor& Hook)
 {
 	return Carry.TryTakeFromFixedSlot(&Hook).bSucceeded;
@@ -353,6 +364,25 @@ bool ABathhouseKeyActor::TryAssignToCustomer(UPlayerCarryComponent& Carry, AActo
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	CommitState(EBathhouseKeyState::AssignedToCustomer, &Customer);
 	SetWorldPresentation(false, false);
+	return true;
+}
+
+bool ABathhouseKeyActor::TryRollbackAssignmentToPlayer(AActor& Customer, UPlayerCarryComponent& Carry)
+{
+	if (KeyState != EBathhouseKeyState::AssignedToCustomer || StateOwner != &Customer || !Carry.IsHandEmpty()
+		|| !Carry.CommitTakeKey(this))
+	{
+		return false;
+	}
+	CounterOwner = nullptr;
+	CommitState(EBathhouseKeyState::HeldByPlayer, &Carry);
+	SetWorldPhysics(false);
+	if (USceneComponent* Anchor = Carry.GetHeldAnchor())
+	{
+		AttachToComponent(Anchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		ApplyHeldTransform();
+	}
+	SetActorHiddenInGame(false);
 	return true;
 }
 

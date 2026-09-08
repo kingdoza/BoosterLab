@@ -59,10 +59,20 @@ void UInteractionPromptWidget::HandleInteractionAttemptFinished(const FPlayerInt
 	ClearTransientFailure(Result.Intent, false);
 	const bool bSecondary = Result.Intent == EPlayerInteractionIntent::Secondary;
 	const bool bEquipment = Result.Intent == EPlayerInteractionIntent::EquipmentUse;
-	FText& FailureReason = bEquipment
+	const bool bPlacement = Result.Intent == EPlayerInteractionIntent::PlacementConfirm;
+	const bool bRecovery = Result.Intent == EPlayerInteractionIntent::FacilityRecovery;
+	FText& FailureReason = bRecovery
+		? RecoveryTransientFailureReason
+		: bPlacement
+		? PlacementTransientFailureReason
+		: bEquipment
 		? EquipmentTransientFailureReason
 		: (bSecondary ? SecondaryTransientFailureReason : PrimaryTransientFailureReason);
-	FTimerHandle& TimerHandle = bEquipment
+	FTimerHandle& TimerHandle = bRecovery
+		? RecoveryFailureTimerHandle
+		: bPlacement
+		? PlacementFailureTimerHandle
+		: bEquipment
 		? EquipmentFailureTimerHandle
 		: (bSecondary ? SecondaryFailureTimerHandle : PrimaryFailureTimerHandle);
 	FailureReason = Result.FailureReason;
@@ -71,7 +81,11 @@ void UInteractionPromptWidget::HandleInteractionAttemptFinished(const FPlayerInt
 		World->GetTimerManager().SetTimer(
 			TimerHandle,
 			this,
-			bEquipment
+			bRecovery
+				? &UInteractionPromptWidget::HandleRecoveryTransientFailureExpired
+				: bPlacement
+				? &UInteractionPromptWidget::HandlePlacementTransientFailureExpired
+				: bEquipment
 				? &UInteractionPromptWidget::HandleEquipmentTransientFailureExpired
 				: bSecondary
 				? &UInteractionPromptWidget::HandleSecondaryTransientFailureExpired
@@ -80,6 +94,16 @@ void UInteractionPromptWidget::HandleInteractionAttemptFinished(const FPlayerInt
 			false);
 	}
 	ApplyCurrentPresentation();
+}
+
+void UInteractionPromptWidget::HandlePlacementTransientFailureExpired()
+{
+	ClearTransientFailure(EPlayerInteractionIntent::PlacementConfirm, true);
+}
+
+void UInteractionPromptWidget::HandleRecoveryTransientFailureExpired()
+{
+	ClearTransientFailure(EPlayerInteractionIntent::FacilityRecovery, true);
 }
 
 void UInteractionPromptWidget::HandlePrimaryTransientFailureExpired()
@@ -144,7 +168,9 @@ void UInteractionPromptWidget::ApplyCurrentPresentation()
 	if (!ensureMsgf(
 		PromptRoot && TargetNameText && ActionNameText && FailureReasonText
 			&& SecondaryActionNameText && SecondaryFailureReasonText && InteractionProgressBar
-			&& EquipmentActionNameText && EquipmentFailureReasonText && EquipmentProgressBar,
+			&& EquipmentActionNameText && EquipmentFailureReasonText && EquipmentProgressBar
+			&& PlacementActionNameText && PlacementFailureReasonText
+			&& RecoveryActionNameText && RecoveryFailureReasonText && RecoveryProgressBar,
 		TEXT("InteractionPromptWidget is missing one or more required BindWidget fields.")))
 	{
 		return;
@@ -156,8 +182,12 @@ void UInteractionPromptWidget::ApplyCurrentPresentation()
 	const bool bHasPrimaryTransientFailure = !PrimaryTransientFailureReason.IsEmpty();
 	const bool bHasSecondaryTransientFailure = !SecondaryTransientFailureReason.IsEmpty();
 	const bool bHasEquipmentTransientFailure = !EquipmentTransientFailureReason.IsEmpty();
-	const bool bHasTransientFailure = bHasPrimaryTransientFailure || bHasSecondaryTransientFailure || bHasEquipmentTransientFailure;
-	const bool bShowPrompt = bHasVisibleQuery || CachedQuery.bEquipmentUseVisible || bHasTransientFailure;
+	const bool bHasPlacementTransientFailure = !PlacementTransientFailureReason.IsEmpty();
+	const bool bHasRecoveryTransientFailure = !RecoveryTransientFailureReason.IsEmpty();
+	const bool bHasTransientFailure = bHasPrimaryTransientFailure || bHasSecondaryTransientFailure
+		|| bHasEquipmentTransientFailure || bHasPlacementTransientFailure || bHasRecoveryTransientFailure;
+	const bool bShowPrompt = bHasVisibleQuery || CachedQuery.bEquipmentUseVisible
+		|| CachedQuery.bPlacementVisible || CachedQuery.bRecoveryVisible || bHasTransientFailure;
 	const bool bSecondaryVisible = bHasVisibleQuery && CachedQuery.bSecondaryVisible;
 	const bool bPromptEnabled = IsPromptRootEnabled(CachedQuery);
 	const bool bPrimaryEnabled = IsLegacyPrimaryEnabled(CachedQuery);
@@ -183,6 +213,14 @@ void UInteractionPromptWidget::ApplyCurrentPresentation()
 	const bool bShowEquipmentFailure = bEquipmentVisible && !EffectiveEquipmentFailureReason.IsEmpty();
 	const bool bShowEquipmentHold = CachedQuery.bEquipmentUseVisible
 		&& CachedQuery.EquipmentActivationMode == EPlayerInteractionActivationMode::Hold;
+	const bool bPlacementVisible = CachedQuery.bPlacementVisible || bHasPlacementTransientFailure;
+	const FText& EffectivePlacementFailure = bHasPlacementTransientFailure
+		? PlacementTransientFailureReason
+		: CachedQuery.PlacementFailureReason;
+	const bool bRecoveryVisible = CachedQuery.bRecoveryVisible || bHasRecoveryTransientFailure;
+	const FText& EffectiveRecoveryFailure = bHasRecoveryTransientFailure
+		? RecoveryTransientFailureReason
+		: CachedQuery.RecoveryFailureReason;
 
 	PromptRoot->SetVisibility(bShowPrompt ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	PromptRoot->SetIsEnabled(bPromptEnabled);
@@ -207,6 +245,21 @@ void UInteractionPromptWidget::ApplyCurrentPresentation()
 	EquipmentFailureReasonText->SetVisibility(bShowEquipmentFailure ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	EquipmentProgressBar->SetPercent(FMath::Clamp(CachedQuery.EquipmentUseProgress, 0.0f, 1.0f));
 	EquipmentProgressBar->SetVisibility(bShowEquipmentHold ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	PlacementActionNameText->SetText(CachedQuery.bPlacementVisible ? CachedQuery.PlacementActionName : EmptyText);
+	PlacementActionNameText->SetIsEnabled(CachedQuery.bPlacementVisible && CachedQuery.bCanPlace);
+	PlacementActionNameText->SetVisibility(bPlacementVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	PlacementFailureReasonText->SetText(EffectivePlacementFailure);
+	PlacementFailureReasonText->SetVisibility(bPlacementVisible && !EffectivePlacementFailure.IsEmpty()
+		? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	RecoveryActionNameText->SetText(CachedQuery.bRecoveryVisible ? CachedQuery.RecoveryActionName : EmptyText);
+	RecoveryActionNameText->SetIsEnabled(CachedQuery.bRecoveryVisible && CachedQuery.bCanRecover);
+	RecoveryActionNameText->SetVisibility(bRecoveryVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	RecoveryFailureReasonText->SetText(EffectiveRecoveryFailure);
+	RecoveryFailureReasonText->SetVisibility(bRecoveryVisible && !EffectiveRecoveryFailure.IsEmpty()
+		? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	RecoveryProgressBar->SetPercent(FMath::Clamp(CachedQuery.RecoveryProgress, 0.0f, 1.0f));
+	RecoveryProgressBar->SetVisibility(CachedQuery.bRecoveryVisible
+		? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 
 	OnInteractionPromptChanged(
 		bShowPrompt,
@@ -228,13 +281,22 @@ void UInteractionPromptWidget::ApplyCurrentPresentation()
 		EffectiveEquipmentFailureReason,
 		bShowEquipmentHold,
 		FMath::Clamp(CachedQuery.EquipmentUseProgress, 0.0f, 1.0f));
+	OnFacilityPlacementPromptChanged(
+		bPlacementVisible,
+		CachedQuery.bPlacementVisible && CachedQuery.bCanPlace,
+		EffectivePlacementFailure,
+		bRecoveryVisible,
+		CachedQuery.bRecoveryVisible && CachedQuery.bCanRecover,
+		FMath::Clamp(CachedQuery.RecoveryProgress, 0.0f, 1.0f));
 }
 
 bool UInteractionPromptWidget::IsPromptRootEnabled(const FPlayerInteractionQuery& Query)
 {
 	return (Query.bVisible && Query.bCanInteract)
 		|| (Query.bSecondaryVisible && Query.bCanSecondaryInteract)
-		|| (Query.bEquipmentUseVisible && Query.bCanEquipmentUse);
+		|| (Query.bEquipmentUseVisible && Query.bCanEquipmentUse)
+		|| (Query.bPlacementVisible && Query.bCanPlace)
+		|| (Query.bRecoveryVisible && Query.bCanRecover);
 }
 
 bool UInteractionPromptWidget::IsLegacyPrimaryEnabled(const FPlayerInteractionQuery& Query)
@@ -248,10 +310,20 @@ bool UInteractionPromptWidget::ClearTransientFailure(
 {
 	const bool bSecondary = Intent == EPlayerInteractionIntent::Secondary;
 	const bool bEquipment = Intent == EPlayerInteractionIntent::EquipmentUse;
-	FText& FailureReason = bEquipment
+	const bool bPlacement = Intent == EPlayerInteractionIntent::PlacementConfirm;
+	const bool bRecovery = Intent == EPlayerInteractionIntent::FacilityRecovery;
+	FText& FailureReason = bRecovery
+		? RecoveryTransientFailureReason
+		: bPlacement
+		? PlacementTransientFailureReason
+		: bEquipment
 		? EquipmentTransientFailureReason
 		: (bSecondary ? SecondaryTransientFailureReason : PrimaryTransientFailureReason);
-	FTimerHandle& TimerHandle = bEquipment
+	FTimerHandle& TimerHandle = bRecovery
+		? RecoveryFailureTimerHandle
+		: bPlacement
+		? PlacementFailureTimerHandle
+		: bEquipment
 		? EquipmentFailureTimerHandle
 		: (bSecondary ? SecondaryFailureTimerHandle : PrimaryFailureTimerHandle);
 	const bool bHadTransientFailure = !FailureReason.IsEmpty() || TimerHandle.IsValid();
@@ -273,9 +345,12 @@ bool UInteractionPromptWidget::ClearAllTransientFailures(const bool bRefreshPres
 	const bool bClearedPrimary = ClearTransientFailure(EPlayerInteractionIntent::Primary, false);
 	const bool bClearedSecondary = ClearTransientFailure(EPlayerInteractionIntent::Secondary, false);
 	const bool bClearedEquipment = ClearTransientFailure(EPlayerInteractionIntent::EquipmentUse, false);
-	if (bRefreshPresentation && (bClearedPrimary || bClearedSecondary || bClearedEquipment) && bHasPresentedQuery)
+	const bool bClearedPlacement = ClearTransientFailure(EPlayerInteractionIntent::PlacementConfirm, false);
+	const bool bClearedRecovery = ClearTransientFailure(EPlayerInteractionIntent::FacilityRecovery, false);
+	if (bRefreshPresentation && (bClearedPrimary || bClearedSecondary || bClearedEquipment
+		|| bClearedPlacement || bClearedRecovery) && bHasPresentedQuery)
 	{
 		ApplyCurrentPresentation();
 	}
-	return bClearedPrimary || bClearedSecondary || bClearedEquipment;
+	return bClearedPrimary || bClearedSecondary || bClearedEquipment || bClearedPlacement || bClearedRecovery;
 }

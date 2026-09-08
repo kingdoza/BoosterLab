@@ -8,7 +8,7 @@ UENUM(BlueprintType)
 enum class EBathhouseCustomerActivity : uint8
 {
 	None,
-	StoreShoes,
+	StoreShoes UMETA(Hidden, Deprecated, DeprecationMessage = "Shoe gameplay is no longer used by the canonical routine."),
 	Undress,
 	PreShower,
 	BathDwell,
@@ -16,7 +16,7 @@ enum class EBathhouseCustomerActivity : uint8
 	Drying,
 	ReturnTowel,
 	Dress,
-	WearShoes
+	WearShoes UMETA(Hidden, Deprecated, DeprecationMessage = "Shoe gameplay is no longer used by the canonical routine.")
 };
 
 UENUM(BlueprintType)

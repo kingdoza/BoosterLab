@@ -566,38 +566,10 @@ bool FBathhousePhysicalCarryDropTest::RunTest(const FString& Parameters)
 	Basket->GetPhysicalCarryPrimitive()->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	Basket->SetActorLocation(FVector(0.0f, 500.0f, 100.0f), false, nullptr, ETeleportType::TeleportPhysics);
 
-	FEnumProperty* FacilityTypeProperty = FindFProperty<FEnumProperty>(
-		ABathhouseFacilityActor::StaticClass(),
-		TEXT("FacilityType"));
-	FIntProperty* FacilityNumberProperty = FindFProperty<FIntProperty>(
-		ABathhouseFacilityActor::StaticClass(),
-		TEXT("FacilityNumber"));
-	const auto SpawnNumberedFacility = [&](const EBathhouseFacilityType FacilityType)
-	{
-		ABathhouseFacilityActor* Facility = World->SpawnActor<ABathhouseFacilityActor>();
-		if (Facility && FacilityTypeProperty && FacilityNumberProperty)
-		{
-			void* TypeAddress = FacilityTypeProperty->ContainerPtrToValuePtr<void>(Facility);
-			FacilityTypeProperty->GetUnderlyingProperty()->SetIntPropertyValue(
-				TypeAddress,
-				static_cast<int64>(FacilityType));
-			FacilityNumberProperty->SetPropertyValue_InContainer(Facility, 0);
-			BeginActorForTest(Facility);
-		}
-		return Facility;
-	};
-	TestNotNull(TEXT("Facility type reflection is available for key topology setup"), FacilityTypeProperty);
-	TestNotNull(TEXT("Facility number reflection is available for key topology setup"), FacilityNumberProperty);
-	ABathhouseFacilityActor* ShoeLocker = SpawnNumberedFacility(EBathhouseFacilityType::ShoeLocker);
-	ABathhouseFacilityActor* ClothesLocker = SpawnNumberedFacility(EBathhouseFacilityType::ClothesLocker);
-	TestTrue(TEXT("Key topology setup registers the numbered shoe locker"),
-		ShoeLocker && ShoeLocker->GetFacilityNumber() == 0);
-	TestTrue(TEXT("Key topology setup registers the numbered clothes locker"),
-		ClothesLocker && ClothesLocker->GetFacilityNumber() == 0);
-
 	ABathhouseKeyHookActor* KeyHook = World->SpawnActor<ABathhouseKeyHookActor>();
 	ABathhouseKeyActor* Key = World->SpawnActor<ABathhouseKeyActor>();
 	KeyHook->KeyActor = Key;
+	KeyHook->InitializeRuntimeFixedSlot();
 	BeginActorForTest(KeyHook);
 	BeginActorForTest(Key);
 	Key->HeldTransform = FTransform(

@@ -1,44 +1,42 @@
 #include "Facility/BathhouseFacilitySubsystem.h"
 
 #include "Facility/BathhouseFacilityActor.h"
+#include "Facility/BathhouseExpansionAuthority.h"
 #include "Facility/BathhouseFacilitySlotComponent.h"
 
 #define LOCTEXT_NAMESPACE "BathhouseFacilitySubsystem"
 
-namespace
-{
-bool AffectsKeyTopology(const ABathhouseFacilityActor* Facility)
-{
-	return Facility
-		&& (Facility->GetFacilityType() == EBathhouseFacilityType::ShoeLocker
-			|| Facility->GetFacilityType() == EBathhouseFacilityType::ClothesLocker);
-}
-}
-
-void UBathhouseFacilitySubsystem::RegisterFacility(ABathhouseFacilityActor* Facility)
+bool UBathhouseFacilitySubsystem::RegisterFacility(
+	ABathhouseFacilityActor* Facility,
+	const bool bPublish)
 {
 	if (IsValid(Facility) && !RegisteredFacilities.Contains(Facility))
 	{
 		RegisteredFacilities.Add(Facility);
-		if (AffectsKeyTopology(Facility))
+		if (bPublish)
 		{
-			OnKeyTopologyChanged.Broadcast();
+			NotifyFacilityAvailabilityChanged(Facility->GetFacilityType());
 		}
-		NotifyFacilityAvailabilityChanged(Facility->GetFacilityType());
+		return true;
 	}
+	return IsValid(Facility) && RegisteredFacilities.Contains(Facility);
 }
 
-void UBathhouseFacilitySubsystem::UnregisterFacility(ABathhouseFacilityActor* Facility)
+bool UBathhouseFacilitySubsystem::UnregisterFacility(
+	ABathhouseFacilityActor* Facility,
+	const bool bPublish)
 {
 	const bool bWasRegistered = RegisteredFacilities.Remove(Facility) > 0;
-	if (Facility)
+	if (bPublish && IsValid(Facility) && bWasRegistered)
 	{
-		if (bWasRegistered && AffectsKeyTopology(Facility))
-		{
-			OnKeyTopologyChanged.Broadcast();
-		}
 		NotifyFacilityAvailabilityChanged(Facility->GetFacilityType());
 	}
+	return bWasRegistered;
+}
+
+bool UBathhouseFacilitySubsystem::IsFacilityRegistered(const ABathhouseFacilityActor* Facility) const
+{
+	return IsValid(Facility) && RegisteredFacilities.Contains(Facility);
 }
 
 void UBathhouseFacilitySubsystem::NotifyFacilityAvailabilityChanged(const EBathhouseFacilityType FacilityType)
@@ -94,33 +92,45 @@ bool UBathhouseFacilitySubsystem::ValidateKeyNumber(
 		return false;
 	}
 
-	for (const EBathhouseFacilityType Type : { EBathhouseFacilityType::ShoeLocker, EBathhouseFacilityType::ClothesLocker })
-	{
-		int32 Count = 0;
-		for (const TWeakObjectPtr<ABathhouseFacilityActor>& Facility : RegisteredFacilities)
-		{
-			if (Facility.IsValid()
-				&& Facility->IsFacilityEnabled()
-				&& Facility->GetFacilityType() == Type
-				&& Facility->GetFacilityNumber() == KeyNumber)
-			{
-				++Count;
-			}
-		}
-
-		if (Count != 1)
-		{
-			if (OutFailureReason)
-			{
-				*OutFailureReason = Type == EBathhouseFacilityType::ShoeLocker
-					? LOCTEXT("InvalidShoeLockerCount", "이 번호의 신발장이 누락되었거나 중복되었습니다.")
-					: LOCTEXT("InvalidClothesLockerCount", "이 번호의 옷장이 누락되었거나 중복되었습니다.");
-			}
-			return false;
-		}
-	}
-
 	return true;
+}
+
+bool UBathhouseFacilitySubsystem::RegisterExpansionAuthority(
+	ABathhouseExpansionAuthority* Authority,
+	FText& OutFailureReason)
+{
+	if (!IsValid(Authority))
+	{
+		OutFailureReason = LOCTEXT("InvalidExpansionAuthority", "확장 단계 관리자가 올바르지 않습니다.");
+		return false;
+	}
+	if (ExpansionAuthority.IsValid() && ExpansionAuthority.Get() != Authority)
+	{
+		OutFailureReason = LOCTEXT("DuplicateExpansionAuthority", "월드에는 확장 단계 관리자를 하나만 둘 수 있습니다.");
+		return false;
+	}
+	ExpansionAuthority = Authority;
+	OnExpansionAuthorityChanged.Broadcast(Authority);
+	return true;
+}
+
+void UBathhouseFacilitySubsystem::UnregisterExpansionAuthority(ABathhouseExpansionAuthority* Authority)
+{
+	if (ExpansionAuthority.Get() == Authority)
+	{
+		ExpansionAuthority.Reset();
+		OnExpansionAuthorityChanged.Broadcast(nullptr);
+	}
+}
+
+int32 UBathhouseFacilitySubsystem::GetMaxInstalledLockerSlots() const
+{
+	return ExpansionAuthority.IsValid() ? ExpansionAuthority->GetCurrentMaxInstalledLockerSlots() : 0;
+}
+
+int32 UBathhouseFacilitySubsystem::GetCurrentKeyPoolSize() const
+{
+	return ExpansionAuthority.IsValid() ? ExpansionAuthority->GetCurrentKeyPoolSize() : 0;
 }
 
 ABathhouseFacilityActor* UBathhouseFacilitySubsystem::FindNumberedFacility(

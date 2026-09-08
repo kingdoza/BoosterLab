@@ -4,7 +4,7 @@
 
 UI System은 BathhouseSim의 native C++ Widget과 Widget Blueprint 사이의 공통 책임 경계를 정의한다.
 
-native UI Source는 primary/secondary/equipment action과 hold progress를 처리한다. Placement target은 같은 prompt에 LMB placement와 Q recovery 행을 추가하며 C++이 상태를 적용하고 WBP는 필수 BindWidget의 layout/style만 소유한다.
+native UI Source는 primary/secondary/equipment/placement/recovery action과 hold progress를 처리한다. C++이 상태를 적용하고 WBP는 필수 BindWidget의 layout/style만 소유한다.
 
 ```text
 Source/BathhouseSim/Public/UI/

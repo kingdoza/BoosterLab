@@ -100,7 +100,7 @@ Equipment row 합성은 현재 held Actor가 `IHeldEquipmentUsable`이면 해당
 - execute 뒤에는 query를 먼저 refresh한 다음 attempt result를 방송하므로 UI는 최신 지속 상태 위에 일시 실행 피드백을 표시할 수 있다.
 - key, mop, basket, towel, stain, customer, cash 같은 구체 domain type을 직접 판별하지 않는다.
 - focus target의 world query와 held Actor의 equipment query를 합성해 E/F/LMB row의 단일 `FPlayerInteractionQuery`를 방송한다.
-- Interaction package가 소유한 supplemental intent-source interface를 통해 placement/recovery presentation state를 합성한다. concrete Placement component에 의존하거나 설비 mode/progress를 직접 변경하지 않는다.
+- Interaction package가 소유한 supplemental intent-source interface를 통해 포커스 Actor의 recovery row를 일반 target query에 합성한다. player-global supplemental source는 placement row와 활성 recovery progress만 보충한다. Interaction은 concrete Placement component에 의존하거나 설비 mode/progress를 직접 변경하지 않는다.
 - equipment-use attempt result를 `EquipmentUse` intent로 받아 기존 query/result delegate에 합성하되 domain mutation을 대행하지 않는다.
 - active hold는 target/input/focus/carry/EndPlay invalidation에서 정확히 한 번 cancel한다.
 - pawn 종료·교체 시 focus를 지우고 query/result delegate를 정리한다.

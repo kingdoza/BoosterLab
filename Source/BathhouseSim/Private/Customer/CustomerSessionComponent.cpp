@@ -14,6 +14,8 @@
 #include "Facility/BathhouseFacilityActor.h"
 #include "Facility/BathhouseFacilitySlotComponent.h"
 #include "Facility/BathhouseFacilitySubsystem.h"
+#include "Facility/LockerActionSlotComponent.h"
+#include "Facility/LockerCapacitySubsystem.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Interaction/BathhouseKeyActor.h"
@@ -55,6 +57,7 @@ void UCustomerSessionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 		World->GetTimerManager().ClearTimer(TowelWaitTimerHandle);
 	}
 	CleanupTowelHandle();
+	ReleaseLockerLease();
 	StopWaitingForFacility();
 	ReleaseCurrentFacility();
 	LeaveQueue();
@@ -125,7 +128,9 @@ FPlayerInteractionQuery UCustomerSessionComponent::QueryCheckInInteraction(const
 	FText TopologyFailure;
 	const ABathhouseKeyHookActor* Hook = HeldKey->GetKeyHook();
 	const UBathhouseFacilitySubsystem* Subsystem = GetWorld() ? GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>() : nullptr;
-	Query.bCanInteract = Hook && Subsystem && Subsystem->ValidateKeyNumber(HeldKey->GetKeyNumber(), Hook, &TopologyFailure);
+	const ULockerCapacitySubsystem* Lockers = GetWorld() ? GetWorld()->GetSubsystem<ULockerCapacitySubsystem>() : nullptr;
+	Query.bCanInteract = Hook && Subsystem && Subsystem->ValidateKeyNumber(HeldKey->GetKeyNumber(), Hook, &TopologyFailure)
+		&& Lockers && Lockers->CanAcquireLease(&TopologyFailure);
 	if (!Query.bCanInteract)
 	{
 		Query.FailureReason = TopologyFailure.IsEmpty()
@@ -144,15 +149,33 @@ FPlayerInteractionResult UCustomerSessionComponent::ExecuteCheckInInteraction(co
 	}
 
 	ABathhouseKeyActor* Key = Context.CarryComponent->GetHeldKey();
-	if (!Key || !Key->TryAssignToCustomer(*Context.CarryComponent, *GetOwner()))
+	ULockerCapacitySubsystem* Lockers = GetWorld() ? GetWorld()->GetSubsystem<ULockerCapacitySubsystem>() : nullptr;
+	FLockerCapacityLeaseHandle ProvisionalLease;
+	FText LeaseFailure;
+	if (!Key || !Lockers || !Lockers->TryAcquireProvisionalLease(GetOwner(), ProvisionalLease, LeaseFailure))
 	{
+		return FPlayerInteractionResult::Failed(LeaseFailure.IsEmpty() ? LOCTEXT("LeaseFailed", "락커 수용량을 확보할 수 없습니다.") : LeaseFailure);
+	}
+	if (!Key->TryAssignToCustomer(*Context.CarryComponent, *GetOwner()))
+	{
+		Lockers->RollbackLease(ProvisionalLease);
 		return FPlayerInteractionResult::Failed(LOCTEXT("KeyCommitFailed", "키 상태가 변경되어 전달에 실패했습니다."));
+	}
+	if (!Lockers->CommitLease(ProvisionalLease))
+	{
+		if (!Key->TryRollbackAssignmentToPlayer(*GetOwner(), *Context.CarryComponent))
+		{
+			Key->RecoverToHook(GetOwner());
+		}
+		Lockers->RollbackLease(ProvisionalLease);
+		return FPlayerInteractionResult::Failed(LOCTEXT("LeaseCommitFailed", "락커 수용량 확정에 실패했습니다."));
 	}
 
 	bCheckInTerminalCommitted = true;
 	bWaitingForCheckIn = false;
 	AssignedKey = Key;
 	KeyNumber = Key->GetKeyNumber();
+	LockerLeaseHandle = ProvisionalLease;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(CheckInTimeoutHandle);
@@ -267,17 +290,31 @@ bool UCustomerSessionComponent::TryReserveFacility(const EBathhouseFacilityType 
 		return false;
 	}
 
-	const int32 Number = FacilityType == EBathhouseFacilityType::ShoeLocker || FacilityType == EBathhouseFacilityType::ClothesLocker
-		? KeyNumber
-		: INDEX_NONE;
+	if (FacilityType == EBathhouseFacilityType::ShoeLocker)
+	{
+		return false;
+	}
 	ABathhouseFacilityActor* Facility = nullptr;
 	UBathhouseFacilitySlotComponent* Slot = nullptr;
-	if (!Subsystem->TryReserveRandomSlot(
+	if (FacilityType == EBathhouseFacilityType::ClothesLocker)
+	{
+		AActor* Bank = nullptr;
+		ULockerActionSlotComponent* LockerSlot = nullptr;
+		ULockerCapacitySubsystem* Lockers = GetWorld()->GetSubsystem<ULockerCapacitySubsystem>();
+		if (!Lockers || !Lockers->TryReserveRandomActionSlot(GetOwner(), Bank, LockerSlot))
+		{
+			WaitForFacility(FacilityType);
+			return false;
+		}
+		Facility = Cast<ABathhouseFacilityActor>(Bank);
+		Slot = LockerSlot;
+	}
+	else if (!Subsystem->TryReserveRandomSlot(
 		FacilityType,
 		GetOwner(),
 		Facility,
 		Slot,
-		Number,
+		INDEX_NONE,
 		bExcludeLastBath ? LastBathActor.Get() : nullptr))
 	{
 		WaitForFacility(FacilityType);
@@ -677,6 +714,14 @@ void UCustomerSessionComponent::FinishActivity(const EBathhouseCustomerActivity 
 	{
 		LastBathActor = CurrentFacilityActor;
 	}
+	else if (Activity == EBathhouseCustomerActivity::Undress)
+	{
+		bClothesStored = true;
+	}
+	else if (Activity == EBathhouseCustomerActivity::Dress)
+	{
+		bClothesStored = false;
+	}
 	CurrentActivity = EBathhouseCustomerActivity::None;
 	if (Activity == EBathhouseCustomerActivity::PreShower)
 	{
@@ -889,11 +934,17 @@ bool UCustomerSessionComponent::TryPlaceCheckoutKey()
 	}
 	if (AssignedKey->GetKeyState() == EBathhouseKeyState::OnCounter)
 	{
+		ReleaseLockerLease();
 		return true;
 	}
 
-	return AssignedKey->TryPlaceOnCounter(*GetOwner(), *Counter)
+	const bool bPlaced = AssignedKey->TryPlaceOnCounter(*GetOwner(), *Counter)
 		&& AssignedKey->GetKeyState() == EBathhouseKeyState::OnCounter;
+	if (bPlaced)
+	{
+		ReleaseLockerLease();
+	}
+	return bPlaced;
 }
 
 bool UCustomerSessionComponent::TryCreateCashOffer(TSubclassOf<ABathhouseCashPaymentActor> CashClass)
@@ -967,6 +1018,7 @@ void UCustomerSessionComponent::FinishSession(const EBathhouseCustomerDepartureR
 		World->GetTimerManager().ClearTimer(TowelWaitTimerHandle);
 	}
 	CleanupTowelHandle();
+	ReleaseLockerLease();
 	StopWaitingForFacility();
 	ReleaseCurrentFacility();
 	LeaveQueue();
@@ -1005,6 +1057,7 @@ void UCustomerSessionComponent::TechnicalAbort(const FString& ErrorMessage)
 		World->GetTimerManager().ClearTimer(TowelWaitTimerHandle);
 	}
 	CleanupTowelHandle();
+	ReleaseLockerLease();
 	StopWaitingForFacility();
 	ReleaseCurrentFacility();
 	LeaveQueue();
@@ -1018,6 +1071,22 @@ void UCustomerSessionComponent::TechnicalAbort(const FString& ErrorMessage)
 		AssignedKey->RecoverToHook();
 	}
 	SetPresentationState(EBathhouseCustomerPresentationState::Leaving);
+}
+
+void UCustomerSessionComponent::ReleaseLockerLease()
+{
+	if (!LockerLeaseHandle.IsValid())
+	{
+		return;
+	}
+	if (ULockerCapacitySubsystem* Lockers = GetWorld() ? GetWorld()->GetSubsystem<ULockerCapacitySubsystem>() : nullptr)
+	{
+		Lockers->ReleaseLease(LockerLeaseHandle);
+	}
+	else
+	{
+		LockerLeaseHandle.Reset();
+	}
 }
 
 void UCustomerSessionComponent::SendCustomerEvent(const FGameplayTag& EventTag) const

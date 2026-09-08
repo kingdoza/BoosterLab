@@ -17,6 +17,7 @@
 #include "Interaction/HeldEquipmentMotionComponent.h"
 #include "Interaction/PlayerEquipmentUseComponent.h"
 #include "Interaction/PlayerInteractionComponent.h"
+#include "Placement/PlayerFacilityPlacementComponent.h"
 
 AFirstPersonCharacter::AFirstPersonCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UFirstPersonMovementComponent>(ACharacter::CharacterMovementComponentName))
@@ -42,6 +43,9 @@ AFirstPersonCharacter::AFirstPersonCharacter(const FObjectInitializer& ObjectIni
 	PlayerEquipmentUse->Configure(FirstPersonCamera, PlayerCarry, PlayerInteraction, HeldEquipmentMotion);
 	PlayerInteraction->ConfigureEquipmentUse(PlayerEquipmentUse);
 	PlayerCarry->ConfigureEquipmentUse(PlayerEquipmentUse);
+	PlayerFacilityPlacement = CreateDefaultSubobject<UPlayerFacilityPlacementComponent>(TEXT("PlayerFacilityPlacement"));
+	PlayerFacilityPlacement->Configure(FirstPersonCamera, PlayerCarry, PlayerInteraction);
+	PlayerInteraction->ConfigureSupplementalIntentSource(PlayerFacilityPlacement);
 	ComputerWidgetInteraction = CreateDefaultSubobject<UWidgetInteractionComponent>(TEXT("ComputerWidgetInteraction"));
 	ComputerWidgetInteraction->SetupAttachment(FirstPersonCamera);
 	ComputerWidgetInteraction->InteractionSource = EWidgetInteractionSource::Mouse;
@@ -132,6 +136,24 @@ void AFirstPersonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 			ETriggerEvent::Started,
 			this,
 			&AFirstPersonCharacter::DropCarryInput);
+	}
+
+	if (RecoverFacilityAction)
+	{
+		EnhancedInputComponent->BindAction(RecoverFacilityAction, ETriggerEvent::Started, this, &AFirstPersonCharacter::RecoverFacilityStartInput);
+		EnhancedInputComponent->BindAction(RecoverFacilityAction, ETriggerEvent::Triggered, this, &AFirstPersonCharacter::RecoverFacilityTriggeredInput);
+		EnhancedInputComponent->BindAction(RecoverFacilityAction, ETriggerEvent::Completed, this, &AFirstPersonCharacter::RecoverFacilityCompletedInput);
+		EnhancedInputComponent->BindAction(RecoverFacilityAction, ETriggerEvent::Canceled, this, &AFirstPersonCharacter::RecoverFacilityCanceledInput);
+	}
+	if (PlacementSnapAction)
+	{
+		EnhancedInputComponent->BindAction(PlacementSnapAction, ETriggerEvent::Started, this, &AFirstPersonCharacter::PlacementSnapStartInput);
+		EnhancedInputComponent->BindAction(PlacementSnapAction, ETriggerEvent::Completed, this, &AFirstPersonCharacter::PlacementSnapEndInput);
+		EnhancedInputComponent->BindAction(PlacementSnapAction, ETriggerEvent::Canceled, this, &AFirstPersonCharacter::PlacementSnapEndInput);
+	}
+	if (PlacementRotateAction)
+	{
+		EnhancedInputComponent->BindAction(PlacementRotateAction, ETriggerEvent::Triggered, this, &AFirstPersonCharacter::PlacementRotateInput);
 	}
 
 	UInputAction* BoundPrimaryUseAction = PrimaryUseAction ? PrimaryUseAction.Get() : ComputerClickAction.Get();
@@ -275,6 +297,12 @@ void AFirstPersonCharacter::PrimaryUseStartInput()
 		bComputerOwnsPointerPress = PlayerComputerUse->PressPointer();
 		return;
 	}
+	if (PlayerFacilityPlacement && PlayerFacilityPlacement->IsPlacementActive())
+	{
+		PrimaryUsePressOwner = EPrimaryUsePressOwner::Placement;
+		PlayerFacilityPlacement->ConfirmPlacement();
+		return;
+	}
 	PrimaryUsePressOwner = EPrimaryUsePressOwner::Equipment;
 	if (PlayerEquipmentUse)
 	{
@@ -307,6 +335,66 @@ void AFirstPersonCharacter::PrimaryUseEndInput()
 	if (PreviousOwner == EPrimaryUsePressOwner::Equipment && PlayerEquipmentUse)
 	{
 		PlayerEquipmentUse->EndEquipmentUse();
+	}
+}
+
+void AFirstPersonCharacter::RecoverFacilityStartInput()
+{
+	if ((!PlayerComputerUse || !PlayerComputerUse->IsCapturingInput()) && PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->BeginRecoveryHold();
+	}
+}
+
+void AFirstPersonCharacter::RecoverFacilityTriggeredInput()
+{
+	if ((!PlayerComputerUse || !PlayerComputerUse->IsCapturingInput()) && PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->UpdateRecoveryHold(GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+	}
+}
+
+void AFirstPersonCharacter::RecoverFacilityCompletedInput()
+{
+	if ((!PlayerComputerUse || !PlayerComputerUse->IsCapturingInput()) && PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->CompleteRecoveryHold();
+	}
+	else if (PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->CancelRecoveryHold();
+	}
+}
+
+void AFirstPersonCharacter::RecoverFacilityCanceledInput()
+{
+	if (PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->CancelRecoveryHold();
+	}
+}
+
+void AFirstPersonCharacter::PlacementSnapStartInput()
+{
+	if ((!PlayerComputerUse || !PlayerComputerUse->IsCapturingInput()) && PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->SetSnapHeld(true);
+	}
+}
+
+void AFirstPersonCharacter::PlacementSnapEndInput()
+{
+	if (PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->SetSnapHeld(false);
+	}
+}
+
+void AFirstPersonCharacter::PlacementRotateInput(const FInputActionValue& Value)
+{
+	if ((!PlayerComputerUse || !PlayerComputerUse->IsCapturingInput()) && PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->AddRotationInput(Value.Get<float>());
 	}
 }
 

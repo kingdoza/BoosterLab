@@ -5,6 +5,7 @@
 #include "Interaction/PlayerCarryComponent.h"
 #include "Interaction/PlayerEquipmentUseComponent.h"
 #include "Interaction/PlayerInteractable.h"
+#include "Interaction/SupplementalInteractionIntentSource.h"
 
 UPlayerInteractionComponent::UPlayerInteractionComponent()
 {
@@ -27,7 +28,14 @@ void UPlayerInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
 	Camera = nullptr;
 	CarryComponent = nullptr;
 	EquipmentUseComponent = nullptr;
+	SupplementalIntentSource = nullptr;
 	Super::EndPlay(EndPlayReason);
+}
+
+void UPlayerInteractionComponent::ConfigureSupplementalIntentSource(UObject* InSupplementalIntentSource)
+{
+	SupplementalIntentSource = InSupplementalIntentSource;
+	RefreshInteractionQuery();
 }
 
 void UPlayerInteractionComponent::TickComponent(
@@ -150,7 +158,9 @@ FPlayerInteractionResult UPlayerInteractionComponent::BeginPrimaryInteraction()
 			FPlayerInteractionResult::Failed(NSLOCTEXT("BathhouseInteraction", "NoTarget", "상호작용 대상이 없습니다.")));
 	}
 
-	const FPlayerInteractionQuery Query = Interactable->QueryInteraction(Context);
+	const FPlayerInteractionQuery Query = MergeFocusedSupplementalQuery(
+		Context,
+		Interactable->QueryInteraction(Context));
 	CommitQuery(TargetObject, Query);
 	if (!Query.bVisible || !Query.bCanInteract)
 	{
@@ -169,7 +179,9 @@ FPlayerInteractionResult UPlayerInteractionComponent::BeginPrimaryInteraction()
 		ActiveHoldTarget = TargetObject;
 		ActiveHoldContext = Context;
 		ActiveHoldProgress = 0.0f;
-		FPlayerInteractionQuery HoldQuery = Interactable->QueryInteraction(Context);
+		FPlayerInteractionQuery HoldQuery = MergeFocusedSupplementalQuery(
+			Context,
+			Interactable->QueryInteraction(Context));
 		HoldQuery.HoldProgress = 0.0f;
 		CommitQuery(TargetObject, HoldQuery);
 		return FPlayerInteractionResult::Succeeded();
@@ -215,7 +227,9 @@ FPlayerInteractionResult UPlayerInteractionComponent::TrySecondaryInteract()
 			NSLOCTEXT("BathhouseInteraction", "NoSecondaryTarget", "보조 상호작용 대상이 없습니다."),
 			EPlayerInteractionIntent::Secondary));
 	}
-	const FPlayerInteractionQuery Query = Interactable->QueryInteraction(Context);
+	const FPlayerInteractionQuery Query = MergeFocusedSupplementalQuery(
+		Context,
+		Interactable->QueryInteraction(Context));
 	CommitQuery(TargetObject, Query);
 	if (!Query.bSecondaryVisible || !Query.bCanSecondaryInteract)
 	{
@@ -277,7 +291,7 @@ void UPlayerInteractionComponent::RefreshInteractionQuery()
 	FPlayerInteractionQuery Query;
 	if (BuildInteraction(Context, Interactable, TargetObject) && Interactable)
 	{
-		Query = Interactable->QueryInteraction(Context);
+		Query = MergeFocusedSupplementalQuery(Context, Interactable->QueryInteraction(Context));
 		if (TargetObject == ActiveHoldTarget)
 		{
 			Query.HoldProgress = ActiveHoldProgress;
@@ -286,6 +300,10 @@ void UPlayerInteractionComponent::RefreshInteractionQuery()
 	if (EquipmentUseComponent)
 	{
 		Query = EquipmentUseComponent->MergeEquipmentQuery(Query);
+	}
+	if (const ISupplementalInteractionIntentSource* Supplemental = Cast<ISupplementalInteractionIntentSource>(SupplementalIntentSource))
+	{
+		Query = Supplemental->MergeSupplementalInteractionQuery(Query);
 	}
 	CommitQuery(TargetObject, Query);
 }
@@ -326,6 +344,18 @@ bool UPlayerInteractionComponent::BuildInteraction(
 	OutContext.HitComponent = Hit.GetComponent();
 	OutContext.HitResult = Hit;
 	return OutInteractable != nullptr;
+}
+
+FPlayerInteractionQuery UPlayerInteractionComponent::MergeFocusedSupplementalQuery(
+	const FPlayerInteractionContext& Context,
+	const FPlayerInteractionQuery& BaseQuery) const
+{
+	if (const ISupplementalInteractionIntentSource* FocusedSupplemental =
+		Cast<ISupplementalInteractionIntentSource>(Context.HitActor.Get()))
+	{
+		return FocusedSupplemental->MergeSupplementalInteractionQuery(BaseQuery);
+	}
+	return BaseQuery;
 }
 
 bool UPlayerInteractionComponent::TraceFocus(FHitResult& OutHit) const
@@ -378,7 +408,9 @@ void UPlayerInteractionComponent::TickActiveHold(const float DeltaTime)
 			NSLOCTEXT("BathhouseInteraction", "HoldFocusLost", "대상에서 시선을 떼어 상호작용이 취소되었습니다."));
 		return;
 	}
-	const FPlayerInteractionQuery Query = Interactable->QueryInteraction(Context);
+	const FPlayerInteractionQuery Query = MergeFocusedSupplementalQuery(
+		Context,
+		Interactable->QueryInteraction(Context));
 	if (!Query.bVisible || !Query.bCanInteract
 		|| Query.PrimaryActivationMode != EPlayerInteractionActivationMode::Hold)
 	{
@@ -395,7 +427,9 @@ void UPlayerInteractionComponent::TickActiveHold(const float DeltaTime)
 	ActiveHoldProgress = FMath::Clamp(Update.Progress, 0.0f, 1.0f);
 	if (Update.State == EPlayerHoldInteractionState::Running)
 	{
-		FPlayerInteractionQuery ProgressQuery = Interactable->QueryInteraction(Context);
+		FPlayerInteractionQuery ProgressQuery = MergeFocusedSupplementalQuery(
+			Context,
+			Interactable->QueryInteraction(Context));
 		ProgressQuery.HoldProgress = ActiveHoldProgress;
 		CommitQuery(TargetObject, ProgressQuery);
 		return;

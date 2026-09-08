@@ -51,6 +51,7 @@ public:
 	bool CommitReleaseKey(ABathhouseKeyActor* Key);
 	bool TryTakePhysicalObject(AActor* Object, FText& OutFailureReason);
 	bool CommitReleasePhysicalObject(AActor* Object);
+	bool CommitReleasePhysicalObjectForPlacement(AActor* Object, TFunctionRef<bool()> DomainCommit);
 	bool RecoverHeldPhysicalObject(AActor* Object);
 	FPlayerInteractionResult TryTakeFromFixedSlot(AActor* SlotActor);
 	FPlayerInteractionResult TryStoreHeldObjectInFixedSlot(AActor* SlotActor);

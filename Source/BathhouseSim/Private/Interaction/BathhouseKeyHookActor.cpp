@@ -340,6 +340,17 @@ bool ABathhouseKeyHookActor::InitializeRuntimeFixedSlot()
 	return true;
 }
 
+bool ABathhouseKeyHookActor::ConfigureRackPair(const int32 InKeyNumber, ABathhouseKeyActor* InKeyActor)
+{
+	if (HasActorBegunPlay() || InKeyNumber < 0 || !IsValid(InKeyActor))
+	{
+		return false;
+	}
+	KeyNumber = InKeyNumber;
+	KeyActor = InKeyActor;
+	return true;
+}
+
 void ABathhouseKeyHookActor::HandleKeyTopologyChanged()
 {
 	const UWorld* World = GetWorld();

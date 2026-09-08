@@ -10,7 +10,7 @@ class UTowelInventoryComponent;
 class UTowelStackVisualComponent;
 
 UCLASS(Blueprintable)
-class BATHHOUSESIM_API AUsedTowelBinActor : public ABathhouseFacilityActor, public IPlayerInteractable
+class BATHHOUSESIM_API AUsedTowelBinActor : public ABathhouseFacilityActor
 {
 	GENERATED_BODY()
 

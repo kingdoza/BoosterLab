@@ -51,6 +51,7 @@ public:
 
 	USceneComponent* GetKeyAnchor() const { return KeyAnchor; }
 	bool IsNumberTopologyValid(FText* OutFailureReason = nullptr) const;
+	bool ConfigureRackPair(int32 InKeyNumber, ABathhouseKeyActor* InKeyActor);
 
 	UPROPERTY(BlueprintAssignable, Category = "Bathhouse Key|Presentation")
 	FOnPhysicalCarrySlotOccupancyChanged OnSlotOccupancyChanged;

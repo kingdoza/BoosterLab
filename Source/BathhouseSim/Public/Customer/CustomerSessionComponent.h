@@ -5,6 +5,7 @@
 #include "Customer/BathhouseCustomerTypes.h"
 #include "Engine/EngineTypes.h"
 #include "Facility/BathhouseFacilityTypes.h"
+#include "Facility/LockerCapacitySubsystem.h"
 #include "Interaction/InteractionTypes.h"
 #include "Towel/TowelTypes.h"
 #include "CustomerSessionComponent.generated.h"
@@ -84,6 +85,7 @@ public:
 	void EndCheckoutOffer();
 	void CancelCashOffer();
 	bool IsCashClaimed() const { return bCashClaimed; }
+	void ReleaseLockerLease();
 
 	bool RegisterNavigationFailure();
 	void ResetNavigationFailures() { NavigationFailureCount = 0; }
@@ -123,6 +125,7 @@ public:
 	bool IsTechnicalAbort() const { return DepartureReason == EBathhouseCustomerDepartureReason::TechnicalAbort; }
 	bool HasTowelHandle() const { return TowelUseHandle.HasToken(); }
 	bool IsTowelWaitExpired() const { return bTowelWaitExpired; }
+	bool AreClothesStored() const { return bClothesStored; }
 	EBathhouseCounterLane GetQueueLane() const { return QueueLane; }
 
 private:
@@ -181,6 +184,9 @@ private:
 	UPROPERTY(Transient)
 	FTowelUseHandle TowelUseHandle;
 
+	UPROPERTY(Transient)
+	FLockerCapacityLeaseHandle LockerLeaseHandle;
+
 	int32 KeyNumber = INDEX_NONE;
 	int32 NavigationFailureCount = 0;
 	EBathhouseCounterLane QueueLane = EBathhouseCounterLane::None;
@@ -220,5 +226,6 @@ private:
 	bool bPausedBathStayTimer = false;
 	bool bPausedTowelWaitTimer = false;
 	bool bFacilityUseSuspendedForKnockdown = false;
+	bool bClothesStored = false;
 	float Satisfaction = 100.0f;
 };
