@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-clean stack부터 customer 사용, used bin/바닥 overflow, player basket, washer와 dryer를 거쳐 clean stack으로 돌아오는 수건 순환 Source와 기본 Blueprint class는 구현되었다. basket exact fixed slot과 held-position free drop도 [PhysicalCarrySystem.md](PhysicalCarrySystem.md)에 따라 구현되었으며 placement는 수건 inventory/revision을 변경하지 않는다.
+clean stack부터 customer 사용, used bin/바닥 overflow, player basket, washer와 dryer를 거쳐 clean stack으로 돌아오는 수건 순환 Source와 기본 Blueprint class는 구현되었다. basket exact fixed slot과 held-position free drop도 [PhysicalCarrySystem.md](PhysicalCarrySystem.md)에 따라 구현되었다. Placement는 수건 inventory/revision을 변경하지 않으며 Clean Towel Stack과 Used Towel Bin은 Actor 배치·회수에서 제외한다.
 
 ## Source Scope
 
@@ -144,6 +144,8 @@ Primary E는 requested count 1, Secondary F는 가능한 최대 수량을 요청
 
 bin 내부 visible towels는 count 기반 presentation 전용이며 개별 collision/interaction을 갖지 않는다.
 
+Clean Stack과 Used Bin은 authoritative towel token endpoint이므로 `SupportsFacilityActorConversion()`이 false다. Q recovery row를 노출하지 않고 전용 facility item/typed payload를 만들지 않으며, 이 class를 대상으로 하는 Placement Definition은 validation에서 거부한다. Washer/Dryer만 아래의 안전한 empty/Waiting gate를 통해 설비 Actor 변환에 참여한다.
+
 ## Used Towel Overflow
 
 `AWorldUsedTowelActor`는 used bin 주변 바닥에 넘친 towel 한 장을 나타내는 authoritative token actor다.
@@ -198,7 +200,7 @@ World towel interaction은 개별 Primary E만 지원한다.
 
 machine capacity와 process duration은 instance/default authoring 값이다. normalized progress는 stored end time에서 파생하며 Blueprint가 timer 정본을 복제하지 않는다.
 
-기존 machine Actor는 `IPlaceableFacility`과 `IPhysicalCarryable`을 구현한다. 회수 query는 authoritative inventory count가 0이고 machine state가 `Waiting`인 경우만 성공한다. Placement는 count/state를 복제하거나 강제로 비우지 않으며 자세한 mode/transaction은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
+machine Actor는 canonical target에서 `IPlaceableFacility`만 구현하고 `IPhysicalCarryable` 책임은 전용 설비 아이템으로 이전한다. 회수 query는 authoritative inventory count가 0이고 machine state가 `Waiting`인 경우만 성공한다. machine은 `MachineKind`와 `ProcessingDurationSeconds`만 typed placement payload로 export/import하며 count, towel state와 processing progress는 전달하지 않는다. Placement는 count/state를 복제하거나 강제로 비우지 않으며 자세한 Actor 변환 transaction은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
 
 ## Transfer Direction
 

@@ -31,8 +31,22 @@ void UFacilityPlacementComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	CaptureLastSafeTransform();
-	FText Ignored;
-	ApplyMode(Mode, Mode == EPlaceableFacilityMode::Packaged, Ignored);
+	if (bStagedPlacement)
+	{
+		SetPlacedDomainActive(false);
+		return;
+	}
+	if (Mode == EPlaceableFacilityMode::Placed)
+	{
+		FText Ignored;
+		ApplyMode(Mode, false, Ignored);
+		bPlacedDomainActive = true;
+	}
+	else
+	{
+		// Legacy packaged placed-actor assets remain serialized-compatible but inert.
+		SetPlacedDomainActive(false);
+	}
 }
 
 void UFacilityPlacementComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -66,6 +80,28 @@ bool UFacilityPlacementComponent::IsOperational(FText& OutFailureReason) const
 	return ValidateFootprintContract(OutFailureReason);
 }
 
+bool UFacilityPlacementComponent::ValidateFootprintContractForDefinition(
+	const UFacilityPlacementDefinition& InDefinition,
+	FText& OutFailureReason) const
+{
+	if (!PlacementFootprint)
+	{
+		OutFailureReason = LOCTEXT("MissingFootprint", "설비 배치 영역을 확인할 수 없습니다.");
+		return false;
+	}
+	const float Grid = GetDefault<UFacilityPlacementSettings>()->GetGridSizeCm();
+	const FVector FullSize = PlacementFootprint->GetScaledBoxExtent() * 2.0f;
+	const FVector Expected(InDefinition.FootprintCellsX * Grid, InDefinition.FootprintCellsY * Grid, FullSize.Z);
+	if (InDefinition.FootprintCellsX < 1 || InDefinition.FootprintCellsY < 1
+		|| !FMath::IsNearlyEqual(FullSize.X, Expected.X, 0.5f)
+		|| !FMath::IsNearlyEqual(FullSize.Y, Expected.Y, 0.5f))
+	{
+		OutFailureReason = LOCTEXT("FootprintGridMismatch", "설비 배치 영역이 정의의 전역 그리드 셀 크기와 일치하지 않습니다.");
+		return false;
+	}
+	return true;
+}
+
 bool UFacilityPlacementComponent::ValidateFootprintContract(FText& OutFailureReason) const
 {
 	if (!Definition || !PlacementFootprint)
@@ -73,16 +109,45 @@ bool UFacilityPlacementComponent::ValidateFootprintContract(FText& OutFailureRea
 		OutFailureReason = LOCTEXT("MissingFootprint", "설비 배치 영역을 확인할 수 없습니다.");
 		return false;
 	}
-	const float Grid = GetDefault<UFacilityPlacementSettings>()->GetGridSizeCm();
-	const FVector FullSize = PlacementFootprint->GetScaledBoxExtent() * 2.0f;
-	const FVector Expected(Definition->FootprintCellsX * Grid, Definition->FootprintCellsY * Grid, FullSize.Z);
-	if (Definition->FootprintCellsX < 1 || Definition->FootprintCellsY < 1
-		|| !FMath::IsNearlyEqual(FullSize.X, Expected.X, 0.5f)
-		|| !FMath::IsNearlyEqual(FullSize.Y, Expected.Y, 0.5f))
+	return ValidateFootprintContractForDefinition(*Definition, OutFailureReason);
+}
+
+bool UFacilityPlacementComponent::BuildPlacedActorTransform(
+	const FTransform& RequestedTransform,
+	FTransform& OutTransform,
+	FText& OutFailureReason) const
+{
+	const AActor* Owner = GetOwner();
+	const USceneComponent* Root = Owner ? Owner->GetRootComponent() : nullptr;
+	if (!Root)
 	{
-		OutFailureReason = LOCTEXT("FootprintGridMismatch", "설비 배치 영역이 정의의 전역 그리드 셀 크기와 일치하지 않습니다.");
+		OutFailureReason = LOCTEXT("MissingPlacedRoot", "배치 설비 클래스의 루트 컴포넌트를 확인할 수 없습니다.");
 		return false;
 	}
+	const FVector RootScale = Root->GetRelativeScale3D();
+	if (RootScale.ContainsNaN() || RootScale.GetAbsMin() <= UE_KINDA_SMALL_NUMBER)
+	{
+		OutFailureReason = LOCTEXT("InvalidPlacedScale", "배치 설비 클래스의 기본 루트 스케일이 올바르지 않습니다.");
+		return false;
+	}
+	OutTransform = RequestedTransform;
+	OutTransform.SetScale3D(RootScale);
+	return true;
+}
+
+bool UFacilityPlacementComponent::GetFootprintRelativeToRoot(
+	FTransform& OutTransform,
+	FText& OutFailureReason) const
+{
+	const AActor* Owner = GetOwner();
+	const USceneComponent* Root = Owner ? Owner->GetRootComponent() : nullptr;
+	if (!Root || !PlacementFootprint)
+	{
+		OutFailureReason = LOCTEXT("MissingFootprintRoot", "배치 설비의 루트 또는 배치 영역을 확인할 수 없습니다.");
+		return false;
+	}
+	OutTransform = PlacementFootprint->GetComponentTransform().GetRelativeTransform(
+		Root->GetComponentTransform());
 	return true;
 }
 
@@ -132,6 +197,7 @@ bool UFacilityPlacementComponent::GetRecoveryDropTransform(
 
 	OutTransform = GetOwner()->GetActorTransform();
 	OutTransform.SetLocation(DropLocation);
+	OutTransform.SetScale3D(FVector::OneVector);
 	return true;
 }
 
@@ -157,6 +223,11 @@ bool UFacilityPlacementComponent::ApplyMode(
 	FText& OutFailureReason,
 	const bool bPublish)
 {
+	if (NewMode == EPlaceableFacilityMode::Packaged)
+	{
+		OutFailureReason = LOCTEXT("LegacyPackagedModeDisabled", "배치 설비 Actor는 더 이상 포장 상태로 전환되지 않습니다.");
+		return false;
+	}
 	if (!IsValid(PackagePhysicalRoot))
 	{
 		OutFailureReason = LOCTEXT("MissingPackageRoot", "포장 물리 루트가 없습니다.");
@@ -168,6 +239,7 @@ bool UFacilityPlacementComponent::ApplyMode(
 	{
 		NavModifier->SetNavigationRelevancy(NewMode == EPlaceableFacilityMode::Placed);
 	}
+	bPlacedDomainActive = NewMode == EPlaceableFacilityMode::Placed;
 	if (NewMode == EPlaceableFacilityMode::Placed)
 	{
 		PackagePhysicalRoot->SetSimulatePhysics(false);
@@ -192,6 +264,37 @@ bool UFacilityPlacementComponent::ApplyMode(
 		OnModeChanged.Broadcast(Previous, Mode);
 	}
 	return true;
+}
+
+void UFacilityPlacementComponent::PrepareForStagedPlacement(
+	UFacilityPlacementDefinition& InDefinition)
+{
+	Definition = &InDefinition;
+	Mode = EPlaceableFacilityMode::Placed;
+	bStagedPlacement = true;
+	SetPlacedDomainActive(false);
+}
+
+void UFacilityPlacementComponent::SetPlacedDomainActive(const bool bActive)
+{
+	bPlacedDomainActive = bActive;
+	if (NavModifier)
+	{
+		NavModifier->SetNavigationRelevancy(bActive);
+	}
+	if (PackagePhysicalRoot)
+	{
+		PackagePhysicalRoot->SetSimulatePhysics(false);
+		PackagePhysicalRoot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+}
+
+void UFacilityPlacementComponent::CommitStagedPlacement()
+{
+	bStagedPlacement = false;
+	Mode = EPlaceableFacilityMode::Placed;
+	SetPlacedDomainActive(true);
+	CaptureLastSafeTransform();
 }
 
 void UFacilityPlacementComponent::PublishModeChanged(

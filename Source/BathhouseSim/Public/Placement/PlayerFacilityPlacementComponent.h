@@ -8,6 +8,7 @@
 
 class AFacilityPlacementPreviewActor;
 class AFacilityPlacementZoneActor;
+class APlaceableFacilityItemActor;
 class IPlaceableFacility;
 class UCameraComponent;
 class UPlayerCarryComponent;
@@ -67,7 +68,7 @@ private:
 	AActor* TraceRecoveryTarget() const;
 	FFacilityPlacementTransactionResult ValidateCurrentPlacement(FTransform& OutCandidate, AFacilityPlacementZoneActor*& OutZone) const;
 	FFacilityPlacementTransactionResult ValidateWorldPlacement(
-		AActor& Facility,
+		APlaceableFacilityItemActor& Item,
 		const FTransform& Candidate,
 		const AFacilityPlacementZoneActor& Zone) const;
 	void ReportResult(const FPlayerInteractionResult& Result) const;
@@ -82,7 +83,7 @@ private:
 	TObjectPtr<UPlayerInteractionComponent> Interaction = nullptr;
 
 	UPROPERTY(Transient)
-	TWeakObjectPtr<AActor> PreviewFacility;
+	TWeakObjectPtr<APlaceableFacilityItemActor> PreviewFacility;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<AFacilityPlacementZoneActor> PreviewZone;

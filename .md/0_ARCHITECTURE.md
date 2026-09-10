@@ -2,8 +2,8 @@
 
 ## 문서 기준
 
-- 기준일: 2026-09-07(KST) 설비 배치 원자성, preview 안전성과 collision semantics 재작업 기준
-- 상태: Placement/Locker/Key-pool Source 재작업과 native automation 완료, Editor asset 연결 대기
+- 기준일: 2026-09-09(KST) 전용 설비 회수 아이템과 Actor 교체 transaction 구현 기준
+- 상태: 전용 회수 아이템 Source·native automation 구현 완료, Content authoring 및 PIE 통합 대기
 - 정본 문서: `.md/0_ARCHITECTURE.md`와 `.md/Architecture/*.md`
 - legacy 문서: 현재 별도 legacy architecture 문서는 없다.
 
@@ -34,9 +34,9 @@
 - [CharacterSystem.md](Architecture/CharacterSystem.md): 1인칭 입력, 컨트롤러 입력 매핑, 이동, 점프, sprint, 캐릭터 조립
 - [CameraSystem.md](Architecture/CameraSystem.md): 이동/착지 기반 카메라 셰이크, camera manager 기반 pitch limit
 - [InteractionSystem.md](Architecture/InteractionSystem.md): camera trace, primary/secondary intent와 equipment-use routing
-- [PhysicalCarrySystem.md](Architecture/PhysicalCarrySystem.md): exact fixed slot, held-position free drop, key/equipment placement와 recovery
+- [PhysicalCarrySystem.md](Architecture/PhysicalCarrySystem.md): exact fixed slot, held-position free drop와 fixed-slot 미지원 설비 아이템
 - [FacilitySystem.md](Architecture/FacilitySystem.md): 다중 facility slot, transform 기반 counter queue assignment, checkout overflow와 key drop point
-- [PlacementSystem.md](Architecture/PlacementSystem.md): 설비 package/preview/placement/Q 회수, 확장 단계와 locker capacity lease
+- [PlacementSystem.md](Architecture/PlacementSystem.md): 배치 설비와 전용 회수 아이템 변환, preview/Q 회수와 locker capacity lease
 - [EconomySystem.md](Architecture/EconomySystem.md): PlayerState wallet과 일회성 cash 획득
 - [CustomerSystem.md](Architecture/CustomerSystem.md): UE 5.8 StateTree customer routine, session과 cleanup
 - [UISystem.md](Architecture/UISystem.md): native Widget/Widget Blueprint 경계와 E/F/LMB interaction prompt 계약
@@ -107,10 +107,10 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Camera는 player camera manager를 통해 상하 시야각 제한 기본값을 제공하고, Blueprint 파생 class에서 값을 조정할 수 있게 한다.
 - Camera는 비로컬 플레이어에서 Tick interval 조정과 shake 중단으로 비용을 줄인다.
 - Character는 E/F/G/Q, LCtrl/MouseWheel과 범용 LMB를 의도로 전달한다. LMB owner는 `Computer > Placement > Equipment` 순서이며 Character가 domain 상태를 변경하지 않는다.
-- Interaction은 camera trace, equipment/placement/recovery prompt 합성과 held motion 표현을 소유한다. Physical Carry는 key/wet mop/towel basket/monkey wrench/packaged facility 중 하나의 held state, exact fixed slot과 free-drop transaction을 소유한다.
-- 모든 일반 carryable은 별도 예외가 없으면 G free drop과 exact assigned fixed slot을 모두 지원한다. free drop은 actual held pose에서 질량 무시 약한 velocity change로 시작하며 free-world item은 Pawn을 무시하고 CCD를 사용한다.
+- Interaction은 camera trace, equipment/placement/recovery prompt 합성과 held motion 표현을 소유한다. Physical Carry는 key/wet mop/towel basket/monkey wrench/전용 설비 아이템 중 하나의 held state, exact fixed slot과 free-drop transaction을 소유한다.
+- 모든 일반 carryable은 별도 예외가 없으면 G free drop과 exact assigned fixed slot을 지원한다. 전용 설비 아이템은 명시적 `FreeDrop` 전용 예외이며, free drop은 actual held pose에서 질량 무시 약한 velocity change로 시작하고 free-world item은 Pawn을 무시하며 CCD를 사용한다.
 - Facility는 다중 use slot, check-in/checkout 독립 FIFO와 revision을 소유한다. queue point는 Location/Yaw 전체를 사용하고 checkout visible capacity를 넘은 entry는 같은 FIFO 순번을 유지한 채 전용 NavMesh volume assignment를 받는다.
-- Placement는 동일 설비 Actor의 `Placed/Packaged` mode, 별도 ghost preview, zone-local 10cm grid, LCtrl snap, wheel Yaw와 Q Hold 회수를 원자적으로 조율한다. 공통 grid/Yaw/hold/회수 낙하 Z offset은 `UFacilityPlacementSettings`가 소유하며, 회수 prompt는 포커스 Actor의 일반 interaction query에 합성된다.
+- Placement는 배치 설비 Actor와 전용 `APlaceableFacilityItemActor` 사이의 생성·파괴 transaction, 별도 ghost preview, zone-local 10cm grid, LCtrl snap, wheel Yaw와 Q Hold 회수를 조율한다. 공통 grid/Yaw/hold/회수 낙하 Z offset은 `UFacilityPlacementSettings`가 소유하며, 회수 prompt는 포커스 Actor의 일반 interaction query에 합성된다.
 - Economy는 PlayerState wallet을 소유하고 cash claim을 한 번만 반영한다.
 - Customer StateTree는 routine을 조율하고 session/queue/facility/key/wallet API에 실행을 위임한다. 신발 단계와 key-locker 대응은 제거하고 탈의·착의마다 임의의 unnumbered locker action slot을 잠시 사용한다.
 - Customer bath stay는 pre-shower 완료부터 고정 60초이며 그동안 available bath를 random 이동한다.
@@ -136,7 +136,7 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Character -> EnhancedInput/Engine Character/Movement
 - Camera -> Character/Engine Camera/CameraShake/PlayerCameraManager
 - Interaction -> Facility public query
-- Placement -> Interaction public carry/prompt-provider contract
+- Placement -> Interaction public carry/prompt-provider contract와 CoreUObject 기반 typed payload
 - Facility/Towel -> Placement placeable-facility contract
 - Combat -> Interaction
 - Economy -> Interaction
@@ -177,8 +177,8 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - UCLASS/USTRUCT/UENUM rename 또는 삭제는 Core Redirect, Editor 재시작, Blueprint compile/save, post-migration scan까지 한 세트로 계획한다.
 - 새 시스템, 새 의존 방향, Blueprint/API 계약 변경은 이 문서와 관련 `.md/Architecture/*System.md`를 함께 갱신한다.
 - Content asset 수정이나 resave가 필요한 변경은 별도 사용자 지시와 Editor 검증 계획 없이는 진행하지 않는다.
-- Player carry는 inventory/hotbar가 아닌 key/wet mop/towel basket/monkey wrench/packaged facility 중 physical actor 하나만 허용한다. key transaction, exact slot, free-world CCD와 cash 비소지 계약을 유지한다.
-- physical carryable 공통 Actor/Component를 만들지 않고 `IPhysicalCarryable` 계약을 유지한다. placeable facility는 기존 Actor가 interface와 placement component를 조합해 같은 instance에서 mode를 바꾸며, physical snapshot과 silent carry/mode/registry staging 뒤 최종 event만 발행한다. live preview, local owner와 suppression을 confirm 직전 재검증하고 collision은 package primitive의 실제 blocking response를 따른다.
+- Player carry는 inventory/hotbar가 아닌 key/wet mop/towel basket/monkey wrench/전용 설비 아이템 중 physical actor 하나만 허용한다. key/equipment의 exact slot, 모든 free-world item의 CCD와 cash 비소지 계약을 유지한다.
+- 모든 소지품을 통합하는 공통 Actor/Component는 만들지 않고 `IPhysicalCarryable` 계약을 유지한다. Placement 도메인에만 `APlaceableFacilityItemActor`를 두며, Definition 기반 payload를 통해 지원 설비와 별도 Actor로 상호 생성한다. 양쪽 변환은 새 Actor를 먼저 stage하고 원본을 마지막에 제거하며, silent registry/carry staging 뒤 최종 event만 발행한다. live preview, local owner와 suppression을 confirm 직전 재검증하고 회수 아이템 collision은 Root Static Mesh의 실제 simple collision response를 따른다. `ACleanTowelStackActor`와 `AUsedTowelBinActor`는 towel token owner이므로 이 변환에서 명시적으로 제외한다.
 - E는 world primary/fixed slot, F는 world secondary, G는 free drop, Q Hold는 facility recovery, LCtrl/휠/LMB는 placement snap/rotation/confirm이다. Character는 intent만 routing한다.
 - 모든 towel endpoint 이동은 source 감소와 destination 증가를 단일 native transaction으로 commit한다.
 - Customer routine의 gameplay 상태 변경은 native C++ API를 통해 수행하고 StateTree/Blueprint asset에 domain mutation을 두지 않는다.
@@ -197,4 +197,4 @@ Computer 구현은 `Public/Computer`, `Private/Computer`와 기존 `Public/UI`, 
 - Combat Source, `PrimaryUseAction` 호환 이관, LMB mop use, equipment prompt row, customer knockdown/soft interruption과 restartable MoveTo는 Source와 native automation까지 구현되었다. `IA_PrimaryUse`, `IMC_FirstPerson`, wrench/customer Blueprint, `WBP_InteractionPrompt`와 `ST_CustomerRoutine` 교체는 코드 리뷰 후 Editor 단계로 인계한다.
 - exact equipment slot, key free drop과 actual-held-pose weak release는 Source와 native automation까지 구현되었다. equipment slot Blueprint/instance, exact item/anchor, key physics bounds와 기존 Blueprint release velocity 값은 코드 리뷰 후 Editor 단계로 인계한다.
 - counter queue transform/overflow, shared queue navigation, recovery pose gate와 physical checkout key drop은 Source와 native automation까지 구현되었다. StateTree/Counter/overflow volume/Blueprint authoring과 PIE 통합은 후속 Editor 단계이며 기존 queue target Task와 returned-key reflected symbol은 asset migration 동안 deprecated compatibility로 보존한다.
-- Placement, bath-water state, locker capacity lease, expansion authority/key-rack와 customer lease 연동은 Source와 native automation까지 구현되었다. atomic notification ordering, missing/lost preview fail-closed, scaled zone containment, package-response blocking overlap, lifecycle cancellation과 weak registry compaction 재작업도 완료되었다. InputAction/IMC, 필수 WBP binding, zone/Definition/설비 Blueprint와 신발 제거·locker slot StateTree migration은 `.md/PROMPT_UNREAL.md`의 별도 Editor 단계로 인계한다.
+- Placement, bath-water/locker capacity/expansion 연동과 placed facility↔전용 `APlaceableFacilityItemActor` 교체는 Source와 native automation까지 구현되었다. typed payload, staged rollback, CDO Root scale, 회수 mesh, callback 파괴 보상, preview/containment/lifecycle 재작업도 완료되었다. Clean Towel Stack/Used Towel Bin은 배치·회수 대상이 아니며 관련 Definition을 만들거나 연결하지 않는다. InputAction/IMC, WBP, zone/Definition/설비 Blueprint와 StateTree migration은 `.md/PROMPT_UNREAL.md`의 Editor 단계로 인계한다.

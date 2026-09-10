@@ -37,7 +37,7 @@ void AUsedTowelBinActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 FPlayerInteractionQuery AUsedTowelBinActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
 	if (GetFacilityPlacementComponent()
-		&& GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+		&& !GetFacilityPlacementComponent()->IsPlacedDomainActive())
 	{
 		return ABathhouseFacilityActor::QueryInteraction(Context);
 	}
@@ -67,7 +67,7 @@ FPlayerInteractionQuery AUsedTowelBinActor::QueryInteraction(const FPlayerIntera
 FPlayerInteractionResult AUsedTowelBinActor::ExecuteInteraction(const FPlayerInteractionContext& Context)
 {
 	if (GetFacilityPlacementComponent()
-		&& GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+		&& !GetFacilityPlacementComponent()->IsPlacedDomainActive())
 	{
 		return ABathhouseFacilityActor::ExecuteInteraction(Context);
 	}
@@ -82,6 +82,11 @@ FPlayerInteractionResult AUsedTowelBinActor::ExecuteSecondaryInteraction(const F
 bool AUsedTowelBinActor::TryStageOverflowTowel(AWorldUsedTowelActor*& OutTowel)
 {
 	OutTowel = nullptr;
+	if (GetFacilityPlacementComponent()
+		&& !GetFacilityPlacementComponent()->IsPlacedDomainActive())
+	{
+		return false;
+	}
 	UWorld* World = GetWorld();
 	UTowelCirculationSubsystem* Subsystem = World ? World->GetSubsystem<UTowelCirculationSubsystem>() : nullptr;
 	if (!World || !Subsystem || !WorldUsedTowelClass)
@@ -151,6 +156,13 @@ FPlayerInteractionResult AUsedTowelBinActor::TransferToHeldBasket(
 	const int32 RequestedCount,
 	const EPlayerInteractionIntent Intent)
 {
+	if (GetFacilityPlacementComponent()
+		&& !GetFacilityPlacementComponent()->IsPlacedDomainActive())
+	{
+		return FPlayerInteractionResult::Failed(
+			LOCTEXT("UsedBinInactive", "설치가 완료된 사용 수건통만 사용할 수 있습니다."),
+			Intent);
+	}
 	ATowelBasketActor* Basket = Context.CarryComponent
 		? Cast<ATowelBasketActor>(Context.CarryComponent->GetHeldObject())
 		: nullptr;

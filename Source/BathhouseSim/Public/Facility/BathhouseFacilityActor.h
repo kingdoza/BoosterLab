@@ -17,6 +17,9 @@ class UNavModifierComponent;
 class UPlayerCarryComponent;
 class UPrimitiveComponent;
 class USceneComponent;
+class APlaceableFacilityItemActor;
+struct FFacilityPlacementPayload;
+struct FFacilityPlacementPublication;
 
 UCLASS(Blueprintable)
 class BATHHOUSESIM_API ABathhouseFacilityActor
@@ -41,8 +44,16 @@ public:
 	virtual UFacilityPlacementComponent* GetFacilityPlacementComponent() const override { return FacilityPlacement; }
 	virtual FFacilityPlacementTransactionResult QueryFacilityPlacement(const FTransform& CandidateTransform, const class AFacilityPlacementZoneActor& Zone) const override;
 	virtual FFacilityPlacementTransactionResult QueryFacilityRecovery() const override;
+	virtual bool ExportPlacementPayload(APlaceableFacilityItemActor& Item, FFacilityPlacementPayload& OutPayload, FText& OutFailureReason) const override;
+	virtual bool ImportPlacementPayload(const APlaceableFacilityItemActor& Item, const FFacilityPlacementPayload& Payload, FText& OutFailureReason) override;
+	virtual bool StagePlacedDomainRegistration(FText& OutFailureReason) override;
+	virtual void RollbackPlacedDomainRegistration() override;
+	virtual bool StagePlacedDomainUnregistration(FFacilityPlacementPublication& OutPublication, FText& OutFailureReason) override;
+	virtual bool RollbackPlacedDomainUnregistration(FText& OutFailureReason) override;
+	virtual void PublishPlacedDomainRegistration() override;
 	virtual bool CommitPlaceableFacilityMode(EPlaceableFacilityMode NewMode, FText& OutFailureReason) override;
 	virtual EPhysicalCarryKind GetPhysicalCarryKind() const override { return EPhysicalCarryKind::Facility; }
+	virtual EPhysicalCarryCapability GetPhysicalCarryCapabilities() const override { return EPhysicalCarryCapability::None; }
 	virtual FText GetPhysicalCarryDisplayName() const override;
 	virtual FTransform GetHeldTransform() const override;
 	virtual bool CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const override;

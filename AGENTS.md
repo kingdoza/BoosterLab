@@ -11,14 +11,17 @@ Do not treat this file as the architecture source of truth. It only points agent
 Read the relevant `.md/` documents before making architecture, implementation, or review decisions.
 
 - `.md/AGENT_WORKFLOW.md`: common sequential workflow, artifact ownership, and document-size rules
+- `.md/AGENT_FEATURE_SPEC.md`: user-visible behavior contract and pre-architecture discovery rules
 - `.md/AGENT_ARCHITECTURE.md`: architecture/documentation agent rules
 - `.md/AGENT_IMPLEMENTATION.md`: implementation agent rules
 - `.md/AGENT_REVIEW.md`: pre-Editor code review rules
 - `.md/AGENT_UNREAL_MCP.md`: Unreal MCP Editor work rules
+- `.md/AGENT_COMPUTERUSE.md`: separately invoked Unreal Computer Use rules
 - `.md/AGENT_INTEGRATION_REVIEW.md`: final code-and-Editor integration review rules
-- `.md/AGENT_DESIGN.md`: separate game-design rules; not part of the technical workflow
 - `.md/0_ARCHITECTURE.md`: current architecture map
 - `.md/Architecture/*.md`: system-specific architecture documents
+- `.md/Unreal/0_UNREAL.md`: current Editor authoring/asset-contract map
+- `.md/Unreal/*.md`: system-specific Editor authoring documents
 
 ## Scope
 
@@ -41,5 +44,7 @@ Generated or local-runtime directories are not architecture sources of truth:
 - Read `.md/AGENT_WORKFLOW.md` before the role-specific agent document.
 - Follow the task-specific `.md/AGENT_*.md` file for the current role.
 - Use `.md/0_ARCHITECTURE.md` as the system map and open the relevant `.md/Architecture/*System.md` files for details.
+- Use `.md/Unreal/0_UNREAL.md` as the Editor map and open the relevant `.md/Unreal/*System.md` files before making Content or Level assumptions.
+- Unreal MCP agents must not invoke Computer Use. Unsupported Editor work is recorded in `.md/USER_UNREAL.md` for an explicit user or separately invoked Computer Use pass.
 - Keep `AGENTS.md` short. Do not duplicate system inventories, class lists, or workflow details here.
 - If this file conflicts with `.md/` canonical documents, prefer the `.md/` documents and update this file only as a routing entry point.

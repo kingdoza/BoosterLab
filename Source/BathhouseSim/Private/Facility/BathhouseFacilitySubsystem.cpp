@@ -39,6 +39,17 @@ bool UBathhouseFacilitySubsystem::IsFacilityRegistered(const ABathhouseFacilityA
 	return IsValid(Facility) && RegisteredFacilities.Contains(Facility);
 }
 
+bool UBathhouseFacilitySubsystem::CompactInvalidFacilityRegistrations()
+{
+	const int32 PreviousCount = RegisteredFacilities.Num();
+	RegisteredFacilities.RemoveAll(
+		[](const TWeakObjectPtr<ABathhouseFacilityActor>& Facility)
+		{
+			return !Facility.IsValid();
+		});
+	return RegisteredFacilities.Num() != PreviousCount;
+}
+
 void UBathhouseFacilitySubsystem::NotifyFacilityAvailabilityChanged(const EBathhouseFacilityType FacilityType)
 {
 	OnFacilityAvailabilityChanged.Broadcast(FacilityType);
@@ -258,7 +269,7 @@ bool UBathhouseFacilitySubsystem::TryReserveRandomSlot(
 
 void UBathhouseFacilitySubsystem::CompactRegistrations()
 {
-	RegisteredFacilities.RemoveAll([](const TWeakObjectPtr<ABathhouseFacilityActor>& Facility) { return !Facility.IsValid(); });
+	CompactInvalidFacilityRegistrations();
 	for (auto It = RegisteredKeyHooks.CreateIterator(); It; ++It)
 	{
 		if (!It.Value().IsValid())

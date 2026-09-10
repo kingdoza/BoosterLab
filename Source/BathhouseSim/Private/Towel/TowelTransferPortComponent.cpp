@@ -20,7 +20,7 @@ FPlayerInteractionQuery UTowelTransferPortComponent::QueryInteraction(const FPla
 	FPlayerInteractionQuery Query;
 	const ATowelProcessingMachineActor* Machine = Cast<ATowelProcessingMachineActor>(GetOwner());
 	if (Machine && Machine->GetFacilityPlacementComponent()
-		&& Machine->GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+		&& !Machine->GetFacilityPlacementComponent()->IsPlacedDomainActive())
 	{
 		return Query;
 	}
@@ -74,7 +74,10 @@ FPlayerInteractionResult UTowelTransferPortComponent::Transfer(
 		? Cast<ATowelBasketActor>(Context.CarryComponent->GetHeldObject())
 		: nullptr;
 	UTowelTransferSubsystem* TransferSubsystem = GetWorld()->GetSubsystem<UTowelTransferSubsystem>();
-	if (!Machine || !Basket || !TransferSubsystem || Machine->GetMachineState() == ETowelMachineState::Processing)
+	if (!Machine || !Basket || !TransferSubsystem
+		|| (Machine->GetFacilityPlacementComponent()
+			&& !Machine->GetFacilityPlacementComponent()->IsPlacedDomainActive())
+		|| Machine->GetMachineState() == ETowelMachineState::Processing)
 	{
 		return FPlayerInteractionResult::Failed(LOCTEXT("PortUnavailable", "현재 수건을 옮길 수 없습니다."), Intent);
 	}

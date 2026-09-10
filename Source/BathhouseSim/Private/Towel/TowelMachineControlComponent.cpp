@@ -16,7 +16,7 @@ FPlayerInteractionQuery UTowelMachineControlComponent::QueryInteraction(const FP
 	FPlayerInteractionQuery Query;
 	const ATowelProcessingMachineActor* Machine = Cast<ATowelProcessingMachineActor>(GetOwner());
 	if (Machine && Machine->GetFacilityPlacementComponent()
-		&& Machine->GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+		&& !Machine->GetFacilityPlacementComponent()->IsPlacedDomainActive())
 	{
 		return Query;
 	}

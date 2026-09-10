@@ -74,6 +74,7 @@ private:
 	friend class FBathhouseInteractionAttemptResultTest;
 	friend class FBathhouseCleaningInteractionTest;
 	friend class FBathhouseComputerSessionTest;
+	friend class FBathhouseFacilityPlacementRuntimeTest;
 
 	bool BuildInteraction(FPlayerInteractionContext& OutContext, IPlayerInteractable*& OutInteractable, UObject*& OutTargetObject) const;
 	FPlayerInteractionQuery MergeFocusedSupplementalQuery(

@@ -1,158 +1,174 @@
-# Implementation Rework Prompt — Facility Placement Atomicity, Preview Safety And Collision Semantics
+# Implementation Rework Prompt — Facility Actor Conversion Domain Safety And Lifecycle
 
 ## Objective
 
-Fix the remaining pre-Editor Source defects in facility placement/recovery without modifying or resaving `Content/` or `Config/`. Preserve the same-Actor `Placed`/`Packaged` model, existing single physical carry owner, expansion-owned key pool, locker-capacity lease owner, supplemental interaction boundary and native Widget contract.
+Fix the remaining pre-Editor defects in the dedicated facility-item Actor replacement flow. Keep the approved split between placed facility Actors and the exact native `APlaceableFacilityItemActor`, the existing single-carry owner, typed payload boundary, staged/silent registry transitions, and Blueprint compatibility fields.
 
-Do not move domain contents, water, reservations, leases or key-pool state into `UPlayerFacilityPlacementComponent`. Do not create a replacement gameplay Actor for placement or recovery.
+Do not modify or resave `Content/`, `Config/`, or `.uproject`. Do not restore the legacy same-Actor `Placed/Packaged` path, add facility items to generic fixed slots, copy complete Actors, or move towel inventory ownership into Placement.
 
-## P1 — Placed Commit Publishes Intermediate State Before The Transaction Is Complete
+## P1 — Clean Stack And Used Bin Conversion Can Lose Or Duplicate Towel Tokens
 
-`ABathhouseFacilityActor::CommitPlaceableFacilityMode()` calls `UFacilityPlacementComponent::ApplyMode(Placed)` before placed-domain registration. `ApplyMode()` immediately broadcasts `OnModeChanged`, and `RegisterPlacedDomain()` then broadcasts facility availability before validating/registering locker capacity. If locker registration fails, observers have already seen a false Placed/facility transition; synchronous delegates can reserve slots, alter carry state or destroy the Actor before rollback. `bPlacedDomainRegistered` is set only after both event-producing registrations return, so EndPlay during either callback can also skip cleanup and leave stale capacity/registry entries.
+`ACleanTowelStackActor` and `AUsedTowelBinActor` inherit the generic `ABathhouseFacilityActor::QueryFacilityRecovery()` and payload import. The generic recovery gate checks facility slots, bath water and locker capacity, but never checks these subclasses' authoritative towel inventory. Their inventories are excluded from `FFacilityPlacementPayload`, so a non-empty stack/bin can currently be destroyed by recovery.
 
-The player transaction snapshots only parent/socket/relative transform. If the subsequent carry release fails, it invokes a fresh Packaged transition whose collision gate can fail at the candidate location, ignores that rollback result, and does not restore a complete transform/physics/registry snapshot.
+This is not only a missing gate. `UTowelInventoryComponent::EndPlay()` moves non-empty contents to the circulation recovery ledger, while a newly spawned clean stack runs its authored default `InitialCount` (`20` in native defaults). Therefore a recover/place cycle can put the old stock in the recovery ledger and independently create the new stack's default stock. A staged clean stack destroyed during a late placement rollback can also recover its default stock despite never becoming an authoritative placed endpoint.
 
 Affected files:
 
 - `Source/BathhouseSim/Private/Facility/BathhouseFacilityActor.cpp`
-- `Source/BathhouseSim/Public/Facility/BathhouseFacilityActor.h`
-- `Source/BathhouseSim/Private/Placement/FacilityPlacementComponent.cpp`
-- `Source/BathhouseSim/Public/Placement/FacilityPlacementComponent.h`
-- `Source/BathhouseSim/Private/Placement/PlayerFacilityPlacementComponent.cpp`
-- `Source/BathhouseSim/Private/Facility/LockerCapacitySubsystem.cpp`
-- placement automation tests
+- `Source/BathhouseSim/Public|Private/Towel/CleanTowelStackActor.*`
+- `Source/BathhouseSim/Public|Private/Towel/UsedTowelBinActor.*`
+- `Source/BathhouseSim/Public|Private/Towel/TowelInventoryComponent.*` only if a focused silent staging/reset API is required
+- `Source/BathhouseSim/Private/Tests/FacilityPlacementAutomationTests.cpp`
+- relevant Towel automation fixtures
 
 Required correction:
 
-1. Make a successful placement externally observable as one committed transition only. Do not broadcast `OnModeChanged`, facility availability or locker-capacity mutation for a state that can still fail, or provide a transaction/deferred-publication mechanism that publishes only after every fallible step and the exact carry release have committed.
-2. Move locker count, non-empty/duplicate stable ID and expansion-limit validation into the side-effect-free placement query/preparation phase. Revalidate immediately before commit, but do not temporarily register a malformed locker as a facility.
-3. Guard synchronous delegate reentrancy and Actor EndPlay. Destroying the facility from any commit notification must not leave a registered weak bank, inflated installed capacity, stale facility entry, held pointer or continued access to an ending Actor.
-4. Snapshot and restore the exact pre-commit world/relative transform, attachment/socket, mode, collision/physics flags, velocities, navigation/registry membership and carry ownership. Rollback must not call a normal recovery collision gate against the new candidate or ignore a failed restoration.
-5. Keep `ABathhouseFacilityActor` as high-level orchestration and `UPlayerFacilityPlacementComponent` as the placement transaction owner. If reusable snapshot mechanics grow, put them in a focused private helper rather than expanding domain ownership.
+1. Give clean stack and used bin domain-owned recovery gates that require authoritative inventory count `0`. Do not serialize or copy towel contents into the placement payload.
+2. Ensure item-to-facility placement initializes the new stack/bin in the canonical empty state before `FinishSpawning`/BeginPlay can expose or recover authored initial stock. Preserve the authored capacity and normal initial-level behavior; only Actor-conversion staging should override runtime contents.
+3. Ensure destroying a staged or rolled-back target cannot call `RecoverInventory()` for stock that was never committed as an authoritative endpoint. A successful source recovery with the empty gate must likewise produce no towel-ledger mutation.
+4. Keep interaction/overflow/transfer guards in the Towel domain. Placement may coordinate lifecycle flags but must not own towel counts or revisions.
 
 Acceptance:
 
-- Force locker registration failure from count mismatch, missing/duplicate `LockerSlotId`, expansion-limit change and a synchronous destruction/reentrancy callback.
-- Every failure leaves the same Actor attached and held in Packaged mode at the exact prior transform with its prior collision/physics state; facility/capacity registries and revisions have no committed false mutation, and presentation delegates do not emit a false Placed transition.
-- A successful placement publishes one coherent final state after the carry hand is committed empty.
-- Add a late carry-release failure probe and verify complete rollback rather than only the happy path.
+- Non-empty clean stack and used bin recovery are rejected without Actor, inventory, revision, recovery-ledger, registry, Nav or prompt-state mutation.
+- An empty clean stack round-trip places an empty stack with the authored capacity, not the class's normal initial stock.
+- A forced late placement failure after `FinishSpawning` leaves the original item held and does not change any towel inventory, recovery count, pending spill count or presentation revision.
+- Successful empty stack/bin round-trips preserve the global towel-token total and create exactly one authoritative Actor.
 
-## P1 — Missing Or Destroyed Preview Still Allows Invisible Placement
+## P1 — Facility Item Fall Recovery Leaves The Carry Owner Stuck
 
-`HandleHeldObjectChanged()` marks `PreviewFacility` active before verifying that `PreviewActorClass` exists and that spawning succeeded. `ValidateCurrentPlacement()` and `ConfirmPlacement()` never require a live preview. The current runtime automation creates a Definition without `PreviewActorClass` and expects placement to succeed, directly proving the contract violation. A preview Actor destroyed during the session is also retained as a non-null `TObjectPtr` and can be called while pending kill.
+`APlaceableFacilityItemActor::FellOutOfWorld()` directly calls `RecoverPhysicalCarryable()`. Unlike the existing key, mop, basket and wrench implementations, `RecoverPhysicalCarryable()` never asks a live `UPlayerCarryComponent` to run `RecoverHeldPhysicalObject()` first. When a held facility item falls below Kill Z, the item clears its own `Carrier`, detaches and returns to the world, but `UPlayerCarryComponent::HeldObject` still points to it. The hand remains occupied while the item reports that it is not held, so placement and G drop fail closed indefinitely.
 
 Affected files:
 
-- `Source/BathhouseSim/Private/Placement/PlayerFacilityPlacementComponent.cpp`
-- `Source/BathhouseSim/Public/Placement/PlayerFacilityPlacementComponent.h`
+- `Source/BathhouseSim/Private/Placement/PlaceableFacilityItemActor.cpp`
+- `Source/BathhouseSim/Private/Tests/FacilityPlacementAutomationTests.cpp` or the focused physical-carry automation file
+
+Required correction:
+
+1. Follow the existing carry recovery handshake: if the recorded carrier still holds this exact Actor, let `UPlayerCarryComponent::RecoverHeldPhysicalObject()` silently clear ownership and publish the final held change once; perform local last-safe free-world recovery only after carry ownership is no longer authoritative.
+2. Preserve the placement-consumption/staged guards, Root scale, CCD, Pawn Ignore, last-safe transform and zero velocities.
+3. Keep recursion/reentry idempotent across FellOutOfWorld, carrier EndPlay, item EndPlay and placement consumption.
+
+Acceptance:
+
+- A held facility item forced through FellOutOfWorld leaves the carry hand empty, the same item at its last-safe transform in free-world physics, and one held-change publication.
+- A free-world fall recovers the same item without creating a facility or a second item.
+- Placement-consumed and staged items never run general fall recovery.
+
+## P1 — Placement Publication Dereferences A Facility Destroyed By Its Own Callback
+
+After the item has been consumed, `FFacilityActorConversionTransaction::PlaceItemAsFacility()` checks `NewFacilityWeak` only before calling `PublishPlacedDomainRegistration()`, then unconditionally calls `NewPlacement->EndTransition()`. `ABathhouseFacilityActor::PublishPlacedDomainRegistration()` broadcasts facility availability and then continues to read `this`/`GetWorld()` and publish locker capacity. A synchronous facility observer may destroy the new Actor during the first broadcast. The code then continues through an ending Actor/component, and locker EndPlay can publish removal while the original placement publisher still emits another capacity mutation.
+
+Affected files:
+
+- `Source/BathhouseSim/Private/Placement/FacilityActorConversionTransaction.cpp`
+- `Source/BathhouseSim/Private/Facility/BathhouseFacilityPlacementDomain.cpp`
+- facility/locker automation fixtures
+
+Required correction:
+
+1. Never dereference `NewFacility`, `NewPlacement`, or Actor-owned state after an external publication without revalidating a weak identity.
+2. Make the facility/capacity publication sequence safe if the first callback destroys the Actor. The final registry/capacity state and revision count must reflect the committed placement followed by the explicit external destruction, without a third/stale publication.
+3. Preserve the transition guard during publication so synchronous recovery/replacement reentry is rejected, but do not require calling `EndTransition()` on an invalid component.
+4. Apply the same callback-destruction audit to recovery publication and item/source destruction callbacks.
+
+Acceptance:
+
+- A facility-availability listener that destroys the just-placed shower or locker causes no invalid UObject access, ensure, stale registry entry or duplicate capacity revision.
+- A non-destructive observer still sees empty hand and final facility/locker registry and receives exactly one placement publication.
+- Synchronous recovery from the placement notification remains rejected.
+
+## P2 — Custom Recovery Mesh Offset Can Pass Validation But Bypass The Commit Overlap
+
+`ValidateRecoveryMesh()` permits a non-zero simple-box center whenever it equals `Mesh.GetBounds().Origin`. The passive query accounts for that offset, but the post-spawn commit query places `ItemRoot->GetCollisionShape()` at `ItemRoot->GetComponentLocation()` and does not apply the box/bounds center. This disagrees with `PROMPT_UNREAL.md`, which requires an offset-free box, and can approve an asset whose actual physics body overlaps a blocker outside the checked shape.
+
+Affected files:
+
+- `Source/BathhouseSim/Private/Placement/PlaceableFacilityItemCollision.cpp`
+- `Source/BathhouseSim/Private/Placement/FacilityActorConversionTransaction.cpp`
+- placement collision automation fixtures
+
+Required correction:
+
+- Either enforce zero mesh-bounds origin and zero `FKBoxElem::Center` as the documented asset contract, or derive both passive and post-spawn overlap transforms from the exact same box center/rotation. Keep the single-box, bounds-match and no-rotation constraints coherent.
+
+Acceptance:
+
+- An offset mesh/box pair cannot pass Data Validation under the current offset-free authoring contract.
+- Passive and actual-item commit checks use the same world center, rotation and extents for fallback and custom meshes.
+
+## P2 — Payload Validation Does Not Fully Enforce Its Generic Reference Invariant
+
+`FFacilityPlacementPayload::Validate()` iterates only direct `FObjectPropertyBase` fields. Object references nested in arrays, sets, maps or reflected structs are not visited, and unresolved soft/reference variants need an explicit policy. The current two final payload classes contain only scalar fields, which limits immediate exposure, but the base payload contract claims to reject Actor/Component runtime references for every typed instance-data class.
+
+Affected files:
+
+- `Source/BathhouseSim/Private/Placement/FacilityPlacementPayload.cpp`
+- payload automation fixtures
+
+Required correction:
+
+- Implement a recursive reflected-property validator, or constrain the allowed property kinds/classes so container/nested/object-reference forms fail closed. Keep exact Outer and exact domain-type validation in each importer.
+
+Acceptance:
+
+- Direct, nested-struct and container Actor/ActorComponent references are rejected; scalar-only facility and machine payloads remain valid.
+
+## P2 — Data Validation, Required Failure Coverage And Canonical Status Are Incomplete
+
+`UFacilityPlacementDefinition::IsDataValid()` returns `Super::IsDataValid()` unchanged on a valid asset. UE's base implementation returns `NotValidated`, while neighboring project validators normalize that result to `Valid`. Consequently the Editor handoff cannot reliably satisfy its stated Data Validation success gate.
+
+The current placement suite passes two tests, but the rewrite removed still-relevant suppression, external preview destruction, non-local owner, late carry failure, unexpected locker loss and synchronous destruction fixtures. The new implementation prompt additionally requires forced spawn/import/domain/carry/source-destroy/silent-unregister rollback, item lifecycle, CDO scale and clean/used endpoint coverage. `.md/PROMPT_REVIEW.md` explicitly admits that source-destroy and silent-unregister fault injection was not added.
+
+The changed canonical documents also still say the Actor-replacement Source is “implementation pending” while `.md/PROMPT_REVIEW.md` and `.md/PROMPT_UNREAL.md` say it is complete. `PlacementSystem.md` omits `PlaceableFacilityItemCollision.cpp` from its Source scope.
+
+Affected files:
+
 - `Source/BathhouseSim/Private/Placement/FacilityPlacementDefinition.cpp`
 - `Source/BathhouseSim/Private/Tests/FacilityPlacementAutomationTests.cpp`
+- focused carry/towel test files as appropriate
+- `.md/0_ARCHITECTURE.md`
+- `.md/Architecture/PlacementSystem.md`
+- `.md/Architecture/PhysicalCarrySystem.md`
+- `.md/Architecture/TowelSystem.md`
+- `.md/PROMPT_REVIEW.md`
+- `.md/PROMPT_UNREAL.md`
 
 Required correction:
 
-1. A Definition with no preview class, a failed spawn, or a lost/destroyed preview must fail closed. It may not expose an enabled placement row or commit an invisible placement.
-2. Track preview validity with `IsValid`, bind/unbind destruction if needed, clear zone grid visibility exactly once, and report a localized placement failure while keeping the gameplay Actor held and unchanged.
-3. Preserve Editor asset validation, but enforce the runtime safety invariant independently because cooked/runtime code cannot rely on `IsDataValid()`.
+1. Return `Valid` when the superclass result is `NotValidated` and all facility-definition checks pass; retain warnings for Cube fallback without turning a valid asset into `NotValidated`.
+2. Restore/adapt the removed lifecycle and atomicity coverage, and add deterministic test seams for every fallible stage. Assertions must cover Actor counts/identity, payload Outer/type, carry snapshot, Root scale, registry/Nav/capacity revisions, towel recovery ledger, event order and reentry.
+3. Add a non-unit target CDO/root/footprint test that proves the CDO-derived candidate matches the actual deferred-spawn result and neither source nor item scale leaks across the conversion.
+4. Update canonical implementation-status and Source-scope text only after the corrected Source and tests pass. Regenerate the review and Unreal handoff prompts so they no longer claim completion prematurely and include clean/used empty-state PIE checks.
 
-Acceptance:
+## Blueprint, Compatibility And Ownership
 
-- Missing class, spawn failure and external preview destruction each disable placement, clear the prior grid/preview session safely and preserve the held Actor.
-- A valid preview follows the candidate and successful commit destroys only the preview, never the gameplay Actor.
-- Update the happy-path test to supply a real preview class; it must no longer demonstrate success without one.
+- Preserve `EPlaceableFacilityMode` and existing enum ordinals.
+- Preserve reflected `Mode`, `HeldTransform`, release values, `OnModeChanged`, `PackagePhysicalRoot`, native parents and existing BlueprintCallable/Assignable names for the migration cycle.
+- Keep `RecoveryItemClass` as the exact native common class and keep facility items `FreeDrop`-only.
+- No Core Redirect is required unless the rework introduces a reflected rename/delete; none is needed for the corrections above.
+- Keep C++ responsible for payload, collision, lifecycle, spawn/destroy and rollback. Blueprint remains class/mesh/layout/presentation authoring only.
+- Keep `UPlayerFacilityPlacementComponent` as session coordinator, `UPlayerCarryComponent` as held-reference owner, Towel inventory/circulation as token owner, and the private conversion helper as replacement mechanics owner.
 
-## P1 — Overlap Checks Do Not Implement “Blocking Overlap”
-
-Both placement and recovery call `OverlapMultiByObjectType()` and treat any returned Actor as blocking. This rejects QueryOnly triggers or components whose collision response is intentionally overlap/ignore. Recovery checks only `WorldStatic` and `WorldDynamic`, so an object using another object type that the package profile actually blocks, notably `PhysicsBody`, can be missed immediately before collision and simulation are enabled.
-
-Affected files:
-
-- `Source/BathhouseSim/Private/Placement/FacilityPlacementComponent.cpp`
-- `Source/BathhouseSim/Private/Placement/PlayerFacilityPlacementComponent.cpp`
-- placement collision automation tests
-
-Required correction:
-
-1. Evaluate the package/placement collision contract using UE 5.8 blocking semantics and the intended collision profile/channel, including every object type the enabled package can actually block.
-2. Do not reject non-blocking overlap volumes. Continue to ignore the facility itself, player owner and active placement zone where required.
-3. Keep footprint containment separate from collision. Preserve four-corner floor support and validate the transformed footprint component rather than the Actor origin.
-4. Verify scaled/rotated zone-local bounds consistently; do not compare inverse-scaled local coordinates with scaled world extents.
-
-Acceptance:
-
-- A non-blocking trigger inside the footprint does not invalidate placement/recovery.
-- A blocking `WorldStatic`, `WorldDynamic`, `Pawn` where intended, and blocking `PhysicsBody` are rejected according to the actual enabled profile.
-- The exact support floor remains accepted without allowing penetration.
-- Rotated and non-unit-scaled zone tests prove full containment and floor checks use consistent coordinate spaces.
-
-## P2 — Suppression, Target EndPlay And Local-Player Lifecycle Are Polling-Dependent
-
-Placement/recovery entry and commit functions do not recheck `Interaction->IsInteractionSuppressed()`. Suppression is noticed only by the component Tick, while the Character's Q Completed path calls `CompleteRecoveryHold()` without a computer-focus check. A focus/suppression change and Q completion in the same input frame can therefore commit before polling cancels it. Target destruction invalidates the weak pointer but does not run the cancellation path until a later completion, leaving internal elapsed/query state stale. The component also ticks and traces without the local-control guard used by `UPlayerInteractionComponent`, then forces an additional interaction refresh every frame even when idle.
-
-Affected files:
-
-- `Source/BathhouseSim/Private/Placement/PlayerFacilityPlacementComponent.cpp`
-- `Source/BathhouseSim/Private/Character/FirstPersonCharacter.cpp`
-- placement lifecycle/input automation tests
-
-Required correction:
-
-1. Revalidate suppression/local ownership in Begin, update and final commit paths, not only on Tick. A suppressed placement/recovery attempt must fail/cancel without mutation.
-2. Cancel target/owner EndPlay deterministically, reset progress/query once and remove any destruction delegates during cleanup.
-3. Limit preview creation, camera traces and prompt refresh to the locally controlled player. Avoid the unconditional duplicate interaction refresh/trace while idle; enable work only when required without losing the passive recovery prompt.
-4. Preserve LMB ownership `Computer > Placement > Equipment`, held-item-independent Q recovery and idempotent cancel semantics.
-
-Acceptance:
-
-- Computer focus or generic interaction suppression immediately before LMB/Q completion cannot commit.
-- Target destruction and owner/component EndPlay reset the session with no stale progress, delegate or preview/grid state.
-- A non-locally-controlled pawn spawns no preview and performs no placement/recovery camera traces.
-- Existing primary, secondary and equipment rows remain unchanged, and placement still suppresses only the equipment row.
-
-## P2 — Weak Registry Recovery And Required Automation Coverage Are Incomplete
-
-`ULockerCapacitySubsystem` stores weak banks, slots and customer owners but never compacts invalid entries. `InstalledLockerCapacity` and `Leases.Num()` can therefore remain inflated if normal EndPlay cleanup is bypassed or reentered. The focused tests cover two happy-path aggregates but omit many minimum cases required by `.md/PROMPT_IMPLEMENTATION.md`, including placement late-failure rollback, preview cleanup/loss, E/G behavior, washer/bath recovery gates, customer check-in rollback/cleanup, random clothes-slot use and weak-entry recovery.
-
-Affected files:
-
-- `Source/BathhouseSim/Public/Facility/LockerCapacitySubsystem.h`
-- `Source/BathhouseSim/Private/Facility/LockerCapacitySubsystem.cpp`
-- `Source/BathhouseSim/Private/Tests/FacilityPlacementAutomationTests.cpp`
-- relevant customer/towel automation fixtures
-
-Required correction:
-
-1. Add a deterministic, mutation-safe weak-entry compaction/teardown policy so invalid bank/slot/customer entries cannot grant capacity or block it forever. Preserve active customer leases when a locker bank unexpectedly ends, as required by the canonical architecture; do not conflate bank loss with customer-owner loss.
-2. Keep release idempotent and keep provisional leases counted against admission/removal until commit or rollback.
-3. Add the missing minimum automation coverage from the implementation prompt, with concrete state/delegate/revision assertions rather than only mode/count happy paths.
-4. Treat the existing towel-presentation warning fixture separately; do not suppress unexpected new warnings/errors globally.
-
-## Blueprint, Compatibility And Documentation
-
-- Do not modify or resave `Content/` or `Config/` in this rework.
-- Preserve the five newly required Widget fields exactly: `PlacementActionNameText`, `PlacementFailureReasonText`, `RecoveryActionNameText`, `RecoveryFailureReasonText`, `RecoveryProgressBar`. C++ continues to own visibility, text, progress and transient failure state; Blueprint remains layout/style/animation/asset wiring only.
-- Preserve existing reflected signatures and the ordinals of `EPhysicalCarryKind`, `EPlayerInteractionIntent`, `EBathhouseFacilityType` and `EBathhouseCustomerActivity`. Keep deprecated shoe/numbered symbols for migration and out of the active routine.
-- No Core Redirect is currently required because this task does not need a reflected rename/delete. Do not introduce one to solve runtime logic.
-- `DeveloperSettings` remains a justified runtime dependency through `UFacilityPlacementSettings`.
-- After Source corrections, update the affected architecture status/flow text, `.md/PROMPT_REVIEW.md` and `.md/PROMPT_UNREAL.md` to match the actual final contract. Do not describe the Source stage as implemented until the new rollback/lifecycle tests pass.
-
-## Regression Checks
+## Regression Verification
 
 - `git diff --check`
 - no `Content/`, `Config/` or `.uproject` mutation
 - Editor/Live Coding closed
 - exact UE 5.8 `Build.bat BathhouseSimEditor Win64 Development` succeeds
-- focused placement tests include every new failure/reentrancy/lifecycle fixture and pass
-- full `BathhouseSim` automation group passes; report exact success/warning/failure counts
-- independent headless log scan contains only the five expected pre-Editor `WBP_InteractionPrompt` missing-bind errors, plus separately identified pre-existing warnings; no assertion, ensure, fatal error, access violation or unexpected Blueprint/script error
+- corrected `BathhouseSim.Placement`, `BathhouseSim.Interaction.PhysicalCarry` and `BathhouseSim.Towel` groups pass
+- independent log scan contains no assertion, ensure, fatal error, access violation or unexpected Blueprint/script error; report the existing animation and intentional towel-presentation warnings separately
 
 ## Review Resubmission
 
-Regenerate `.md/PROMPT_REVIEW.md` and report:
+Regenerate `.md/PROMPT_REVIEW.md` with concrete evidence for:
 
-- the transaction snapshot, commit order, deferred publication and forced-failure rollback evidence
-- preview spawn/loss fail-closed behavior
-- collision profile/channel and blocking-overlap tests, including `PhysicsBody` and non-blocking triggers
-- suppression, target/owner EndPlay and local-player trace cleanup
-- weak-registry compaction and customer lease preservation behavior
-- exact Widget/Blueprint/Core Redirect compatibility conclusion
-- UE 5.8 build, focused tests, full automation counts and independent log scan
+- clean/used empty gates, empty converted initialization and towel-token conservation
+- held facility-item FellOutOfWorld recovery through the carry owner
+- callback-destruction-safe publication and exact revision/event counts
+- custom-mesh collision center consistency
+- recursive payload reference rejection
+- every forced failure rollback and non-unit CDO/Root scale case
+- UE 5.8 build and exact focused automation pass counts
+- Blueprint/Core Redirect compatibility and the remaining Editor-only checks

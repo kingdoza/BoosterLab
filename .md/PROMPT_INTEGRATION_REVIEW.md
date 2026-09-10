@@ -1,71 +1,58 @@
-# Integration Review Prompt — Facility Placement, Locker Capacity And Expansion Integration
+# 통합 검토 — 설비 Actor 교체 및 Conversion Opt-Out
 
-## Status
+## 작업 범위와 결과
 
-Partial completion. The serialized input, Placement Definition, Expansion Definition, Preview Blueprint and Facility Blueprint work is saved and reloaded. WidgetTree/StateTree authoring and reliable World Partition level persistence remain outside the current MCP write surface. Two native validation/initialization defects block a clean compile and PIE acceptance.
+- 입력 프롬프트: `.md/PROMPT_UNREAL.md`
+- Source, Config, `.uproject`, native parent class, reflected 이름은 변경하지 않았다.
+- `.uasset` 직접 패치나 `Save All`은 사용하지 않았다.
+- 기존 더티 worktree는 보존했다.
+- 아래 7개 `FacilityPlacementDefinition`만 저장했다.
 
-## Scope And Ownership
+## 저장된 Definition 연결
 
-- Input prompt: `.md/PROMPT_UNREAL.md`
-- No Source or Config file was changed in this Editor pass.
-- No `.uasset`/`.umap` binary patch or `Save All` was used.
-- The previous dirty worktree was preserved.
-- Required user/UI work is recorded in `.md/USER_UNREAL.md`.
+각 Definition에 `Recovery Item Class = /Script/BathhouseSim.PlaceableFacilityItemActor`를 저장했다. `Recovery Item Mesh`는 모두 `None`으로 유지하여 native cube fallback을 사용한다.
 
-## Persisted Asset Verification
+| Definition | Placed Facility Class |
+| --- | --- |
+| `DA_FacilityPlacement_Bath` | `BP_Bath` |
+| `DA_FacilityPlacement_Shower` | `BP_Shower` |
+| `DA_FacilityPlacement_ClothesLocker_1` | `BP_ClothesLocker` |
+| `DA_FacilityPlacement_ClothesLocker_4` | `BP_ClothesLocker_4` |
+| `DA_FacilityPlacement_ClothesLocker_8` | `BP_ClothesLocker_8` |
+| `DA_FacilityPlacement_Washer` | `BP_Washer` |
+| `DA_FacilityPlacement_Dryer` | `BP_Dryer` |
 
-The following assets were loaded from a fresh Editor session and their stored values matched the authored contract.
+기존 `StableId`, `Facility.Placeable` 태그, Preview class, footprint cell 값, locker slot count는 읽은 뒤 변경하지 않았다.
 
-- `/Game/Input/Actions/IA_RecoverFacility` — `Boolean`
-- `/Game/Input/Actions/IA_PlacementSnap` — `Boolean`
-- `/Game/Input/Actions/IA_PlacementRotate` — `Axis1D`
-- `/Game/Input/IMC_FirstPerson` — Q, LeftControl and MouseWheelAxis mappings target those three actions.
-- `/Game/FirstPersonCharacter/BP_FirstPersonCharacter` — the three Facility Placement action defaults are assigned; existing `PrimaryUseAction` stays `IA_PrimaryUse`.
-- `/Game/Bathhouse/Data/Placement/DA_FacilityPlacement_{Bath,Shower,ClothesLocker_1,ClothesLocker_4,ClothesLocker_8,Washer,Dryer,CleanTowelStack,UsedTowelBin}` — each has `Facility.Placeable`, a matching preview class and these footprint/slot values: Bath `29x24/0`, Shower `8x11/0`, Locker `6x4/1`, `6x14/4`, `6x28/8`, Washer `6x5/0`, Dryer `6x5/0`, Clean `5x4/0`, Used `5x5/0`.
-- `/Game/Bathhouse/Data/Expansion/DA_BathhouseExpansion_Default` — tiers `(KeyPool, LockerLimit) = (3,2), (4,4), (8,8)`.
-- `/Game/Bathhouse/Blueprints/Placement/BP_FacilityPlacementZone` — `Facility.Placeable`, bounds extent `(1400,900,10)` at local Z `10`.
-- `/Game/Bathhouse/Blueprints/Placement/BP_BathhouseExpansionAuthority` — default definition and initial tier `0` assigned.
-- `/Game/Bathhouse/Blueprints/Interaction/BP_BathhouseKeyRack` — key/hook classes, first key `1`, eight unique pair transforms assigned.
+## Blueprint 확인
 
-All nine migrated facility Blueprints point to their matching definitions, use `Placed` mode, keep bottom-aligned footprints, use `NavArea_Null` placement modifiers, and do not let their physical root create navigation. Locker component-tree verification found exactly 1/4/8 `LockerSlot` components with non-empty IDs and the authored approach transforms.
+다음 7개 Blueprint의 `FacilityPlacement` 컴포넌트는 이미 `Mode = Placed` 및 각각의 대응 Definition을 가리키고 있었다. 따라서 원본 컴포넌트/그래프를 덮어쓰지 않았다.
 
-## Blueprint Compile
+- `BP_Bath`, `BP_Shower`, `BP_ClothesLocker`, `BP_ClothesLocker_4`, `BP_ClothesLocker_8`
+- `BP_Washer`, `BP_Dryer`
 
-Warnings-as-errors compile succeeded and left no dirty asset for 23 assets:
+각 Blueprint의 Event Graph 및 Construction Script에는 별도의 패키지 mesh spawn/attach/복제 분기가 없었다. `PackagePhysicalRoot`, `PlacementFootprint`, `FacilityPlacement` 등 기존 컴포넌트 이름도 보존했다.
 
-- `BP_FirstPersonCharacter`, Placement Zone, Expansion Authority, Key Rack and Key
-- Bath, Shower, Locker 1/4/8, Washer, Dryer, Clean Towel Stack and Used Towel Bin
-- all nine facility preview Blueprints
+`BP_CleanTowelStack` 및 `BP_UsedTowelBin`과 그 Definition은 수정·저장·재배정하지 않았다.
 
-Expected current failures:
+## 검증
 
-1. `/Game/Bathhouse/UI/WBP_InteractionPrompt` lacks the five required bindings: `PlacementActionNameText`, `PlacementFailureReasonText`, `RecoveryActionNameText`, `RecoveryFailureReasonText`, `RecoveryProgressBar`.
-2. `/Game/Bathhouse/Blueprints/Interaction/BP_BathhouseKeyHook` fails native validation: `KeyActor must reference the exact key with the same KeyNumber.` Its CDO is intentionally unconfigured (`KeyNumber=0`, `KeyActor=None`) because these are `EditInstanceOnly`; this is a native validation defect for rack-owned runtime pairs, not an asset-default value to fill in.
+- 7개 대상 Blueprint를 warnings-as-errors로 컴파일했다. 컴파일 요청은 모두 성공했고 대상 Blueprint는 dirty 상태가 되지 않았다.
+- 7개 Definition 저장 후 대상 14개(Definition 7 + Blueprint 7)의 dirty 상태가 모두 `false`임을 확인했다.
+- 기본 PIE를 1초 warmup으로 시작하고 정상 종료했다. 시작 중 assertion/Blueprint compile error는 없었다.
+- Map Check는 에디터 시작 시 `0 Error(s), 0 Warning(s)`로 완료됐다.
 
-## Level Persistence Attempt
+현재 MCP 툴셋에는 Data Validation 실행 명령이 노출되지 않아 Data Validation은 실행하지 못했다. PIE의 플레이어 입력, 설비 회수/손 장착/자유 드롭, 재배치, 세탁기·건조기 동작은 실제 상호작용 검증이 필요하다.
 
-The MCP created one Placement Zone at `(600,-100,0)`, one Authority at `(0,0,0)`, one Key Rack at `(0,-260,50)`, and set Recast runtime generation to `DynamicModifiersOnly` in memory. `SceneTools.save_actor` failed to find the new World Partition external actor package. The fallback explicit `/Game/Maps/DefaultMap` save returned success and dirty=false, but a fresh Editor reload found zero of the three actors and `RecastNavMesh.RuntimeGeneration=Static`.
+저장 직후 fresh-editor restart/reload도 시도했으나 새 백그라운드 Editor가 MCP 초기화 완료 전에 멈춰 재연결할 수 없었다. 저장 전후의 값 재조회 및 dirty 검증은 완료했으며, 해당 agent-owned Editor는 종료했다.
 
-This MCP path is therefore not a valid World Partition save method for this project. Section 3 of `.md/USER_UNREAL.md` is required.
+## 후속 수동 확인
 
-The six old level-owned key/hook actors were only recorded, never deleted.
+1. Editor를 다시 열어 7개 Definition의 `Placed Facility Class`, `Recovery Item Class`, `Recovery Item Mesh=None`을 한 번 확인한다.
+2. Data Validation을 실행한다.
+3. PIE에서 Bath/Shower/Locker 1·4·8/Washer/Dryer 각각을 회수하여 손 장착, G 자유 드롭, 재배치까지 확인한다.
+4. Clean Towel Stack과 Used Towel Bin이 기존 전용 흐름을 계속 사용하며 설비 회수 후보가 아닌지 확인한다.
 
-## PIE And Logs
+## 결론
 
-Two 5-second input-free PIE smoke runs started and stopped successfully. They cannot verify player input, placement, recovery, focus priority, ghost visuals, trigger/obstacle semantics or StateTree customer flow.
-
-Both runs emitted the same two errors:
-
-`BP_ClothesLocker_C_UAID_F02F7433CA3615F402_1440894859` and `BP_ClothesLocker_C_UAID_F02F7433CA3615F402_1441212860` could not register their placed state because installed locker capacity was reported over the current expansion limit. Runtime inspection showed each has one `Locker_1_01` slot and the correct one-slot definition; authored Tier 0 capacity is two. The registration happens before/while authority availability is established. The native retry path exists, but the initial failed registration is still logged as an Error. This needs a code-stage fix before clean-log acceptance.
-
-No new Counter or Navigation error was observed in either smoke run.
-
-## Required Next Steps
-
-1. Complete `.md/USER_UNREAL.md` sections 1–4.
-2. Return the KeyHook CDO validation and locker registration-order errors to the implementation/review stage.
-3. After those changes, run Data Validation, full compile, disk reload and the interactive PIE acceptance matrix from `.md/PROMPT_UNREAL.md`.
-
-## Integration Conclusion
-
-Do not approve integration yet. The persisted asset contract is largely correct, but the unresolved WidgetTree/StateTree/World Partition authoring and two native blockers prevent end-to-end acceptance.
+Definition 기반 설비 교체 연결은 저장 완료됐다. 수동 Data Validation과 상호작용 acceptance가 남아 있으므로, 그 두 항목을 마친 뒤 최종 통합 승인하는 것이 적절하다.

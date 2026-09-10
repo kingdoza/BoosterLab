@@ -141,7 +141,7 @@ Cash는 carry 대상이 아니며 Economy System의 즉시 획득 interaction으
 - `UPlayerEquipmentUseComponent`
 - target `UPlayerFacilityPlacementComponent`
 - first-person camera 하위 `HeldKeyAnchor`
-- E Started/Completed/Canceled, F/G Started, Q Started/Triggered/Completed/Canceled, LCtrl Started/Completed, MouseWheel axis와 LMB lifecycle을 Interaction/Carry/Placement/Equipment에 의도로 전달한다.
+- E Started/Completed/Canceled, F/G Started, Q Started/Completed/Canceled, LCtrl Started/Completed, MouseWheel axis와 LMB lifecycle을 Interaction/Carry/Placement/Equipment에 의도로 전달한다. Q hold elapsed와 자동 commit은 입력 반복 이벤트가 아니라 Placement Component Tick이 소유한다.
 - LMB owner는 `Computer > Placement > Equipment` 순서로 하나만 선택한다.
 - computer session이 input을 capture하면 해당 session이 E lifecycle을 소비하고 Interaction에는 전달하지 않는다.
 
@@ -204,7 +204,7 @@ Editor authoring 값:
 ## Manual Review Points
 
 - 어떤 경로에서도 player가 두 key를 동시에 들지 않는지 확인한다.
-- 어떤 경로에서도 key/mop/basket/monkey wrench/packaged facility를 둘 이상 동시에 들지 않는지 확인한다.
+- 어떤 경로에서도 key/mop/basket/monkey wrench/전용 facility item을 둘 이상 동시에 들지 않는지 확인한다.
 - E hold cancel과 F/G attempt가 기존 primary result를 중복 방송하지 않는지 확인한다.
 - key의 기존 state transition과 GetHeldKey/OnHeldKeyChanged 계약이 generic carry 확장 뒤에도 유지되는지 확인한다.
 - query가 상태를 바꾸지 않고 execute가 조건을 재검증하는지 확인한다.

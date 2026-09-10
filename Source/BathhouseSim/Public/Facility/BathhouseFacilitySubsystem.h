@@ -22,6 +22,7 @@ public:
 	bool RegisterFacility(ABathhouseFacilityActor* Facility, bool bPublish = true);
 	bool UnregisterFacility(ABathhouseFacilityActor* Facility, bool bPublish = true);
 	bool IsFacilityRegistered(const ABathhouseFacilityActor* Facility) const;
+	bool CompactInvalidFacilityRegistrations();
 	void NotifyFacilityAvailabilityChanged(EBathhouseFacilityType FacilityType);
 
 	void RegisterKeyHook(AActor* KeyHook, int32 KeyNumber);

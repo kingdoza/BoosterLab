@@ -45,7 +45,10 @@ public:
 
 	UPrimitiveComponent* GetPackagePhysicalRoot() const { return PackagePhysicalRoot; }
 	bool IsOperational(FText& OutFailureReason) const;
+	bool ValidateFootprintContractForDefinition(const UFacilityPlacementDefinition& InDefinition, FText& OutFailureReason) const;
 	bool ValidateFootprintContract(FText& OutFailureReason) const;
+	bool BuildPlacedActorTransform(const FTransform& RequestedTransform, FTransform& OutTransform, FText& OutFailureReason) const;
+	bool GetFootprintRelativeToRoot(FTransform& OutTransform, FText& OutFailureReason) const;
 	bool GetRecoveryDropTransform(FTransform& OutTransform, FText& OutFailureReason) const;
 	bool CanEnablePackagedCollision(FText& OutFailureReason) const;
 	bool BeginTransition(FText& OutFailureReason);
@@ -55,6 +58,11 @@ public:
 	void ApplyHeldPresentation(class USceneComponent& HeldAnchor, const FTransform& HeldTransform);
 	void RestoreLastSafePackagedWorld();
 	void CaptureLastSafeTransform();
+	void PrepareForStagedPlacement(UFacilityPlacementDefinition& InDefinition);
+	void SetPlacedDomainActive(bool bActive);
+	void CommitStagedPlacement();
+	bool IsStagedPlacement() const { return bStagedPlacement; }
+	bool IsPlacedDomainActive() const { return bPlacedDomainActive; }
 
 	AActor* GetAssignedFixedSlot() const { return AssignedFixedSlot.Get(); }
 	bool TryBindFixedSlot(AActor& SlotActor, FText& OutFailureReason);
@@ -101,4 +109,6 @@ private:
 	FTransform LastSafeTransform = FTransform::Identity;
 	bool bTransitionInProgress = false;
 	bool bFixedSlotBindingConflict = false;
+	bool bStagedPlacement = false;
+	bool bPlacedDomainActive = false;
 };

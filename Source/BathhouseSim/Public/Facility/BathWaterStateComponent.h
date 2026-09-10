@@ -43,6 +43,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Bath Water")
 	void SetNormalizedAmount(float NewAmount);
 
+	void ResetEmptyForPlacement();
+
 	UPROPERTY(BlueprintAssignable, Category = "Bath Water|Presentation")
 	FOnBathWaterStateChanged OnWaterStateChanged;
 

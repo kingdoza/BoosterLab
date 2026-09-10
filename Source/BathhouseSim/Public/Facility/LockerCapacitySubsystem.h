@@ -36,7 +36,7 @@ class BATHHOUSESIM_API ULockerCapacitySubsystem : public UWorldSubsystem
 public:
 	bool ValidateLockerBankRegistration(const AActor* Bank, const TArray<ULockerActionSlotComponent*>& Slots, int32 DefinitionSlotCount, FText& OutFailureReason);
 	bool RegisterLockerBank(AActor* Bank, const TArray<ULockerActionSlotComponent*>& Slots, int32 DefinitionSlotCount, FText& OutFailureReason, bool bPublish = true);
-	void UnregisterLockerBank(AActor* Bank, bool bUnexpectedEndPlay, bool bPublish = true);
+	bool UnregisterLockerBank(AActor* Bank, bool bUnexpectedEndPlay, bool bPublish = true);
 	bool IsLockerBankRegistered(const AActor* Bank) const;
 	bool CanInstallLockerSlots(int32 AdditionalSlots, FText& OutFailureReason) const;
 	bool CanRemoveLockerBank(const AActor* Bank, FText& OutFailureReason) const;

@@ -81,6 +81,23 @@ AFirstPersonCharacter::AFirstPersonCharacter(const FObjectInitializer& ObjectIni
 	}
 }
 
+void AFirstPersonCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// These links are runtime-only state. Re-establish them on the fully constructed
+	// player instance so Blueprint archetype loading cannot leave the recovery
+	// progress provider disconnected from the interaction query.
+	if (PlayerFacilityPlacement)
+	{
+		PlayerFacilityPlacement->Configure(FirstPersonCamera, PlayerCarry, PlayerInteraction);
+	}
+	if (PlayerInteraction)
+	{
+		PlayerInteraction->ConfigureSupplementalIntentSource(PlayerFacilityPlacement);
+	}
+}
+
 void AFirstPersonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -141,7 +158,6 @@ void AFirstPersonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	if (RecoverFacilityAction)
 	{
 		EnhancedInputComponent->BindAction(RecoverFacilityAction, ETriggerEvent::Started, this, &AFirstPersonCharacter::RecoverFacilityStartInput);
-		EnhancedInputComponent->BindAction(RecoverFacilityAction, ETriggerEvent::Triggered, this, &AFirstPersonCharacter::RecoverFacilityTriggeredInput);
 		EnhancedInputComponent->BindAction(RecoverFacilityAction, ETriggerEvent::Completed, this, &AFirstPersonCharacter::RecoverFacilityCompletedInput);
 		EnhancedInputComponent->BindAction(RecoverFacilityAction, ETriggerEvent::Canceled, this, &AFirstPersonCharacter::RecoverFacilityCanceledInput);
 	}
@@ -346,21 +362,9 @@ void AFirstPersonCharacter::RecoverFacilityStartInput()
 	}
 }
 
-void AFirstPersonCharacter::RecoverFacilityTriggeredInput()
-{
-	if ((!PlayerComputerUse || !PlayerComputerUse->IsCapturingInput()) && PlayerFacilityPlacement)
-	{
-		PlayerFacilityPlacement->UpdateRecoveryHold(GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
-	}
-}
-
 void AFirstPersonCharacter::RecoverFacilityCompletedInput()
 {
-	if ((!PlayerComputerUse || !PlayerComputerUse->IsCapturingInput()) && PlayerFacilityPlacement)
-	{
-		PlayerFacilityPlacement->CompleteRecoveryHold();
-	}
-	else if (PlayerFacilityPlacement)
+	if (PlayerFacilityPlacement)
 	{
 		PlayerFacilityPlacement->CancelRecoveryHold();
 	}

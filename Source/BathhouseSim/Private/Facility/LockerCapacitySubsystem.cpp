@@ -58,7 +58,7 @@ bool ULockerCapacitySubsystem::RegisterLockerBank(
 	return true;
 }
 
-void ULockerCapacitySubsystem::UnregisterLockerBank(
+bool ULockerCapacitySubsystem::UnregisterLockerBank(
 	AActor* Bank,
 	const bool bUnexpectedEndPlay,
 	const bool bPublish)
@@ -84,6 +84,7 @@ void ULockerCapacitySubsystem::UnregisterLockerBank(
 	{
 		BroadcastMutation();
 	}
+	return bRemoved;
 }
 
 bool ULockerCapacitySubsystem::IsLockerBankRegistered(const AActor* Bank) const

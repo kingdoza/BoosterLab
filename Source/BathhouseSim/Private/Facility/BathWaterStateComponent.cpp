@@ -21,3 +21,9 @@ void UBathWaterStateComponent::SetNormalizedAmount(const float NewAmount)
 {
 	NormalizedAmount = FMath::Clamp(NewAmount, 0.0f, 1.0f);
 }
+
+void UBathWaterStateComponent::ResetEmptyForPlacement()
+{
+	WaterState = EBathWaterState::Empty;
+	NormalizedAmount = 0.0f;
+}

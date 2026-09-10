@@ -3,8 +3,6 @@
 #include "Camera/CameraComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
-#include "Interaction/PhysicalCarryable.h"
-#include "Interaction/PhysicalCarryPlacementTransaction.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Interaction/PlayerInteractionComponent.h"
 #include "Placement/FacilityPlacementComponent.h"
@@ -12,7 +10,9 @@
 #include "Placement/FacilityPlacementPreviewActor.h"
 #include "Placement/FacilityPlacementSettings.h"
 #include "Placement/FacilityPlacementZoneActor.h"
+#include "Placement/FacilityActorConversionTransaction.h"
 #include "Placement/PlaceableFacility.h"
+#include "Placement/PlaceableFacilityItemActor.h"
 
 #define LOCTEXT_NAMESPACE "PlayerFacilityPlacementComponent"
 
@@ -100,6 +100,14 @@ void UPlayerFacilityPlacementComponent::TickComponent(
 			{
 				CancelRecovery();
 			}
+			else
+			{
+				UpdateRecoveryHold(DeltaTime);
+				if (!RecoveryTarget.IsValid())
+				{
+					return;
+				}
+			}
 		}
 	}
 	UpdateTickState();
@@ -112,15 +120,14 @@ void UPlayerFacilityPlacementComponent::HandleHeldObjectChanged(AActor* NewHeldO
 	{
 		return;
 	}
-	IPlaceableFacility* Placeable = Cast<IPlaceableFacility>(NewHeldObject);
-	UFacilityPlacementComponent* Placement = Placeable ? Placeable->GetFacilityPlacementComponent() : nullptr;
-	if (!Placement || Placement->GetMode() != EPlaceableFacilityMode::Packaged)
+	APlaceableFacilityItemActor* Item = Cast<APlaceableFacilityItemActor>(NewHeldObject);
+	if (!Item || !Item->IsHeldForPlacement())
 	{
 		return;
 	}
-	PreviewFacility = NewHeldObject;
+	PreviewFacility = Item;
 	AccumulatedYaw = 0.0f;
-	UFacilityPlacementDefinition* Definition = Placement->GetDefinition();
+	UFacilityPlacementDefinition* Definition = Item->GetDefinition();
 	if (!Definition || !Definition->PreviewActorClass || !GetWorld())
 	{
 		SetPreviewFailure(
@@ -130,7 +137,7 @@ void UPlayerFacilityPlacementComponent::HandleHeldObjectChanged(AActor* NewHeldO
 	}
 	PreviewActor = GetWorld()->SpawnActor<AFacilityPlacementPreviewActor>(
 		Definition->PreviewActorClass,
-		NewHeldObject->GetActorTransform());
+		Item->GetActorTransform());
 	if (AFacilityPlacementPreviewActor* SpawnedPreview = PreviewActor.Get())
 	{
 		SpawnedPreview->SetActorEnableCollision(false);
@@ -252,13 +259,9 @@ FPlayerInteractionResult UPlayerFacilityPlacementComponent::ConfirmPlacement()
 	FTransform Candidate;
 	AFacilityPlacementZoneActor* Zone = nullptr;
 	const FFacilityPlacementTransactionResult Query = ValidateCurrentPlacement(Candidate, Zone);
-	AActor* FacilityActor = PreviewFacility.Get();
-	IPlaceableFacility* Placeable = Cast<IPlaceableFacility>(FacilityActor);
-	UFacilityPlacementComponent* Placement = Placeable ? Placeable->GetFacilityPlacementComponent() : nullptr;
-	UPrimitiveComponent* PackageRoot = Placement ? Placement->GetPackagePhysicalRoot() : nullptr;
-	if (!Query.bSucceeded || !IsValid(PreviewActor.Get()) || !FacilityActor || !Placeable
-		|| !IsValid(PackageRoot) || PackageRoot != FacilityActor->GetRootComponent()
-		|| !Carry || Carry->GetHeldObject() != FacilityActor)
+	APlaceableFacilityItemActor* Item = PreviewFacility.Get();
+	if (!Query.bSucceeded || !IsValid(PreviewActor.Get()) || !Item
+		|| !Carry || Carry->GetHeldObject() != Item || !Zone)
 	{
 		const FPlayerInteractionResult Result = FPlayerInteractionResult::Failed(
 			Query.FailureReason.IsEmpty() ? LOCTEXT("PlacementUnavailable", "설비를 설치할 수 없습니다.") : Query.FailureReason,
@@ -267,15 +270,13 @@ FPlayerInteractionResult UPlayerFacilityPlacementComponent::ConfirmPlacement()
 		return Result;
 	}
 
-	FPhysicalCarryPlacementTransaction Transaction(*FacilityActor, *PackageRoot);
 	FText FailureReason;
-	const bool bSucceeded = Transaction.IsValid()
-		&& Transaction.ApplyPlacedWorld(Candidate)
-		&& Carry->CommitReleasePhysicalObjectForPlacement(FacilityActor, [&]()
-		{
-			return IsValid(FacilityActor)
-				&& Placeable->CommitPlaceableFacilityMode(EPlaceableFacilityMode::Placed, FailureReason);
-		});
+	const bool bSucceeded = FFacilityActorConversionTransaction::PlaceItemAsFacility(
+		*Item,
+		Candidate,
+		*Zone,
+		*Carry,
+		FailureReason) != nullptr;
 	if (!bSucceeded)
 	{
 		const FPlayerInteractionResult Result = FPlayerInteractionResult::Failed(
@@ -284,7 +285,6 @@ FPlayerInteractionResult UPlayerFacilityPlacementComponent::ConfirmPlacement()
 		ReportResult(Result);
 		return Result;
 	}
-	Transaction.Commit();
 	const FPlayerInteractionResult Result = FPlayerInteractionResult::Succeeded(EPlayerInteractionIntent::PlacementConfirm);
 	ReportResult(Result);
 	return Result;
@@ -307,6 +307,13 @@ bool UPlayerFacilityPlacementComponent::BeginRecoveryHold()
 	Candidate->OnDestroyed.AddUniqueDynamic(this, &UPlayerFacilityPlacementComponent::HandleRecoveryTargetDestroyed);
 	RecoveryElapsed = 0.0f;
 	bRecoveryCommittedThisPress = false;
+	if (Interaction)
+	{
+		// The focused facility contributes a visible recovery row with zero progress.
+		// Reassert this live component as the final query provider when the hold begins
+		// so the row receives RecoveryElapsed even after Blueprint instance reinstancing.
+		Interaction->ConfigureSupplementalIntentSource(this);
+	}
 	UpdateTickState();
 	return true;
 }
@@ -324,6 +331,10 @@ void UPlayerFacilityPlacementComponent::UpdateRecoveryHold(const float DeltaTime
 	if (Interaction)
 	{
 		Interaction->RefreshInteractionQuery();
+	}
+	if (RecoveryElapsed >= GetDefault<UFacilityPlacementSettings>()->GetRecoveryHoldSeconds())
+	{
+		CompleteRecoveryHold();
 	}
 }
 
@@ -346,7 +357,7 @@ void UPlayerFacilityPlacementComponent::CompleteRecoveryHold()
 		: FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::StateChanged, LOCTEXT("RecoveryTargetChanged", "회수 대상에서 시선이 벗어났습니다."));
 	FText FailureReason;
 	const bool bSucceeded = CurrentRecoveryQuery.bSucceeded
-		&& Placeable->CommitPlaceableFacilityMode(EPlaceableFacilityMode::Packaged, FailureReason);
+		&& FFacilityActorConversionTransaction::RecoverFacilityToItem(*Target, FailureReason) != nullptr;
 	bRecoveryCommittedThisPress = bSucceeded;
 	ReportResult(bSucceeded
 		? FPlayerInteractionResult::Succeeded(EPlayerInteractionIntent::FacilityRecovery)

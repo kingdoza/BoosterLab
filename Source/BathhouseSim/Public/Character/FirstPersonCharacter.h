@@ -28,6 +28,7 @@ class BATHHOUSESIM_API AFirstPersonCharacter : public ACharacter
 public:
 	AFirstPersonCharacter(const FObjectInitializer& ObjectInitializer);
 
+	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	UFUNCTION(BlueprintPure, Category = "First Person")
@@ -69,7 +70,6 @@ protected:
 	void ComputerClickStartInput();
 	void ComputerClickEndInput();
 	void RecoverFacilityStartInput();
-	void RecoverFacilityTriggeredInput();
 	void RecoverFacilityCompletedInput();
 	void RecoverFacilityCanceledInput();
 	void PlacementSnapStartInput();

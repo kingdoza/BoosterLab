@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-Q47~Q52의 exact fixed slot과 actual-held-position free drop은 구현되어 있다. Placement target은 동일 설비 Actor의 `Packaged` mode를 새 carry kind로 추가하며 기존 single carry, exact slot, held pose drop과 CCD 계약을 그대로 사용한다.
+Q47~Q52의 exact fixed slot과 actual-held-position free drop은 구현되어 있다. 기존 설비 Actor의 `Packaged` carry 책임은 비활성화되었고 Placement 전용 `APlaceableFacilityItemActor`가 single carry, held-pose free drop, CCD와 carry-owner 기반 낙하 복구를 재사용한다. 설비 아이템은 fixed-slot capability를 명시적으로 제외한다.
 
 equipment slot Blueprint/instance 배치, exact `AssignedItem`/anchor, key physics bounds와 기존 Blueprint release velocity 값은 코드 리뷰 후 Editor 단계에서 authoring한다.
 
@@ -29,21 +29,22 @@ Source/BathhouseSim/Private/Tests/
   CleaningTowelAutomationTests.cpp
   CombatRecoveryAutomationTests.cpp
   PhysicalCarryFixedSlotAutomationTests.cpp
+  FacilityPlacementAutomationTests.cpp
 ```
 
-Concrete carryable은 key, `Cleaning/WetMopActor`, `Towel/TowelBasketActor`, `Combat/MonkeyWrenchActor`와 target placeable facility Actor다. Source 폴더를 이동하거나 모든 carryable의 공통 Actor/Component를 만들지 않는다.
+Concrete carryable은 key, `Cleaning/WetMopActor`, `Towel/TowelBasketActor`, `Combat/MonkeyWrenchActor`와 Placement 전용 `APlaceableFacilityItemActor`다. 배치된 facility Actor는 canonical carryable이 아니다. Source 폴더를 이동하거나 모든 carryable의 공통 Actor/Component를 만들지 않는다.
 
 ## Responsibilities
 
 - inventory/hotbar 없는 0개 또는 1개의 physical Actor 소지
-- 모든 일반 carryable의 G free drop과 전용 fixed slot 기본 capability
+- 모든 일반 carryable의 G free drop과 capability별 exact fixed slot
 - item instance와 fixed slot의 일대일 authoring·runtime binding
 - fixed slot↔held와 held→free world의 원자적 transaction
 - 실제 held world transform을 보존하는 physics release
 - 질량 무시 약한 forward/upward velocity-change impulse
 - 모든 physical carry root의 free-world CCD 기본 활성화
 - fixed-slot 우선 비정상 복구와 last-safe fallback
-- key의 token/customer/counter lifecycle과 packaged facility mode의 물리 placement 공존
+- key의 token/customer/counter lifecycle과 전용 설비 아이템의 물리 placement 공존
 
 Physical Carry는 input mapping, cleaning/damage/towel count, customer routine와 UI layout을 소유하지 않는다.
 
@@ -54,6 +55,7 @@ Physical Carry는 input mapping, cleaning/damage/towel count, customer routine�
 | 현재 held Actor | `UPlayerCarryComponent` |
 | exact assigned item·anchor·점유 | fixed slot Actor |
 | equipment carrier·last-safe transform | concrete equipment Actor |
+| 설비 아이템 payload·Root mesh scale·last-safe transform | `APlaceableFacilityItemActor` |
 | key number/domain state | `ABathhouseKeyActor` |
 | take/store/free-drop transaction guard | `UPlayerCarryComponent` |
 | E/G intent routing·결과 방송 | Interaction/Character |
@@ -72,7 +74,7 @@ Physical Carry는 input mapping, cleaning/damage/towel count, customer routine�
 - `FreeDrop`: held 상태에서 G free drop
 - `FixedSlot`: 지정된 exact fixed slot에 E store/take
 
-새 carryable은 둘 다 지원하는 것이 기본이며 예외만 명시적으로 opt-out한다. `CanFreeDrop`은 현재 상태까지 재검증하고, fixed-slot query도 assigned item, 점유, held identity와 Actor validity를 side effect 없이 검사한다.
+새 carryable은 둘 다 지원하는 것이 기본이며 예외만 명시적으로 opt-out한다. `APlaceableFacilityItemActor`는 `FreeDrop`만 반환하고 fixed-slot binding API는 항상 비활성이다. `CanFreeDrop`은 현재 상태까지 재검증하고, fixed-slot query도 assigned item, 점유, held identity와 Actor validity를 side effect 없이 검사한다.
 
 공통 계약은 다음 정보를 제공한다.
 
@@ -80,8 +82,8 @@ Physical Carry는 input mapping, cleaning/damage/towel count, customer routine�
 - pickup/held presentation lifecycle
 - physical root primitive
 - free-drop 허용 여부와 forward/upward velocity-change 값
-- assigned fixed slot binding과 store/take commit notification
-- last-safe/fixed-slot recovery
+- capability가 있는 item의 assigned fixed slot binding과 store/take commit notification
+- last-safe recovery와 capability가 있는 item의 fixed-slot 우선 recovery
 
 각 concrete Actor는 자신의 domain state와 reflected authoring 값을 직접 소유한다.
 
@@ -137,12 +139,16 @@ Commit 전에 item/slot/carry identity, active transaction guard, attachment, pr
 
 store/free-drop 시 active equipment use와 held motion을 먼저 한 번 cancel한다. 이후 placement가 실패해도 use는 취소된 상태로 유지하지만 item ownership과 위치는 유지한다. 성공 후에만 `HeldObject`를 지우고 change delegate를 한 번 방송한다.
 
+설비 아이템을 새 placed Actor로 소비하는 흐름은 Placement의 Actor-conversion transaction이 소유한다. 이 helper는 `UPlayerCarryComponent`의 silent held clear/restore 계약을 사용하지만 facility spawn, payload와 registry를 Physical Carry에 넣지 않는다.
+
+held 설비 아이템이 `FellOutOfWorld`에 진입하면 item이 임의로 carrier 상태만 지우지 않는다. 기록된 carrier가 동일 item을 보유하면 `RecoverHeldPhysicalObject()`가 held ownership과 최종 change event를 한 번 정리하고, 그 뒤 item이 last-safe transform·기존 Root scale·CCD·Pawn Ignore·zero velocity의 free-world physics로 복구된다. placement-consumed 또는 staged item은 이 일반 복구를 실행하지 않는다.
+
 ## Held-Position Free Drop
 
 `HeldPosition`은 새 property가 아니라 active held motion을 cancel한 뒤의 실제 Actor/physical primitive world transform이다.
 
 ```text
-HeldAnchor WorldTransform × Item HeldTransform
+HeldAnchor WorldTransform × Item HeldTransform location/rotation + 기존 physical Root scale
 ```
 
 새 free-drop 흐름:
@@ -172,7 +178,7 @@ Upward velocity change: 15 cm/s
 
 Q50 B에 따라 free-world carryable은 `Pawn` channel을 영구 `Ignore`한다. player와 customer Pawn 모두 물리 충돌하지 않으며 WorldStatic/WorldDynamic collision은 유지한다. held/fixed-slot 상태에서는 기존처럼 collision 전체를 끈다.
 
-모든 `IPhysicalCarryable::GetPhysicalCarryPrimitive()`는 CCD가 기본이다. key의 `KeyPhysicsRoot`와 wet mop/towel basket/monkey wrench의 `WorldMesh` native default 및 Blueprint component template에서 `bUseCCD=true`를 유지한다. 공통 free-world transaction은 serialized Blueprint 값이나 이전 상태에 의존하지 않고 physics 활성화 직전에 CCD를 다시 켠다. `FellOutOfWorld`의 fixed-slot 불가 시 concrete last-safe `SetWorldPhysics(true)` 경로도 같은 플래그를 복구한다. 따라서 신규 carryable은 common transaction과 recovery helper에서 같은 규칙을 구현하며, 아이템별 opt-out 분기는 두지 않는다.
+모든 `IPhysicalCarryable::GetPhysicalCarryPrimitive()`는 CCD가 기본이다. key의 `KeyPhysicsRoot`, wet mop/towel basket/monkey wrench의 `WorldMesh`와 설비 아이템의 Root `UStaticMeshComponent`에서 `bUseCCD=true`를 유지한다. 공통 free-world transaction은 serialized Blueprint 값이나 이전 상태에 의존하지 않고 physics 활성화 직전에 CCD를 다시 켠다. `FellOutOfWorld`의 fixed-slot 불가 시 concrete last-safe `SetWorldPhysics(true)` 경로도 같은 플래그를 복구한다. 따라서 신규 carryable은 common transaction과 recovery helper에서 같은 규칙을 구현하며, 아이템별 opt-out 분기는 두지 않는다.
 
 held/fixed-slot 상태는 collision과 physics가 꺼져 있으므로 CCD 플래그를 지울 필요가 없다. placement가 commit 전에 실패하면 transaction snapshot의 이전 CCD 값을 복구하여 원자성을 보존한다. CCD는 빠르고 얇은 rigid body의 discrete-step tunneling을 줄이는 보조 계약이며, 유효한 simple collision과 WorldStatic/WorldDynamic block 응답을 대체하지 않는다.
 
@@ -210,22 +216,23 @@ Wet mop, towel basket과 monkey wrench는 exact `APhysicalCarryFixedSlotActor`�
 
 fixed-slot placement는 cleaning, combat 또는 towel transaction이 아니다. slot/carry ownership만 변경한다.
 
-## Packaged Facility Extension
+## Placeable Facility Item Extension
 
-`EPhysicalCarryKind` 끝에 `Facility`를 추가한다. `ABathhouseFacilityActor` 계열과 `ATowelProcessingMachineActor`가 `IPhysicalCarryable`을 직접 구현하고 자신의 `UFacilityPlacementComponent`에 package primitive, held transform과 exact fixed-slot binding을 위임한다. 별도 공통 facility-item Actor를 만들지 않는다.
+`EPhysicalCarryKind::Facility`는 전용 `APlaceableFacilityItemActor`가 사용한다. 배치된 `ABathhouseFacilityActor` 계열과 `ATowelProcessingMachineActor`는 canonical physical carry 책임을 갖지 않는다.
 
-- `Placed` mode는 carry query를 숨기고 package primitive physics를 끈다.
-- `Packaged` world mode는 E pickup과 exact-slot interaction을 제공한다.
-- held package는 기존 anchor/`HeldTransform`/G transaction을 사용한다.
-- G 성공 또는 E fixed-slot store는 active placement preview를 cancel한다.
-- Q recovery는 현재 held Actor를 바꾸지 않고 target facility를 같은 위치의 packaged free-world mode로 전환하며 impulse를 주지 않는다.
-- LMB placement는 `UPlayerFacilityPlacementComponent`가 carry snapshot과 facility registry를 포함해 원자적으로 commit/rollback한다.
+- stable Root `UStaticMeshComponent`가 Definition의 `RecoveryItemMesh`, bounds와 일치하는 단일 simple box collision, physics와 CCD를 담당한다.
+- Definition mesh가 아직 없으면 Engine 기본 Cube를 사용한다. 모든 mesh는 같은 규격 직육면체이며 Root component scale은 item class 공통값이다.
+- `HeldTransform`은 item class 공통값이며 location/rotation만 적용한다. authored scale은 unit으로 정규화하고 Root scale을 보존한다.
+- world item은 E pickup, held item은 G actual-held-pose free drop을 지원한다.
+- capability는 `FreeDrop`만 반환하고 generic fixed-slot의 assigned/store/take/recovery 경로에는 참여하지 않는다.
+- held item의 payload와 placement preview/confirm은 Placement가 소유하고 Physical Carry는 item identity, attachment와 release transaction만 소유한다.
+- Q facility recovery는 기존 held Actor를 바꾸지 않고 별도 item을 무충격 free-world 상태로 만든다.
 
 ## Recovery And EndPlay
 
-carrier EndPlay와 `FellOutOfWorld`는 유효하고 비어 있는 exact fixed slot을 먼저 사용하고, 불가능하면 last-safe world transform에 physics 상태로 복구한다. 새 Actor를 spawn하지 않는다.
+fixed-slot capability가 있는 item의 carrier EndPlay와 `FellOutOfWorld`는 유효하고 비어 있는 exact fixed slot을 먼저 사용하고, 불가능하면 last-safe world transform에 physics 상태로 복구한다. fixed-slot이 없는 설비 아이템은 last-safe free-world transform만 사용한다. 이 physical recovery는 새 Actor나 배치 설비를 spawn하지 않는다.
 
-slot이 runtime에 파괴될 때 stored item이 유효하고 world teardown이 아니면 anchor world transform에서 free-world 상태로 전환하고 fixed binding을 지운다. 실제 item Actor의 `EndPlay`가 시작된 뒤에는 같은 instance를 되살릴 수 없으므로 carry/slot external reference만 정리한다. runtime gameplay는 carryable에 직접 `Destroy()`를 호출하지 않고 recoverable failure를 `FellOutOfWorld` 이전 경로에서 처리한다.
+slot이 runtime에 파괴될 때 stored item이 유효하고 world teardown이 아니면 anchor world transform에서 free-world 상태로 전환하고 fixed binding을 지운다. 실제 item Actor의 `EndPlay`가 시작된 뒤에는 같은 instance를 되살릴 수 없으므로 carry/slot external reference만 정리한다. 설비 item을 배치 성공으로 소비하는 `Destroy()`는 Placement transaction만 실행하며 consumption flag로 일반 EndPlay recovery를 차단한다.
 
 EndPlay, fall recovery와 transaction retry는 delegate, timer, attachment와 slot occupancy를 중복 변경하지 않아야 한다.
 
@@ -240,7 +247,8 @@ EndPlay, fall recovery와 transaction retry는 delegate, timer, attachment와 sl
 - key `KeyPhysicsRoot`
 - item별 upward velocity-change authoring 값
 - 모든 concrete carryable physical root의 `BodyInstance.bUseCCD=true`
-- placeable facility의 package primitive reference와 `EPhysicalCarryKind::Facility`
+- `APlaceableFacilityItemActor`의 stable Root Static Mesh와 `EPhysicalCarryKind::Facility`
+- 설비 item의 명시적 `FreeDrop` 전용 capability
 
 보존 계약:
 
@@ -249,20 +257,20 @@ EndPlay, fall recovery와 transaction retry는 delegate, timer, attachment와 sl
 - `DropCarryAction`, 기존 key/hook API와 state ordinal
 - `ThrowImpulseStrength`, `ThrowSpawnDistance`, drop sweep property
 
-기존 symbol rename/delete가 없으므로 Core Redirect는 추가하지 않았다. Source 구현은 Content를 수정하지 않았으며, Editor 단계에서 equipment slot Blueprint/instances, assigned item, anchors, key physics bounds와 기존 Blueprint velocity 값을 authoring한다.
+기존 symbol rename/delete 없이 신규 item class를 추가하므로 Core Redirect는 필요하지 않다. 기존 placed facility의 package 관련 reflected symbol은 한 migration cycle 보존하되 canonical carry에 사용하지 않는다. Editor 단계에서 equipment slot Blueprint/instances, assigned item, anchors, key physics bounds와 기존 Blueprint velocity 값을 authoring하며 설비 item용 fixed slot은 만들지 않는다.
 
 ## Dependencies
 
 - Physical Carry는 Interaction Source package와 Engine collision/physics를 사용한다.
 - Cleaning/Towel/Combat은 concrete item state에서 Physical Carry public 계약을 구현한다.
-- Placement는 placeable facility Actor mode에서 같은 public carry 계약을 구현한다.
+- Placement의 전용 facility item Actor가 같은 public carry 계약과 기존 transaction helper를 사용한다.
 - Character는 Interaction을 통해 E/G intent만 전달한다.
 - UI는 Interaction query/result만 표시한다.
-- 신규 runtime module dependency는 필요하지 않다.
+- Physical Carry 자체의 신규 runtime module dependency는 필요하지 않다.
 
 ## Manual Review Points
 
-- key/mop/basket/wrench/packaged facility가 모두 exact slot과 G free drop을 지원하는지 확인한다.
+- key/mop/basket/wrench는 exact slot과 G free drop을, 설비 item은 G free drop만 지원하는지 확인한다.
 - 같은 kind의 다른 instance와 duplicate assigned slot이 거부되는지 확인한다.
 - G가 slot 근처에서 snap하지 않고 actual held pose에서 출발하는지 확인한다.
 - wall overlap 실패가 attachment, carry reference와 presentation을 보존하는지 확인한다.
@@ -273,5 +281,6 @@ EndPlay, fall recovery와 transaction retry는 delegate, timer, attachment와 sl
 - non-empty basket의 inventory와 presentation revision이 slot 이동으로 바뀌지 않는지 확인한다.
 - store/drop이 active mop/wrench use를 한 번 cancel하고 다음 사용이 정상 복구되는지 확인한다.
 - carrier/slot/item/fall cleanup에서 item과 slot occupancy가 소실·복제되지 않는지 확인한다.
-- facility가 `Placed/Packaged`를 왕복해도 같은 Actor identity, assigned slot과 held transform을 유지하는지 확인한다.
-- Q recovery가 기존 held item을 교체하지 않고 회수 대상에 impulse도 주지 않는지 확인한다.
+- 설비 item pickup/drop이 Root mesh scale을 보존하고 `HeldTransform`의 scale을 무시하는지 확인한다.
+- 배치 성공 consumption과 비정상 EndPlay가 item/facility를 중복 생성하지 않는지 확인한다.
+- Q recovery가 기존 held item을 교체하지 않고 새 설비 item에도 impulse를 주지 않는지 확인한다.

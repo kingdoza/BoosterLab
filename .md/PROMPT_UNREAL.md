@@ -1,29 +1,44 @@
-# Unreal 작업 프롬프트 — 회수 프롬프트와 낙하 위치 검증
+# Unreal 작업 프롬프트 — 설비 회수 진행률 런타임 재연결 확인
 
 ## 상태
 
-에셋 수정은 필요 없다. 새 native 코드와 config property를 읽도록 Editor를 새로 시작한 뒤 Compile/PIE 검증만 수행한다. Widget Blueprint에 recovery 로직을 추가하지 않는다.
+Editor 에셋 변경은 불필요하다. C++에서 Q hold elapsed와 자동 commit 소유권을 Placement Component Tick으로 유지하고, 플레이어 `BeginPlay()`에서 회수 진행률 provider를 Interaction에 다시 연결한다.
 
-## 설정 확인
+## 변경 금지
 
-Project Settings > Game > Facility Placement에서 다음 값을 확인한다.
+- `IA_RecoverFacility` 또는 `IMC_FirstPerson`에 Hold Trigger를 추가하지 않는다.
+- `WBP_InteractionPrompt`에 Percent binding, Tick/Event Graph 진행률 계산 또는 회수 실행 로직을 추가하지 않는다.
+- 설비 Definition, Blueprint, Level Actor를 이번 작업 때문에 수정하거나 저장하지 않는다.
 
-- `Recovery Drop ZOffset Cm = 100.0`
+## 사전 조건
 
-필요하면 프로젝트 전체 설비에 공통으로 적용할 높이만 이 값에서 조정한다. 개별 설비 Blueprint에 별도 recovery offset을 만들지 않는다.
+1. 현재 Editor에서 Live Coding을 실행하거나, Editor를 완전히 종료한 뒤 `BathhouseSimEditor Win64 Development`를 빌드하고 다시 실행한다.
+2. `/Game/Input/Actions/IA_RecoverFacility`가 Boolean이고 action-level Trigger가 없는지 확인만 한다.
+3. `/Game/Input/IMC_FirstPerson`의 Q → `IA_RecoverFacility` 매핑에 mapping-level Trigger가 없는지 확인만 한다.
+4. `/Game/Bathhouse/UI/WBP_InteractionPrompt`의 `RecoveryProgressBar` 이름과 native parent를 유지한다.
 
-## PIE 검증
+## PIE 수용 기준
 
-1. 빈 목욕탕, 빈 세탁기, 빈 건조기를 각각 포커스한다.
-2. 일반 상호작용 prompt와 같은 HUD에서 `Q 설비 회수` row가 즉시 보이는지 확인한다.
-3. 목욕탕 물이 있거나 slot이 사용 중인 상태, 기계가 비어 있지 않거나 processing 중인 상태에서도 Q row와 정확한 실패 사유가 보이는지 확인한다.
-4. 회수 가능한 설비에서 Q를 누르고 유지해 progress가 증가하는지 확인한다.
-5. 회수 성공 시 package가 `PlacementFootprint` 중심 X/Y와 footprint 월드 바닥 Z + `100 cm` 위치에서 시작해 중력으로 떨어지는지 확인한다.
-6. 그 예정 위치에 blocking object를 놓으면 Q row는 유지되면서 `포장 설비가 다른 물체와 겹쳐 회수할 수 없습니다.`가 표시되고 회수가 실패하는지 확인한다.
+1. 회수 가능한 빈 설비를 응시하고 Q를 누른다.
+2. `RecoveryProgressBar`가 `0 → 1`로 연속 증가해야 한다.
+3. `RecoveryHoldSeconds`에 도달하면 Q를 계속 누르고 있어도 즉시 회수되어야 한다.
+4. 자동 회수 뒤 Q를 놓아도 추가 item, 추가 결과 또는 중복 event가 없어야 한다.
+5. 기준 시간 전에 Q를 놓으면 회수되지 않고 원본 설비가 유지되며 progress가 0으로 돌아가야 한다.
+6. hold 도중 시선을 떼거나 범위를 벗어나면 회수되지 않아야 한다.
+7. hold 도중 설비 조건이 바뀌면 회수되지 않아야 한다.
+   - Bath: 물 또는 사용 중 slot
+   - Washer/Dryer: contents 또는 processing
+   - Locker: reserved/occupied slot
+8. 다른 물건을 든 상태에서 자동 회수해도 기존 held object는 바뀌지 않아야 한다.
 
-## 수용 기준
+## 저장
 
-- recovery row는 성공 가능 여부와 관계없이 포커스 중 표시된다.
-- Q hold 중 progress가 표시되고 취소 시 0으로 돌아간다.
-- 성공 회수는 자동 pickup/impulse 없이 같은 Actor를 packaged physics로 전환한다.
-- 충돌 실패 시 설비 transform, placed mode와 domain 등록이 유지된다.
+이번 작업은 native-only이므로 검증만으로 Editor asset이 dirty가 되어서는 안 된다. `Save All`을 사용하지 않는다.
+
+## 보고
+
+- Editor 재시작 여부
+- progress 연속 증가 여부
+- release 전 자동 회수 여부
+- 조기 release/시선 이탈/조건 변경 취소 결과
+- 중복 item/event 또는 새 Error/Ensure 로그 여부

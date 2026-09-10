@@ -12,6 +12,7 @@
 #include "Placement/FacilityPlacementComponent.h"
 #include "Placement/FacilityPlacementDefinition.h"
 #include "Placement/FacilityPlacementZoneActor.h"
+#include "Placement/FacilityActorConversionTransaction.h"
 
 #define LOCTEXT_NAMESPACE "BathhouseFacilityActor"
 
@@ -55,11 +56,13 @@ void ABathhouseFacilityActor::BeginPlay()
 			&ABathhouseFacilityActor::HandleExpansionAuthorityChanged);
 	}
 
-	if (FacilityPlacement && FacilityPlacement->GetMode() == EPlaceableFacilityMode::Placed)
+	if (FacilityPlacement && FacilityPlacement->GetMode() == EPlaceableFacilityMode::Placed
+		&& !FacilityPlacement->IsStagedPlacement())
 	{
 		FText FailureReason;
 		if (!RegisterPlacedDomain(FailureReason))
 		{
+			FacilityPlacement->SetPlacedDomainActive(false);
 			UE_LOG(LogTemp, Error, TEXT("Facility %s could not register its placed state: %s"), *GetName(), *FailureReason.ToString());
 		}
 	}
@@ -92,43 +95,28 @@ void ABathhouseFacilityActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ABathhouseFacilityActor::FellOutOfWorld(const UDamageType& DamageType)
 {
-	if (FacilityPlacement && FacilityPlacement->GetMode() == EPlaceableFacilityMode::Packaged)
-	{
-		FacilityPlacement->RestoreLastSafePackagedWorld();
-		return;
-	}
 	Super::FellOutOfWorld(DamageType);
 }
 
 FPlayerInteractionQuery ABathhouseFacilityActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
-	FPlayerInteractionQuery Query;
-	if (!FacilityPlacement || FacilityPlacement->GetMode() != EPlaceableFacilityMode::Packaged)
-	{
-		return Query;
-	}
-	Query.bVisible = true;
-	Query.TargetName = GetPhysicalCarryDisplayName();
-	Query.ActionName = LOCTEXT("TakePackage", "포장 설비 들기");
-	FText FailureReason;
-	Query.bCanInteract = Context.CarryComponent && CanBeTakenBy(*Context.CarryComponent, FailureReason);
-	Query.FailureReason = FailureReason;
-	return Query;
+	(void)Context;
+	return FPlayerInteractionQuery();
 }
 
 FPlayerInteractionResult ABathhouseFacilityActor::ExecuteInteraction(const FPlayerInteractionContext& Context)
 {
-	FText FailureReason;
-	return Context.CarryComponent && Context.CarryComponent->TryTakePhysicalObject(this, FailureReason)
-		? FPlayerInteractionResult::Succeeded()
-		: FPlayerInteractionResult::Failed(FailureReason.IsEmpty() ? LOCTEXT("TakeFailed", "포장 설비를 들 수 없습니다.") : FailureReason);
+	(void)Context;
+	return FPlayerInteractionResult::Failed(LOCTEXT("LegacyPlacedCarryDisabled", "배치 설비 Actor는 직접 들 수 없습니다."));
 }
 
 FPlayerInteractionQuery ABathhouseFacilityActor::MergeSupplementalInteractionQuery(
 	const FPlayerInteractionQuery& BaseQuery) const
 {
 	FPlayerInteractionQuery Query = BaseQuery;
-	if (!FacilityPlacement || FacilityPlacement->GetMode() != EPlaceableFacilityMode::Placed)
+	if (!SupportsFacilityActorConversion()
+		|| !FacilityPlacement || FacilityPlacement->GetMode() != EPlaceableFacilityMode::Placed
+		|| FacilityPlacement->IsStagedPlacement())
 	{
 		return Query;
 	}
@@ -147,14 +135,22 @@ FFacilityPlacementTransactionResult ABathhouseFacilityActor::QueryFacilityPlacem
 	const AFacilityPlacementZoneActor& Zone) const
 {
 	(void)CandidateTransform;
+	if (!SupportsFacilityActorConversion())
+	{
+		return FFacilityPlacementTransactionResult::Failed(
+			EFacilityPlacementFailureCode::WrongMode,
+			LOCTEXT("FacilityConversionUnsupported", "이 설비는 배치 및 회수 대상이 아닙니다."));
+	}
 	FText FailureReason;
-	if (!FacilityPlacement || !FacilityPlacement->IsOperational(FailureReason))
+	if (!FacilityPlacement || !FacilityPlacement->IsOperational(FailureReason)
+		|| !FacilityPlacement->GetDefinition()->ValidateRuntime(FailureReason))
 	{
 		return FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::InvalidComponents, FailureReason);
 	}
-	if (FacilityPlacement->GetMode() != EPlaceableFacilityMode::Packaged)
+	if (FacilityPlacement->GetMode() != EPlaceableFacilityMode::Placed
+		|| !FacilityPlacement->IsStagedPlacement())
 	{
-		return FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::WrongMode, LOCTEXT("NotPackaged", "포장 상태의 설비만 설치할 수 있습니다."));
+		return FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::WrongMode, LOCTEXT("NotStaged", "새로 생성된 staged 설비만 설치할 수 있습니다."));
 	}
 	if (!Zone.IsDefinitionAllowed(*FacilityPlacement->GetDefinition()))
 	{
@@ -172,9 +168,18 @@ FFacilityPlacementTransactionResult ABathhouseFacilityActor::QueryFacilityPlacem
 
 FFacilityPlacementTransactionResult ABathhouseFacilityActor::QueryFacilityRecovery() const
 {
+	if (!SupportsFacilityActorConversion())
+	{
+		return FFacilityPlacementTransactionResult::Failed(
+			EFacilityPlacementFailureCode::WrongMode,
+			LOCTEXT("FacilityRecoveryUnsupported", "이 설비는 회수 대상이 아닙니다."));
+	}
 	FText FailureReason;
 	if (!FacilityPlacement || !FacilityPlacement->IsOperational(FailureReason)
-		|| FacilityPlacement->GetMode() != EPlaceableFacilityMode::Placed)
+		|| FacilityPlacement->GetMode() != EPlaceableFacilityMode::Placed
+		|| FacilityPlacement->IsStagedPlacement()
+		|| !FacilityPlacement->IsPlacedDomainActive()
+		|| !FacilityPlacement->GetDefinition()->ValidateRuntime(FailureReason))
 	{
 		return FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::WrongMode,
 			FailureReason.IsEmpty() ? LOCTEXT("NotPlaced", "설치된 설비만 회수할 수 있습니다.") : FailureReason);
@@ -198,7 +203,9 @@ FFacilityPlacementTransactionResult ABathhouseFacilityActor::QueryFacilityRecove
 			return FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::DomainCondition, FailureReason);
 		}
 	}
-	if (!FacilityPlacement->CanEnablePackagedCollision(FailureReason))
+	FTransform ItemTransform;
+	if (!FFacilityActorConversionTransaction::ValidateRecoveryCandidate(
+		*const_cast<ABathhouseFacilityActor*>(this), ItemTransform, FailureReason))
 	{
 		return FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::Blocked, FailureReason);
 	}
@@ -209,105 +216,13 @@ bool ABathhouseFacilityActor::CommitPlaceableFacilityMode(
 	const EPlaceableFacilityMode NewMode,
 	FText& OutFailureReason)
 {
-	if (bEndingPlay || !FacilityPlacement)
-	{
-		return false;
-	}
-	if (FacilityPlacement->GetMode() == NewMode)
+	if (NewMode == EPlaceableFacilityMode::Placed && FacilityPlacement
+		&& FacilityPlacement->GetMode() == EPlaceableFacilityMode::Placed)
 	{
 		return true;
 	}
-	if (!FacilityPlacement->BeginTransition(OutFailureReason))
-	{
-		return false;
-	}
-	const EPlaceableFacilityMode Previous = FacilityPlacement->GetMode();
-	const FTransform PreviousTransform = GetActorTransform();
-	bool bSucceeded = true;
-	if (NewMode == EPlaceableFacilityMode::Packaged)
-	{
-		FTransform RecoveryDropTransform;
-		if (!FacilityPlacement->GetRecoveryDropTransform(RecoveryDropTransform, OutFailureReason)
-			|| !FacilityPlacement->CanEnablePackagedCollision(OutFailureReason))
-		{
-			FacilityPlacement->EndTransition();
-			return false;
-		}
-		UnregisterPlacedDomain(false, false);
-		bSucceeded = SetActorTransform(
-			RecoveryDropTransform,
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics);
-		if (!bSucceeded)
-		{
-			OutFailureReason = LOCTEXT("RecoveryDropMoveFailed", "설비를 회수 위치로 옮길 수 없습니다.");
-		}
-		else
-		{
-			bSucceeded = FacilityPlacement->ApplyMode(NewMode, true, OutFailureReason, false);
-		}
-		if (bSucceeded && PackagePhysicalRoot)
-		{
-			PackagePhysicalRoot->SetPhysicsLinearVelocity(FVector::ZeroVector);
-			PackagePhysicalRoot->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-		}
-		if (!bSucceeded)
-		{
-			FText Ignored;
-			SetActorTransform(PreviousTransform, false, nullptr, ETeleportType::TeleportPhysics);
-			FacilityPlacement->ApplyMode(Previous, false, Ignored, false);
-			RegisterPlacedDomain(Ignored, false);
-		}
-	}
-	else
-	{
-		bSucceeded = ValidatePlacedDomain(OutFailureReason)
-			&& RegisterPlacedDomain(OutFailureReason, false)
-			&& FacilityPlacement->ApplyMode(NewMode, false, OutFailureReason, false);
-		if (!bSucceeded)
-		{
-			UnregisterPlacedDomain(false, false);
-			if (FacilityPlacement->GetMode() != Previous)
-			{
-				FText Ignored;
-				FacilityPlacement->ApplyMode(Previous, true, Ignored, false);
-			}
-		}
-	}
-	if (!bSucceeded)
-	{
-		FacilityPlacement->EndTransition();
-		return false;
-	}
-
-	TWeakObjectPtr<ABathhouseFacilityActor> Self(this);
-	FacilityPlacement->PublishModeChanged(Previous, NewMode);
-	if (!Self.IsValid() || bEndingPlay)
-	{
-		return true;
-	}
-	if (UBathhouseFacilitySubsystem* Facilities = GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>())
-	{
-		Facilities->NotifyFacilityAvailabilityChanged(FacilityType);
-	}
-	if (!Self.IsValid() || bEndingPlay)
-	{
-		return true;
-	}
-	if (FacilityType == EBathhouseFacilityType::ClothesLocker)
-	{
-		if (ULockerCapacitySubsystem* Lockers = GetWorld()->GetSubsystem<ULockerCapacitySubsystem>())
-		{
-			Lockers->PublishCapacityMutation();
-		}
-	}
-	if (!Self.IsValid() || bEndingPlay)
-	{
-		return true;
-	}
-	FacilityPlacement->EndTransition();
-	return true;
+	OutFailureReason = LOCTEXT("LegacyModeTransitionDisabled", "배치 설비 Actor의 legacy Placed/Packaged 전환은 비활성화되었습니다.");
+	return false;
 }
 
 FText ABathhouseFacilityActor::GetPhysicalCarryDisplayName() const
@@ -315,54 +230,35 @@ FText ABathhouseFacilityActor::GetPhysicalCarryDisplayName() const
 	return LOCTEXT("FacilityPackage", "포장 설비");
 }
 
-FTransform ABathhouseFacilityActor::GetHeldTransform() const { return FacilityPlacement ? FacilityPlacement->GetHeldTransform() : FTransform::Identity; }
+FTransform ABathhouseFacilityActor::GetHeldTransform() const { return FTransform::Identity; }
 bool ABathhouseFacilityActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
-	if (!FacilityPlacement || FacilityPlacement->GetMode() != EPlaceableFacilityMode::Packaged)
-	{
-		OutFailureReason = LOCTEXT("NotPackage", "이 설비는 포장 상태가 아닙니다.");
-		return false;
-	}
-	if (!Carry.IsHandEmpty())
-	{
-		OutFailureReason = LOCTEXT("HandOccupied", "이미 다른 물건을 들고 있습니다.");
-		return false;
-	}
-	return FacilityPlacement->IsOperational(OutFailureReason);
+	(void)Carry;
+	OutFailureReason = LOCTEXT("PlacedFacilityNotCarryable", "배치 설비 Actor는 직접 들 수 없습니다.");
+	return false;
 }
 bool ABathhouseFacilityActor::HandleTakenBy(UPlayerCarryComponent& Carry, USceneComponent* HeldAnchor)
 {
-	if (!HeldAnchor || !FacilityPlacement || FacilityPlacement->GetMode() != EPlaceableFacilityMode::Packaged) return false;
-	FacilityPlacement->ApplyHeldPresentation(*HeldAnchor, GetHeldTransform());
-	return true;
+	(void)Carry;
+	(void)HeldAnchor;
+	return false;
 }
-bool ABathhouseFacilityActor::CanFreeDrop(FText& OutFailureReason) const { return FacilityPlacement && FacilityPlacement->GetMode() == EPlaceableFacilityMode::Packaged; }
-UPrimitiveComponent* ABathhouseFacilityActor::GetPhysicalCarryPrimitive() const { return PackagePhysicalRoot; }
+bool ABathhouseFacilityActor::CanFreeDrop(FText& OutFailureReason) const { OutFailureReason = LOCTEXT("PlacedFacilityNoDrop", "배치 설비 Actor는 내려놓을 수 없습니다."); return false; }
+UPrimitiveComponent* ABathhouseFacilityActor::GetPhysicalCarryPrimitive() const { return nullptr; }
 float ABathhouseFacilityActor::GetThrowImpulseStrength() const { return FacilityPlacement ? FacilityPlacement->GetThrowImpulseStrength() : 120.0f; }
 float ABathhouseFacilityActor::GetUpwardThrowImpulseStrength() const { return FacilityPlacement ? FacilityPlacement->GetUpwardThrowImpulseStrength() : 15.0f; }
-AActor* ABathhouseFacilityActor::GetAssignedPhysicalCarryFixedSlot() const { return FacilityPlacement ? FacilityPlacement->GetAssignedFixedSlot() : nullptr; }
-bool ABathhouseFacilityActor::TryBindPhysicalCarryFixedSlot(AActor& SlotActor, FText& OutFailureReason) { return FacilityPlacement && FacilityPlacement->TryBindFixedSlot(SlotActor, OutFailureReason); }
-void ABathhouseFacilityActor::ClearPhysicalCarryFixedSlotBinding(AActor& ExpectedSlot) { if (FacilityPlacement) FacilityPlacement->ClearFixedSlot(ExpectedSlot); }
-void ABathhouseFacilityActor::NotifyPhysicalCarryFixedSlotBindingConflict() { if (FacilityPlacement) FacilityPlacement->MarkFixedSlotBindingConflict(); }
-bool ABathhouseFacilityActor::IsStoredInAssignedPhysicalCarryFixedSlot() const { return FacilityPlacement && FacilityPlacement->IsStoredInFixedSlot(); }
-bool ABathhouseFacilityActor::NotifyTakenFromFixedSlotCommitted(UPlayerCarryComponent& Carry, AActor& SlotActor) { return FacilityPlacement && FacilityPlacement->GetMode() == EPlaceableFacilityMode::Packaged; }
-bool ABathhouseFacilityActor::NotifyStoredInFixedSlotCommitted(UPlayerCarryComponent& Carry, AActor& SlotActor) { return FacilityPlacement && FacilityPlacement->GetMode() == EPlaceableFacilityMode::Packaged; }
-bool ABathhouseFacilityActor::NotifyRecoveredToFixedSlotCommitted(AActor& SlotActor) { return FacilityPlacement && FacilityPlacement->GetMode() == EPlaceableFacilityMode::Packaged; }
-void ABathhouseFacilityActor::NotifyFixedSlotDestroyed(AActor& SlotActor) { ClearPhysicalCarryFixedSlotBinding(SlotActor); }
-bool ABathhouseFacilityActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry)
-{
-	FText FailureReason;
-	return FacilityPlacement && FacilityPlacement->ApplyMode(EPlaceableFacilityMode::Packaged, true, FailureReason);
-}
+AActor* ABathhouseFacilityActor::GetAssignedPhysicalCarryFixedSlot() const { return nullptr; }
+bool ABathhouseFacilityActor::TryBindPhysicalCarryFixedSlot(AActor& SlotActor, FText& OutFailureReason) { OutFailureReason = LOCTEXT("PlacedFacilityNoFixedSlot", "배치 설비 Actor는 고정 슬롯을 지원하지 않습니다."); return false; }
+void ABathhouseFacilityActor::ClearPhysicalCarryFixedSlotBinding(AActor& ExpectedSlot) {}
+void ABathhouseFacilityActor::NotifyPhysicalCarryFixedSlotBindingConflict() {}
+bool ABathhouseFacilityActor::IsStoredInAssignedPhysicalCarryFixedSlot() const { return false; }
+bool ABathhouseFacilityActor::NotifyTakenFromFixedSlotCommitted(UPlayerCarryComponent& Carry, AActor& SlotActor) { return false; }
+bool ABathhouseFacilityActor::NotifyStoredInFixedSlotCommitted(UPlayerCarryComponent& Carry, AActor& SlotActor) { return false; }
+bool ABathhouseFacilityActor::NotifyRecoveredToFixedSlotCommitted(AActor& SlotActor) { return false; }
+void ABathhouseFacilityActor::NotifyFixedSlotDestroyed(AActor& SlotActor) {}
+bool ABathhouseFacilityActor::NotifyPhysicalDropCommitted(UPlayerCarryComponent& Carry) { return false; }
 void ABathhouseFacilityActor::PublishPhysicalCarryCommit(EPhysicalCarryCommitTransition Transition) {}
-void ABathhouseFacilityActor::RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry)
-{
-	if (IPhysicalCarryFixedSlot* Slot = Cast<IPhysicalCarryFixedSlot>(GetAssignedPhysicalCarryFixedSlot()); Slot && Slot->TryRecoverAssignedPhysicalCarryItem(*this))
-	{
-		return;
-	}
-	if (FacilityPlacement) FacilityPlacement->RestoreLastSafePackagedWorld();
-}
+void ABathhouseFacilityActor::RecoverPhysicalCarryable(UPlayerCarryComponent* PreviousCarry) {}
 
 void ABathhouseFacilityActor::HandleSlotStateChanged(
 	UBathhouseFacilitySlotComponent* Slot,

@@ -140,7 +140,7 @@ Source/BathhouseSim/Private/Character/
 
 1. `PrimaryUseAction` Started에서 현재 input owner를 Computer, Placement 또는 Equipment으로 정확히 한 번 결정한다.
 2. Computer Active이면 pointer press를 시작하고 해당 press의 Completed/Canceled만 pointer release로 소비한다.
-3. packaged facility preview가 active면 Placement confirm으로 전달한다.
+3. held facility-item preview가 active면 Placement confirm으로 전달한다.
 4. 나머지는 `UPlayerEquipmentUseComponent` Begin/Update/End로 전달한다. 몽키스패너는 Started 한 번, 물걸레는 Hold lifecycle을 사용한다.
 5. press owner를 중간에 바꾸지 않고 End/Cancel을 시작 owner에만 전달한다.
 
@@ -210,7 +210,7 @@ Blueprint/Editor에서 설정해야 하는 주요 property:
 - E/F/G/Q/LCtrl/휠은 intent mapping이며 fixed slot, key, Placement, Cleaning/Towel 상태를 Character에 추가하지 않는다.
 - LMB도 intent mapping이며 Character에 wrench attack, mop cleaning 또는 prompt domain state를 추가하지 않는다.
 - `ComputerClickAction` property를 즉시 rename/delete하지 않고 `PrimaryUseAction` 이관 후 후속 제거 단계에서 Property Redirect를 검토한다.
-- serialized `HeldKeyAnchor` 이름은 기존 Blueprint 호환성을 위해 유지하되 key/mop/basket/monkey wrench/packaged facility의 공용 held anchor로 사용한다. rename하지 않는다.
+- serialized `HeldKeyAnchor` 이름은 기존 Blueprint 호환성을 위해 유지하되 key/mop/basket/monkey wrench/전용 facility item의 공용 held anchor로 사용한다. rename하지 않는다.
 - Controller는 mapping context 등록/해제 외 책임을 갖지 않는다.
 - Sprint 시작 조건은 전방 가속과 지상 상태를 요구한다.
 - 현재 카메라는 capsule 기준 고정 offset을 사용한다. skeletal mesh socket 기반 카메라나 weapon/hand mesh는 별도 시스템이 생길 때 설계한다.

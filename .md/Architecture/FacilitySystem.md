@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 facility slot, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point를 정의한다. 번호 기반 신발장/락커 topology는 deprecated compatibility로만 남고 신규 배치·회수·락커 수용량은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
+이 문서는 현재 구현된 facility slot, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point를 정의한다. 번호 기반 신발장/락커 topology는 deprecated compatibility로만 남는다. facility Actor는 canonical target에서 배치 상태만 소유하고 전용 회수 아이템과 typed persistent payload 변환은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
 
 ## Source Scope
 
@@ -183,6 +183,7 @@ Counter는 customer routine phase, navigation request와 character rotation을 �
 
 - `ACleanTowelStackActor`는 `ABathhouseFacilityActor`를 확장하고 `TowelShelf` slot을 제공한다.
 - `AUsedTowelBinActor`는 기존 `TowelBasket` slot을 제공한다.
+- 두 towel endpoint는 facility 조회·customer navigation에는 등록되지만 Placement Actor 변환은 native opt-out하며 Q 회수 대상이 아니다.
 - Facility slot은 customer 이동/reservation만 소유한다.
 - clean/used count, bin capacity, overflow world towel과 player E/F transfer는 Towel System이 소유한다.
 - washer, dryer와 player-carried basket은 customer navigation facility로 등록하지 않는다.
@@ -220,7 +221,7 @@ Blueprint 조회·표현 API:
 - Customer -> Facility
 - Towel -> Facility actor/slot contract
 - Interaction -> Facility의 generic facility/key-hook validation
-- Facility -> Placement의 placeable-facility mode/query 계약
+- Facility -> Placement의 placed-facility query, typed payload와 Actor 변환 계약
 - Facility는 Customer, Interaction과 UI concrete class에 의존하지 않는다.
 
 ## Manual Review Points

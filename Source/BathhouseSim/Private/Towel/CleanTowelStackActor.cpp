@@ -33,7 +33,7 @@ void ACleanTowelStackActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 FPlayerInteractionQuery ACleanTowelStackActor::QueryInteraction(const FPlayerInteractionContext& Context) const
 {
 	if (GetFacilityPlacementComponent()
-		&& GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+		&& !GetFacilityPlacementComponent()->IsPlacedDomainActive())
 	{
 		return ABathhouseFacilityActor::QueryInteraction(Context);
 	}
@@ -70,7 +70,7 @@ FPlayerInteractionQuery ACleanTowelStackActor::QueryInteraction(const FPlayerInt
 FPlayerInteractionResult ACleanTowelStackActor::ExecuteInteraction(const FPlayerInteractionContext& Context)
 {
 	if (GetFacilityPlacementComponent()
-		&& GetFacilityPlacementComponent()->GetMode() == EPlaceableFacilityMode::Packaged)
+		&& !GetFacilityPlacementComponent()->IsPlacedDomainActive())
 	{
 		return ABathhouseFacilityActor::ExecuteInteraction(Context);
 	}
@@ -87,6 +87,13 @@ FPlayerInteractionResult ACleanTowelStackActor::TransferFromHeldBasket(
 	const int32 RequestedCount,
 	const EPlayerInteractionIntent Intent)
 {
+	if (GetFacilityPlacementComponent()
+		&& !GetFacilityPlacementComponent()->IsPlacedDomainActive())
+	{
+		return FPlayerInteractionResult::Failed(
+			LOCTEXT("CleanStackInactive", "설치가 완료된 수건 선반만 사용할 수 있습니다."),
+			Intent);
+	}
 	ATowelBasketActor* Basket = Context.CarryComponent
 		? Cast<ATowelBasketActor>(Context.CarryComponent->GetHeldObject())
 		: nullptr;
