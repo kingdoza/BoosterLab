@@ -6,6 +6,15 @@
 
 class ULockerActionSlotComponent;
 
+enum class ELockerBankRegistrationResult : uint8
+{
+	Success,
+	AuthorityNotReady,
+	ExpansionLimitExceeded,
+	InvalidTopology,
+	AlreadyRegistered
+};
+
 USTRUCT(BlueprintType)
 struct BATHHOUSESIM_API FLockerCapacityLeaseHandle
 {
@@ -34,6 +43,8 @@ class BATHHOUSESIM_API ULockerCapacitySubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
+	ELockerBankRegistrationResult ValidateLockerBankRegistrationTyped(const AActor* Bank, const TArray<ULockerActionSlotComponent*>& Slots, int32 DefinitionSlotCount, FText& OutFailureReason);
+	ELockerBankRegistrationResult RegisterLockerBankTyped(AActor* Bank, const TArray<ULockerActionSlotComponent*>& Slots, int32 DefinitionSlotCount, FText& OutFailureReason, bool bPublish = true);
 	bool ValidateLockerBankRegistration(const AActor* Bank, const TArray<ULockerActionSlotComponent*>& Slots, int32 DefinitionSlotCount, FText& OutFailureReason);
 	bool RegisterLockerBank(AActor* Bank, const TArray<ULockerActionSlotComponent*>& Slots, int32 DefinitionSlotCount, FText& OutFailureReason, bool bPublish = true);
 	bool UnregisterLockerBank(AActor* Bank, bool bUnexpectedEndPlay, bool bPublish = true);
@@ -51,7 +62,7 @@ public:
 		AActor* Requestor,
 		AActor*& OutBank,
 		ULockerActionSlotComponent*& OutSlot);
-	void CompactInvalidEntries();
+	void CompactInvalidEntries(bool bPublish = true);
 	void PublishCapacityMutation();
 
 	UFUNCTION(BlueprintPure, Category = "Locker")

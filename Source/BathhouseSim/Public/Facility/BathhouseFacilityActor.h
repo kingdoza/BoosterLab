@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Facility/BathhouseFacilityTypes.h"
+#include "Facility/LockerCapacitySubsystem.h"
 #include "Interaction/PhysicalCarryable.h"
 #include "Interaction/PlayerInteractable.h"
 #include "Interaction/SupplementalInteractionIntentSource.h"
@@ -13,7 +14,6 @@ class UBathhouseFacilitySlotComponent;
 class UBathWaterStateComponent;
 class UBoxComponent;
 class UFacilityPlacementComponent;
-class UNavModifierComponent;
 class UPlayerCarryComponent;
 class UPrimitiveComponent;
 class USceneComponent;
@@ -37,6 +37,12 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void FellOutOfWorld(const UDamageType& DamageType) override;
+#if WITH_EDITOR
+	virtual void PostLoad() override;
+	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
+	virtual void PostEditImport() override;
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 
 	virtual FPlayerInteractionQuery QueryInteraction(const FPlayerInteractionContext& Context) const override;
 	virtual FPlayerInteractionResult ExecuteInteraction(const FPlayerInteractionContext& Context) override;
@@ -89,6 +95,7 @@ public:
 
 	const TArray<TObjectPtr<UBathhouseFacilitySlotComponent>>& GetFacilitySlots() const { return FacilitySlots; }
 	UBathWaterStateComponent* GetBathWaterState() const { return BathWaterState; }
+	const FGuid& GetRegistrationId() const { return RegistrationId; }
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Bathhouse Facility")
 	void OnSlotReservationChanged(UBathhouseFacilitySlotComponent* Slot, EBathhouseFacilitySlotState NewState);
@@ -115,9 +122,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
 	TObjectPtr<UFacilityPlacementComponent> FacilityPlacement;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
-	TObjectPtr<UNavModifierComponent> PlacementNavModifier;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bathhouse Facility")
 	TObjectPtr<UBathWaterStateComponent> BathWaterState;
 
@@ -133,17 +137,22 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bathhouse Facility")
 	bool bEnabled = true;
 
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Bathhouse Facility|Startup")
+	FGuid RegistrationId;
+
 private:
+	friend class UBathhouseFacilitySubsystem;
 	UFUNCTION()
 	void HandleSlotStateChanged(UBathhouseFacilitySlotComponent* Slot, EBathhouseFacilitySlotState PreviousState, EBathhouseFacilitySlotState NewState);
-	void HandleExpansionAuthorityChanged(class ABathhouseExpansionAuthority* Authority);
 	bool ValidatePlacedDomain(FText& OutFailureReason) const;
 	bool RegisterPlacedDomain(FText& OutFailureReason, bool bPublish = true);
+	ELockerBankRegistrationResult RegisterStartupLockerDomain(FText& OutFailureReason);
+	bool CommitStartupLockerDomain(FText& OutFailureReason);
+	void FailStartupLockerDomain();
 	void UnregisterPlacedDomain(bool bUnexpectedEndPlay, bool bPublish = true);
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBathhouseFacilitySlotComponent>> FacilitySlots;
 	bool bPlacedDomainRegistered = false;
 	bool bEndingPlay = false;
-	FDelegateHandle ExpansionAuthorityChangedHandle;
 };

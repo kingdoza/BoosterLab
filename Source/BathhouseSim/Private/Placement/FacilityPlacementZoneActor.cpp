@@ -1,6 +1,7 @@
 #include "Placement/FacilityPlacementZoneActor.h"
 
 #include "Components/BoxComponent.h"
+#include "Components/SceneComponent.h"
 #include "Placement/FacilityPlacementDefinition.h"
 #include "Placement/FacilityPlacementSettings.h"
 
@@ -13,6 +14,9 @@ AFacilityPlacementZoneActor::AFacilityPlacementZoneActor()
 	ZoneBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
 	ZoneBounds->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	ZoneBounds->SetCanEverAffectNavigation(false);
+	PlacementFloor = CreateDefaultSubobject<USceneComponent>(TEXT("PlacementFloor"));
+	PlacementFloor->SetupAttachment(ZoneBounds);
+	PlacementFloor->SetCanEverAffectNavigation(false);
 }
 
 bool AFacilityPlacementZoneActor::IsDefinitionAllowed(const UFacilityPlacementDefinition& Definition) const
@@ -25,8 +29,11 @@ FTransform AFacilityPlacementZoneActor::MakeCandidateTransform(
 	const float YawDegrees,
 	const bool bSnap) const
 {
-	FVector Local = GetActorTransform().InverseTransformPosition(WorldPoint);
-	Local.Z = ZoneBounds ? ZoneBounds->GetUnscaledBoxExtent().Z : 0.0f;
+	const FTransform FloorTransform = PlacementFloor
+		? PlacementFloor->GetComponentTransform()
+		: GetActorTransform();
+	FVector Local = FloorTransform.InverseTransformPosition(WorldPoint);
+	Local.Z = 0.0f;
 	if (bSnap)
 	{
 		const float Grid = GetDefault<UFacilityPlacementSettings>()->GetGridSizeCm();
@@ -34,7 +41,7 @@ FTransform AFacilityPlacementZoneActor::MakeCandidateTransform(
 		Local.Y = QuantizeLocalCoordinate(Local.Y, Grid);
 	}
 	const FQuat LocalYaw(FVector::UpVector, FMath::DegreesToRadians(NormalizePlacementYaw(YawDegrees)));
-	return FTransform(GetActorQuat() * LocalYaw, GetActorTransform().TransformPosition(Local));
+	return FTransform(FloorTransform.GetRotation() * LocalYaw, FloorTransform.TransformPosition(Local));
 }
 
 bool AFacilityPlacementZoneActor::ContainsFootprint(

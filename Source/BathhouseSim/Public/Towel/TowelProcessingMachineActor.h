@@ -12,7 +12,6 @@
 class USceneComponent;
 class UBoxComponent;
 class UFacilityPlacementComponent;
-class UNavModifierComponent;
 class UPlayerCarryComponent;
 class UTowelInventoryComponent;
 class UTowelMachineControlComponent;
@@ -126,9 +125,6 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
 	TObjectPtr<UFacilityPlacementComponent> FacilityPlacement;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
-	TObjectPtr<UNavModifierComponent> PlacementNavModifier;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Towel Machine")
 	TObjectPtr<UTowelInventoryComponent> Inventory;

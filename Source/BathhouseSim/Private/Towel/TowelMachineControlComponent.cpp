@@ -9,6 +9,7 @@ UTowelMachineControlComponent::UTowelMachineControlComponent()
 {
 	InitBoxExtent(FVector(20.0f));
 	SetCollisionProfileName(TEXT("BlockAllDynamic"));
+	SetCanEverAffectNavigation(false);
 }
 
 FPlayerInteractionQuery UTowelMachineControlComponent::QueryInteraction(const FPlayerInteractionContext& Context) const

@@ -7,6 +7,7 @@
 
 class UBoxComponent;
 class UFacilityPlacementDefinition;
+class USceneComponent;
 
 UCLASS(Blueprintable)
 class BATHHOUSESIM_API AFacilityPlacementZoneActor : public AActor
@@ -20,6 +21,7 @@ public:
 	FTransform MakeCandidateTransform(const FVector& WorldPoint, float YawDegrees, bool bSnap) const;
 	bool ContainsFootprint(const FTransform& CandidateTransform, const FVector& WorldHalfExtent) const;
 	UBoxComponent* GetZoneBounds() const { return ZoneBounds; }
+	USceneComponent* GetPlacementFloor() const { return PlacementFloor; }
 
 	static float QuantizeLocalCoordinate(float Value, float GridSize);
 	static float NormalizePlacementYaw(float YawDegrees);
@@ -30,6 +32,9 @@ public:
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
 	TObjectPtr<UBoxComponent> ZoneBounds;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Placement")
+	TObjectPtr<USceneComponent> PlacementFloor;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Facility Placement")
 	FGameplayTagContainer AllowedFacilityTags;

@@ -76,7 +76,6 @@ bool ABathhouseFacilityActor::StagePlacedDomainRegistration(FText& OutFailureRea
 	{
 		return false;
 	}
-	FacilityPlacement->CommitStagedPlacement();
 	return true;
 }
 
@@ -117,6 +116,10 @@ bool ABathhouseFacilityActor::StagePlacedDomainUnregistration(
 			Lockers->PublishCapacityMutation();
 		}
 	};
+	if (!FacilityPlacement->CaptureAndDisableActorCollision(OutFailureReason))
+	{
+		return false;
+	}
 	UnregisterPlacedDomain(false, false);
 	FacilityPlacement->SetPlacedDomainActive(false);
 	return true;
@@ -129,12 +132,17 @@ bool ABathhouseFacilityActor::RollbackPlacedDomainUnregistration(FText& OutFailu
 		OutFailureReason = LOCTEXT("FacilityRollbackUnavailable", "설비 domain 등록을 복구할 수 없습니다.");
 		return false;
 	}
-	FacilityPlacement->SetPlacedDomainActive(true);
 	if (!RegisterPlacedDomain(OutFailureReason, false))
 	{
+		return false;
+	}
+	if (!FacilityPlacement->RestoreActorCollisionSnapshot(OutFailureReason))
+	{
+		UnregisterPlacedDomain(false, false);
 		FacilityPlacement->SetPlacedDomainActive(false);
 		return false;
 	}
+	FacilityPlacement->SetPlacedDomainActive(true);
 	return true;
 }
 
@@ -237,6 +245,75 @@ bool ABathhouseFacilityActor::RegisterPlacedDomain(FText& OutFailureReason, cons
 	return true;
 }
 
+ELockerBankRegistrationResult ABathhouseFacilityActor::RegisterStartupLockerDomain(FText& OutFailureReason)
+{
+	if (bPlacedDomainRegistered)
+	{
+		return ELockerBankRegistrationResult::AlreadyRegistered;
+	}
+	if (FacilityType != EBathhouseFacilityType::ClothesLocker || !GetWorld())
+	{
+		OutFailureReason = LOCTEXT("InvalidStartupLocker", "startup reconciliation 대상이 올바른 락커가 아닙니다.");
+		return ELockerBankRegistrationResult::InvalidTopology;
+	}
+	UBathhouseFacilitySubsystem* Facilities = GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>();
+	ULockerCapacitySubsystem* Lockers = GetWorld()->GetSubsystem<ULockerCapacitySubsystem>();
+	TArray<ULockerActionSlotComponent*> LockerSlots;
+	GetComponents(LockerSlots);
+	const int32 Expected = FacilityPlacement && FacilityPlacement->GetDefinition()
+		? FacilityPlacement->GetDefinition()->LockerSlotCount : 0;
+	if (!Facilities || !Lockers)
+	{
+		OutFailureReason = LOCTEXT("MissingStartupSubsystem", "startup 락커 등록 시스템을 찾을 수 없습니다.");
+		return ELockerBankRegistrationResult::InvalidTopology;
+	}
+	const ELockerBankRegistrationResult LockerResult = Lockers->RegisterLockerBankTyped(
+		this, LockerSlots, Expected, OutFailureReason, false);
+	if (LockerResult != ELockerBankRegistrationResult::Success
+		&& LockerResult != ELockerBankRegistrationResult::AlreadyRegistered)
+	{
+		return LockerResult;
+	}
+	if (!Facilities->RegisterFacility(this, false))
+	{
+		if (LockerResult == ELockerBankRegistrationResult::Success)
+		{
+			Lockers->UnregisterLockerBank(this, false, false);
+		}
+		OutFailureReason = LOCTEXT("StartupFacilityRegistrationFailed", "startup 락커의 facility 등록을 적용할 수 없습니다.");
+		return ELockerBankRegistrationResult::InvalidTopology;
+	}
+	bPlacedDomainRegistered = true;
+	return LockerResult;
+}
+
+bool ABathhouseFacilityActor::CommitStartupLockerDomain(FText& OutFailureReason)
+{
+	if (!bPlacedDomainRegistered || !FacilityPlacement
+		|| !FacilityPlacement->RestoreActorCollisionSnapshot(OutFailureReason))
+	{
+		UnregisterPlacedDomain(false, false);
+		if (FacilityPlacement)
+		{
+			FacilityPlacement->SetPlacedDomainActive(false);
+		}
+		return false;
+	}
+	FacilityPlacement->SetPlacedDomainActive(true);
+	return true;
+}
+
+void ABathhouseFacilityActor::FailStartupLockerDomain()
+{
+	UnregisterPlacedDomain(false, false);
+	if (FacilityPlacement)
+	{
+		FacilityPlacement->SetPlacedDomainActive(false);
+		FacilityPlacement->ConsumeActorCollisionSnapshot();
+	}
+	SetActorEnableCollision(false);
+}
+
 void ABathhouseFacilityActor::UnregisterPlacedDomain(
 	const bool bUnexpectedEndPlay,
 	const bool bPublish)
@@ -269,17 +346,6 @@ void ABathhouseFacilityActor::UnregisterPlacedDomain(
 		{
 			Lockers->PublishCapacityMutation();
 		}
-	}
-}
-
-void ABathhouseFacilityActor::HandleExpansionAuthorityChanged(ABathhouseExpansionAuthority* Authority)
-{
-	(void)Authority;
-	if (!bEndingPlay && !bPlacedDomainRegistered && FacilityPlacement
-		&& FacilityPlacement->GetMode() == EPlaceableFacilityMode::Placed)
-	{
-		FText FailureReason;
-		RegisterPlacedDomain(FailureReason);
 	}
 }
 

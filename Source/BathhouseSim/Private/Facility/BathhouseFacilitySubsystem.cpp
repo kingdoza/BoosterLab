@@ -121,7 +121,12 @@ bool UBathhouseFacilitySubsystem::RegisterExpansionAuthority(
 		return false;
 	}
 	ExpansionAuthority = Authority;
+	++AuthorityReadinessRevision;
 	OnExpansionAuthorityChanged.Broadcast(Authority);
+	if (bStartupSubmissionClosed)
+	{
+		ReconcileStartupLockers();
+	}
 	return true;
 }
 
@@ -130,7 +135,12 @@ void UBathhouseFacilitySubsystem::UnregisterExpansionAuthority(ABathhouseExpansi
 	if (ExpansionAuthority.Get() == Authority)
 	{
 		ExpansionAuthority.Reset();
+		++AuthorityReadinessRevision;
 		OnExpansionAuthorityChanged.Broadcast(nullptr);
+		if (bStartupSubmissionClosed)
+		{
+			ReconcileStartupLockers();
+		}
 	}
 }
 

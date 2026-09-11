@@ -70,7 +70,6 @@ bool ATowelProcessingMachineActor::StagePlacedDomainRegistration(FText& OutFailu
 		OutFailureReason = LOCTEXT("MachineNotStaged", "새 수건 처리기가 staged 상태가 아닙니다.");
 		return false;
 	}
-	FacilityPlacement->CommitStagedPlacement();
 	return true;
 }
 
@@ -93,6 +92,10 @@ bool ATowelProcessingMachineActor::StagePlacedDomainUnregistration(
 		OutFailureReason = LOCTEXT("MachineDomainNotPlaced", "수건 처리기가 설치 상태가 아닙니다.");
 		return false;
 	}
+	if (!FacilityPlacement->CaptureAndDisableActorCollision(OutFailureReason))
+	{
+		return false;
+	}
 	FacilityPlacement->SetPlacedDomainActive(false);
 	return true;
 }
@@ -102,6 +105,10 @@ bool ATowelProcessingMachineActor::RollbackPlacedDomainUnregistration(FText& Out
 	if (!FacilityPlacement || IsActorBeingDestroyed())
 	{
 		OutFailureReason = LOCTEXT("MachineRollbackUnavailable", "수건 처리기 설치 상태를 복구할 수 없습니다.");
+		return false;
+	}
+	if (!FacilityPlacement->RestoreActorCollisionSnapshot(OutFailureReason))
+	{
 		return false;
 	}
 	FacilityPlacement->SetPlacedDomainActive(true);

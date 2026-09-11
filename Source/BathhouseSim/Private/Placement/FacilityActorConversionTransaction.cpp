@@ -266,7 +266,7 @@ APlaceableFacilityItemActor* FFacilityActorConversionTransaction::RecoverFacilit
 
 AActor* FFacilityActorConversionTransaction::PlaceItemAsFacility(
 	APlaceableFacilityItemActor& ItemActor,
-	const FTransform& CandidateTransform,
+	const FTransform& FinalActorTransform,
 	const AFacilityPlacementZoneActor& Zone,
 	UPlayerCarryComponent& Carry,
 	FText& OutFailureReason)
@@ -294,17 +294,15 @@ AActor* FFacilityActorConversionTransaction::PlaceItemAsFacility(
 		OutFailureReason = LOCTEXT("MissingPlacedFacilityCDO", "배치 설비 기본 설정을 찾을 수 없습니다.");
 		return nullptr;
 	}
-	UFacilityPlacementComponent* PlacedCDOPlacement =
-		PlacedCDOFacility->GetFacilityPlacementComponent();
-	FTransform SpawnTransform;
-	if (!PlacedCDOPlacement
-		|| !PlacedCDOPlacement->BuildPlacedActorTransform(
-			CandidateTransform,
-			SpawnTransform,
-			OutFailureReason))
+	if (FinalActorTransform.ContainsNaN()
+		|| !FinalActorTransform.GetRotation().IsNormalized())
 	{
+		OutFailureReason = LOCTEXT(
+			"InvalidFinalPlacementTransform",
+			"최종 설비 배치 transform이 올바르지 않습니다.");
 		return nullptr;
 	}
+	const FTransform SpawnTransform = FinalActorTransform;
 #if WITH_DEV_AUTOMATION_TESTS
 	if (ConsumeTestFault(ETestFault::PlacementSpawn))
 	{
@@ -341,7 +339,23 @@ AActor* FFacilityActorConversionTransaction::PlaceItemAsFacility(
 			NewFacilityActor->Destroy();
 		}
 	};
-	NewPlacement->PrepareForStagedPlacement(*Definition);
+	if (!NewPlacement->PrepareForStagedPlacement(*Definition, OutFailureReason))
+	{
+		DestroyStaged();
+		return nullptr;
+	}
+#if WITH_DEV_AUTOMATION_TESTS
+	if (ConsumeTestFault(ETestFault::PlacementCollisionSnapshotDuplicate))
+	{
+		FText DuplicateFailure;
+		if (!NewPlacement->PrepareForStagedPlacement(*Definition, DuplicateFailure))
+		{
+			OutFailureReason = DuplicateFailure;
+			DestroyStaged();
+			return nullptr;
+		}
+	}
+#endif
 	if (
 #if WITH_DEV_AUTOMATION_TESTS
 		ConsumeTestFault(ETestFault::PlacementImport) ||
@@ -356,6 +370,23 @@ AActor* FFacilityActorConversionTransaction::PlaceItemAsFacility(
 		false,
 		nullptr,
 		ESpawnActorScaleMethod::OverrideRootScale);
+	if (!IsValid(NewFacilityActor)
+		|| !NewPlacement->FinalizeStagedPlacementCollisionSnapshot(OutFailureReason))
+	{
+		DestroyStaged();
+		return nullptr;
+	}
+#if WITH_DEV_AUTOMATION_TESTS
+	if (ConsumeTestFault(ETestFault::PlacementCollisionSnapshotMissing))
+	{
+		NewPlacement->ConsumeActorCollisionSnapshot();
+	}
+#endif
+	if (!NewPlacement->ValidateStagedPlacementCollisionSnapshot(OutFailureReason))
+	{
+		DestroyStaged();
+		return nullptr;
+	}
 	const FFacilityPlacementTransactionResult PlacementQuery = IsValid(NewFacilityActor)
 		? NewFacility->QueryFacilityPlacement(SpawnTransform, Zone)
 		: FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::InvalidActor, FText::GetEmpty());
@@ -378,6 +409,13 @@ AActor* FFacilityActorConversionTransaction::PlaceItemAsFacility(
 #endif
 		!NewFacility->StagePlacedDomainRegistration(OutFailureReason))
 	{
+		NewPlacement->EndTransition();
+		DestroyStaged();
+		return nullptr;
+	}
+	if (!NewPlacement->ValidateStagedPlacementCollisionSnapshot(OutFailureReason))
+	{
+		NewFacility->RollbackPlacedDomainRegistration();
 		NewPlacement->EndTransition();
 		DestroyStaged();
 		return nullptr;
@@ -409,6 +447,17 @@ AActor* FFacilityActorConversionTransaction::PlaceItemAsFacility(
 		NewPlacement->EndTransition();
 		DestroyStaged();
 		OutFailureReason = LOCTEXT("PlacementItemConsumeFailed", "설비 아이템 소지 상태를 확정할 수 없습니다.");
+		return nullptr;
+	}
+	if (!IsValid(NewFacilityActor)
+		|| !NewPlacement->CommitStagedPlacement(OutFailureReason))
+	{
+		if (IsValid(NewFacilityActor))
+		{
+			NewFacility->RollbackPlacedDomainRegistration();
+			NewPlacement->EndTransition();
+			DestroyStaged();
+		}
 		return nullptr;
 	}
 

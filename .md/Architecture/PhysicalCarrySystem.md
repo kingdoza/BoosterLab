@@ -221,7 +221,7 @@ fixed-slot placement는 cleaning, combat 또는 towel transaction이 아니다. 
 `EPhysicalCarryKind::Facility`는 전용 `APlaceableFacilityItemActor`가 사용한다. 배치된 `ABathhouseFacilityActor` 계열과 `ATowelProcessingMachineActor`는 canonical physical carry 책임을 갖지 않는다.
 
 - stable Root `UStaticMeshComponent`가 Definition의 `RecoveryItemMesh`, bounds와 일치하는 단일 simple box collision, physics와 CCD를 담당한다.
-- Definition mesh가 아직 없으면 Engine 기본 Cube를 사용한다. 모든 mesh는 같은 규격 직육면체이며 Root component scale은 item class 공통값이다.
+- Definition mesh가 아직 없으면 Engine 기본 Cube를 사용한다. 모든 mesh는 같은 규격 직육면체이며 Root component scale은 Definition들이 공유하는 `APlaceableFacilityItemActor` 파생 class default의 공통값이다.
 - `HeldTransform`은 item class 공통값이며 location/rotation만 적용한다. authored scale은 unit으로 정규화하고 Root scale을 보존한다.
 - world item은 E pickup, held item은 G actual-held-pose free drop을 지원한다.
 - capability는 `FreeDrop`만 반환하고 generic fixed-slot의 assigned/store/take/recovery 경로에는 참여하지 않는다.

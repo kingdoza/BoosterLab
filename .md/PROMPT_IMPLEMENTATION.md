@@ -1,161 +1,183 @@
-# 구현 프롬프트 — 전용 설비 회수 아이템과 Actor 교체 Transaction
+# 구현 프롬프트 — 설비 배치 Authoring·높이·Preview·Navigation·락커 초기화
+
+## 입력과 범위
+
+- 승인 기능 계약: `.md/PROMPT_ARCHITECTURE.md`
+- 정본: `.md/0_ARCHITECTURE.md`, `.md/Architecture/PlacementSystem.md`, `.md/Architecture/FacilitySystem.md`, `.md/Architecture/CoreSystem.md`
+- 사용자 결과: `.md/QNA_FEATURE_SPEC.md` Q1~Q3, 기술 결정: `.md/QNA_ARCHITECTURE.md` Q1~Q11
+- reflected property/default subobject 즉시 제거 때문에 모든 영향 설비를 같은 migration 단위로 처리한다.
+- 이 단계는 Source와 native automation만 수정한다. Content/Level/Project Settings asset 값은 후속 Unreal 단계로 인계한다.
 
 ## 목표
 
-배치된 설비 Actor 자체를 `Packaged` physical item으로 바꾸는 현재 구현을 폐기한다. 배치 설비와 회수 아이템을 별도 class/instance로 분리하고 `APlaceableFacilityItemActor` 하나가 모든 설비 회수 아이템을 Definition 기반으로 표현하게 한다. 기존 Q Hold, 회수 조건, 낙하 위치, ghost preview, grid/snap/rotation, single carry와 G free-drop 경로는 유지한다.
+1. 설비 아이템 Held transform과 preview material을 Developer Settings로 공통화한다.
+2. footprint X/Y 크기에서 grid cell을 파생하고 Definition cell authoring을 제거한다.
+3. explicit zone floor와 footprint bottom으로 설치 Z를 한 번만 계산한다.
+4. placed class-default Static Mesh를 복제하는 공통 native preview를 사용한다.
+5. NavModifier를 제거하고 실제 body mesh collision을 Dynamic Recast에 맡긴다.
+6. pre-placed locker를 stable ID 기반 startup reconciliation으로 등록한다.
 
-## 정본 입력
+## 변경 금지
 
-- `.md/0_ARCHITECTURE.md`
-- `.md/Architecture/PlacementSystem.md`
-- `.md/Architecture/PhysicalCarrySystem.md`
-- `.md/Architecture/FacilitySystem.md`
-- `.md/Architecture/TowelSystem.md`
-- `.md/Architecture/CoreSystem.md`
-- `.md/QNA_ARCHITECTURE.md` Q89~Q94
+- E/LMB/LCtrl/Mouse Wheel/G/Q 입력, LMB 우선순위와 UI
+- zone tag, X/Y snap/Yaw와 footprint collision·containment·floor-support 의미
+- facility↔item payload/class 분리, recovery gate와 Actor 교체 원자성
+- locker lease/key-pool/customer locker 사용과 contents/water/processing/StateTree
+- Clean Towel Stack과 Used Towel Bin placement opt-out
 
-## 고정 결정
+## Global Settings와 Definition
 
-- 배치 설비와 회수 아이템은 서로 다른 Actor class와 instance다.
-- 공통 native `APlaceableFacilityItemActor` 하나를 Definition으로 구분한다.
-- Definition이 `PlacedFacilityClass`, `RecoveryItemClass`, `RecoveryItemMesh`와 기존 preview/footprint 데이터를 함께 소유한다.
-- 양방향 변환은 새 Actor를 먼저 deferred/staged 생성하고 검증한 뒤 원본을 마지막에 제거한다.
-- 설비 아이템은 `IPhysicalCarryable`의 `FreeDrop` capability만 지원한다. exact fixed slot은 범위 밖이다.
-- 회수 성공은 자동 pickup이나 impulse를 발생시키지 않고 기존 held item을 바꾸지 않는다.
-- Root Static Mesh의 scale이 공통 외형/물리 scale이며 별도 `RecoveryItemVisualScale`과 collision extent를 만들지 않는다.
-- `HeldTransform`은 모든 설비 아이템에 공통이고 location/rotation만 적용한다. scale은 무시한다.
-- facility↔item 변환은 location/rotation만 전달하고 서로의 Actor/Root scale을 복사하지 않는다.
-- Content를 수정하지 않으며 Definition mesh 미지정 시 Engine 기본 `/Engine/BasicShapes/Cube.Cube`로 동작한다.
+`UFacilityPlacementSettings`에 config `FacilityItemHeldTransform`, `TSoftObjectPtr<UMaterialInterface> ValidPreviewMaterial/InvalidPreviewMaterial`을 추가한다. Held getter는 location/rotation만 반환하고 scale은 `OneVector`로 만든다. item과 legacy fail-closed placed carry getter는 이 값만 읽는다. material 누락/load 실패나 비반투명 설정은 preview 실패다.
 
-## 신규 타입
+즉시 삭제:
 
-### `FacilityPlacementPayload.h`
+- `APlaceableFacilityItemActor::HeldTransform`
+- `UFacilityPlacementComponent::HeldTransform`과 getter
+- `UFacilityPlacementDefinition::PreviewActorClass`
+- `UFacilityPlacementDefinition::FootprintCellsX/Y`
 
-- `UFacilityPlacementInstanceData`: abstract runtime-only UObject base. Tick/delegate와 domain mutation을 갖지 않는다.
-- `FFacilityPlacementPayload`: `Definition`과 item을 Outer로 하는 instanced `UFacilityPlacementInstanceData` 포인터.
-- Placement는 instance data 내용을 해석하지 않는다.
-- null/wrong Outer/wrong domain type과 Actor/Component runtime reference를 fail-closed한다.
+Definition validation은 `PlacedFacilityClass` CDO의 placement component/footprint를 resolve한다. scaled full X/Y와 `GridSizeCm` 비율이 허용 오차 안의 양의 정수인지 검사하고 필요 시 non-reflected `FIntPoint`로 파생한다. 기존 stable id, tag, placed/item class, recovery mesh와 locker slot count 검증은 유지한다.
 
-Domain별 data class:
+파생 계산은 다음 계약을 따른다.
 
-- `UBathhouseFacilityPlacementInstanceData`: `FacilityType`, legacy `FacilityNumber`, `SelectionWeight`, `bEnabled`
-- `UTowelMachinePlacementInstanceData`: `MachineKind`, `ProcessingDurationSeconds`
+```text
+FullSizeX = 2 * PlacementFootprint.BoxExtent.X * abs(PlacementFootprint world-relative scale X)
+FullSizeY = 2 * PlacementFootprint.BoxExtent.Y * abs(PlacementFootprint world-relative scale Y)
+CellsX = RoundToInt(FullSizeX / GridSizeCm)
+CellsY = RoundToInt(FullSizeY / GridSizeCm)
+```
 
-contents, machine state/progress, bath water, slot reservation/occupancy, customer와 registry pointer는 payload에 넣지 않는다. `StructUtils`/experimental plugin, 전체 Actor serialization과 문자열 property bag은 사용하지 않는다.
+각 비율은 양수·finite이며 반올림한 정수와 허용 오차 안에서 같아야 한다. `FootprintCellsX/Y`를 대체하는 새 reflected cache를 만들지 않는다. 전역 grid나 footprint 크기가 바뀌면 다음 조회부터 파생값이 자동으로 바뀐다.
 
-### `APlaceableFacilityItemActor`
+## Zone Floor와 Candidate Transform
 
-- `AActor + IPlayerInteractable + IPhysicalCarryable`
-- stable Root `UStaticMeshComponent` 하나가 표시, simple collision, physics와 CCD를 담당
-- staged/free-world/held/placement-consumed 내부 lifecycle과 payload, carrier weak reference, last-safe transform 소유
-- `EPhysicalCarryKind::Facility`, capability는 `FreeDrop`만 반환
-- E pickup과 기존 `UPlayerCarryComponent` single-held 계약 사용
-- G는 기존 actual-held-pose transaction, Pawn Ignore, CCD, 질량 무시 약한 velocity change 사용
-- fixed-slot getter/bind/store/recovery는 제공하지 않거나 항상 fail-closed
-- 정상 placement consumption과 일반 EndPlay/fall recovery를 구분
+`AFacilityPlacementZoneActor`는 기존 `ZoneBounds` root 아래 stable native `USceneComponent PlacementFloor`를 추가한다. trace point를 floor local XY에 투영하고 LCtrl quantization/누적 Yaw를 적용한다. candidate Z에 Bounds extent와 trace impact Z를 사용하지 않는다.
 
-Definition mesh가 유효하면 Root에 적용하고 없으면 native Cube fallback을 유지한다. 모든 회수 mesh는 동일 규격 직육면체이며 bounds와 일치하는 simple box collision 하나만 허용한다. complex-as-simple, box 이외/복수 shape, physics 불가 mesh는 validation 실패다.
+`UFacilityPlacementComponent`는 placed CDO root scale, footprint relative transform과 local bottom point `(0,0,-Extent.Z)`로 bottom world offset을 계산해 desired floor point에서 한 번 뺀 final Actor transform을 반환한다. 네 bottom corner가 Actor local Z=0에 놓이고 transform/scale이 finite인지 검증한다.
 
-pickup은 `SnapToTargetNotIncludingScale`과 `SetRelativeLocationAndRotation`만 사용한다. `SetRelativeTransform(HeldTransform)`으로 Root scale을 덮어쓰지 않는다. held/drop/rollback 전체에서 Root scale을 보존한다.
+공통 계산식은 다음 의미를 유지한다. `P`는 `PlacementFloor` 위 desired bottom point, `Q`는 최종 Actor rotation, `S`는 placed CDO root scale, `R`은 footprint relative transform, `Bf`는 footprint local bottom center다.
 
-### Private conversion helper
+```text
+BottomOffsetWorld = Q.RotateVector(S * R.TransformPosition(Bf))
+ActorLocation = P - BottomOffsetWorld
+```
 
-`FacilityActorConversionTransaction.h/.cpp` 같은 private non-UObject helper로 staged Actor, 원본/신규 weak identity, carry/physics snapshot, silent domain registration과 rollback을 응집한다. Tick, reflected 상태나 domain 규칙은 넣지 않는다. `UPlayerFacilityPlacementComponent`는 session과 상위 commit 순서만 조율한다.
+scale 곱의 실제 구현은 UE transform 규칙과 non-uniform scale을 보존해야 하며, 위 식을 이유로 extent나 relative Z를 다른 단계에서 다시 더하면 안 된다. 기존 Blueprint CDO는 Actor local install floor Z=0과 footprint 네 bottom corner Z=0이 일치하도록 Unreal 단계에서 migration한다.
 
-## `UFacilityPlacementDefinition`
+`ValidateCurrentPlacement()`은 final candidate에 height/relative offset을 더하지 않는다. preview root, deferred spawn, footprint world transform, containment와 네 corner support trace는 같은 candidate와 `PlacementFloor` normal을 사용한다. geometry 구현은 별도 cpp로 나눌 수 있지만 owner는 기존 Component/Zone에 둔다.
 
-추가:
+## 범용 Native Preview
 
-- `TSubclassOf<AActor> PlacedFacilityClass`
-- `TSubclassOf<APlaceableFacilityItemActor> RecoveryItemClass`
-- `TObjectPtr<UStaticMesh> RecoveryItemMesh`
+Player placement는 Definition을 조회하지 않고 native `AFacilityPlacementPreviewActor`를 직접 spawn한다. preview 초기화는 `PlacedFacilityClass` CDO에서 다음을 수행한다.
 
-validation:
+1. 유효 mesh가 있고 class-default에서 표시되는 non-instanced `UStaticMeshComponent`를 찾는다.
+2. helper, hidden, editor-only, ISM과 runtime contents/pile/water 표현을 제외한다.
+3. actor root 기준 transform과 mesh/render 기본값으로 transient mesh component를 만든다.
+4. collision/overlap/physics/Tick/Navigation을 끄고 source material을 복사하지 않는다.
+5. 모든 material slot을 current valid/invalid settings material로 교체한다.
+6. source footprint relative transform/extent snapshot과 authoritative CDO geometry 정합을 검사한다.
 
-- placed class는 `IPlaceableFacility` 구현
-- recovery class는 전용 item class 파생
-- 현재 모든 Definition의 recovery class는 동일한 native 공통 class여야 하며 설비별 subclass는 거부
-- placed/recovery class가 서로 다름
-- preview class, stable id, footprint와 locker slot count 기존 검증 유지
-- mesh가 있으면 동일 직육면체/simple box/physics 계약 검사; null은 이번 migration에서 Cube fallback 경고만 허용
+eligible mesh 0개, material/component 생성 실패와 geometry mismatch는 live preview 실패이며 item을 유지하고 confirm을 막는다. 기존 failure text/event는 유지할 수 있으나 Blueprint가 mesh/material/validity를 결정하지 않는다. per-facility preview asset 정리는 Unreal 단계로 넘긴다.
 
-## Placed Facility 책임 변경
+preview mesh 수집 순서와 identity는 CDO component의 stable object name 기준으로 고정해 반복 생성 결과를 결정적으로 만든다. source component의 world transform을 복사하지 말고 placed Actor root 기준 상대 transform을 사용한다. source의 mesh asset, visibility/render flags와 cast-shadow 같은 비-domain 표현값만 복사하고 material override, collision profile, overlap delegate, physics body와 navigation state는 복사하지 않는다. preview validity 변경은 component를 재생성하지 않고 모든 slot material만 교체한다.
 
-- `ABathhouseFacilityActor`와 `ATowelProcessingMachineActor`는 canonical `IPlaceableFacility`만 사용한다.
-- 각 Actor가 자신의 typed instance data를 item Outer에 export하고 staged 새 Actor에서 import/범위 검증한다.
-- bath/locker는 기존 모든 slot Available, bath water Empty와 locker capacity gate를 유지한다.
-- washer/dryer는 inventory 0, state Waiting gate를 유지한다.
-- 새 Actor import 후 runtime 내용물은 empty/waiting/available로 시작한다.
-- class/default subobject topology, locker slot ID/transform과 presentation은 `PlacedFacilityClass` CDO가 공급한다.
-- Level instance의 임의 component override를 serialize/copy하지 않는다.
+## Collision과 Navigation
 
-`IPlaceableFacility`에는 side-effect-free query와 payload export/import, silent register/unregister stage, rollback과 최종 publication을 분리하는 native 계약을 제공한다. 외부 event는 양쪽 Actor 상태가 확정되기 전에 발행하지 않는다.
+다음을 즉시 삭제한다.
 
-## Q Hold 회수 흐름
+- facility/towel machine의 `PlacementNavModifier` property/default subobject
+- `UFacilityPlacementComponent::Configure()` NavModifier 인자·포인터
+- NavModifier relevancy 전환과 관련 include
 
-1. 기존 focus supplemental recovery row, Q Started/Triggered/Completed/Canceled와 target 고정을 유지한다.
-2. 시작 및 완료 직전에 domain 조건, Definition/class/payload와 낙하 위치를 재검증한다.
-3. passive query collision은 Definition mesh bounds/simple box와 recovery item CDO Root scale에서 derived box를 계산한다.
-4. `RecoveryItemClass`를 예정 낙하 location/rotation과 item class CDO Root scale로 deferred spawn하고 collision/physics가 꺼진 staged 상태로 초기화한다. 원본 facility scale은 복사하지 않는다.
-5. 원본 설비가 staged item을 Outer로 typed payload data를 생성하고 item이 payload를 소유한다.
-6. `FinishSpawning` 뒤 실제 Root mesh collision을 원본 설비만 ignore하여 다시 검사한다.
-7. 원본 facility/domain/locker/NavModifier를 silent unregister한다.
-8. item을 free-world physics로 활성화하고 선형·각속도를 0으로 둔다. impulse는 주지 않는다.
-9. 원본 설비를 마지막에 `Destroy()`한다.
-10. 성공이 확정된 후 registry/capacity와 필요한 presentation event를 한 번 publish한다.
+primitive 배열, navigation tag, `FailsafeExtent`와 `NavArea_Null`을 추가하지 않는다. body Static Mesh의 Simple Collision, response와 `CanEverAffectNavigation`이 정본이며 Recast mode는 Editor에서 `Dynamic`으로 설정한다.
 
-어느 단계든 실패하면 staged item을 파괴하고 원본 등록/NavModifier를 복원한다. 정상 transaction이 실행한 target Destroy와 외부 Destroy callback을 구분한다. 외부 EndPlay/world teardown/FellOutOfWorld는 설비 item을 생성하지 않는다.
+`UFacilityPlacementComponent`는 transition별 Actor collision bool 하나를 snapshot한다. stage/recovery unregister에서 `SetActorEnableCollision(false)`, placement 최종 commit과 recovery rollback에서 원값을 복원한다. 개별 component collision은 변경하지 않고 snapshot을 중복 캡처·소비하지 않는다.
 
-## LMB 배치 흐름
+collision snapshot 상태는 `없음 → 캡처됨 → 복원/소비됨`으로 단방향 전이한다. placement에서 새 Actor의 authored collision 값은 CDO/Construction 결과가 확정된 직후 한 번 캡처하고, staged 시작 전에 끈다. recovery는 원본 Actor의 현재 authored enable 값을 한 번 캡처한다. rollback 도중 domain 복구가 실패하면 snapshot을 소비하거나 collision을 먼저 복원하지 않는다. 정상 commit 뒤에는 stale snapshot을 남기지 않는다.
 
-1. held object change에서 동일 facility item instance와 payload를 고정하고 기존 ghost preview를 즉시 시작한다.
-2. preview validation은 Definition footprint, zone, floor/blocking, 확장 한계를 사용한다.
-3. confirm 직전에 local owner, suppression, held identity, preview, payload와 후보를 재검증한다.
-4. `PlacedFacilityClass`를 candidate location/rotation과 placed class CDO Root scale로 deferred spawn하고 payload import 및 staged-start flag를 설정한다. held item Root scale은 복사하지 않는다.
-5. `FinishSpawning`은 BeginPlay의 자동 domain registration을 억제하고 외부 event를 발행하지 않는다.
-6. 새 facility component/topology/domain 조건을 검증한 뒤 facility/locker/NavModifier를 silent register한다.
-7. carry의 held reference를 silent clear하고 item을 placement-consumed로 표시한 뒤 원본 item을 제거한다.
-8. 모든 상태가 확정된 후 held/facility/capacity event를 각 한 번 publish하고 preview를 종료한다.
+native helper는 `CanEverAffectNavigation=false`다. CDO validation은 footprint/package root, non-mesh helper, 알려진 presentation/interaction helper가 nav relevant이거나 collision 없이 nav data를 export하면 실패한다. 배치 시스템은 body primitive를 수집하지 않는다.
 
-실패하면 새 facility 등록을 취소하고 staged Actor만 파괴한다. 원본 item의 held identity, parent/socket, location/rotation, Root scale, collision/physics/CCD와 preview를 정확히 유지한다.
+## Transaction 순서
 
-## 호환성과 제거 금지
+Placement:
 
-- 기존 `EPlaceableFacilityMode` ordinal을 변경하지 않는다.
-- `UFacilityPlacementComponent::Mode`, `HeldTransform`, release 값, `OnModeChanged`와 placed Actor의 `PackagePhysicalRoot` reflected 이름/default subobject를 한 migration cycle 유지한다.
-- legacy placed Actor physical-carry query와 `Packaged` 전환은 fail-closed이며 신규 경로에서 호출하지 않는다.
-- 기존 BlueprintCallable/Assignable 및 component 이름을 rename/delete하지 않는다. Core Redirect는 추가하지 않는다.
-- `EPhysicalCarryKind::Facility`, `HeldKeyAnchor`, `UPlayerCarryComponent`와 기존 free-drop transaction을 유지한다.
+1. deferred placed Actor에 collision-off stage를 `FinishSpawning` 전에 적용한다.
+2. payload import, final candidate와 domain 조건을 검증한다.
+3. facility/locker를 silent 등록하되 staged/collision-off를 유지한다.
+4. held item consume/source 제거 뒤 collision snapshot과 staged flag를 commit한다.
+5. held/facility/capacity event를 발행한다.
 
-## 대상 파일
+Recovery:
 
-- `Source/BathhouseSim/BathhouseSim.Build.cs`는 신규 dependency가 필요 없는지 확인만 하며 `StructUtils`를 추가하지 않는다.
-- `Source/BathhouseSim/Public|Private/Placement/*`
-- `Source/BathhouseSim/Public|Private/Facility/BathhouseFacilityActor*`, placement domain과 신규 typed instance data
-- `Source/BathhouseSim/Public|Private/Towel/TowelProcessingMachineActor*`와 신규 typed instance data
-- 필요한 `Interaction/PlayerCarryComponent*`, private physical transaction의 최소 확장
-- `Source/BathhouseSim/Private/Tests/FacilityPlacementAutomationTests.cpp`
-- 필요하면 carry scale/capability 회귀 테스트 파일
+1. staged item과 drop collision을 검증한다.
+2. source collision을 끄고 facility/locker를 silent unregister한다.
+3. item physics 활성화 후 source를 마지막에 제거하고 publish한다.
+4. 실패하면 domain 재등록 성공 뒤 collision snapshot을 복원하고 item을 제거한다.
 
-`Content/`, `Config/`, `.uproject`는 수정하지 않는다.
+`StagePlacedDomainRegistration()`은 collision/staged flag를 commit하지 않는다. 기존 fault injection, callback 재진입 보상, held identity/Root scale/payload rollback을 유지한다. domain rollback 실패 시 collision을 먼저 켜지 않고 fail-closed/invariant 오류로 남긴다.
 
-## 자동화 수용 기준
+## Locker Startup Reconciliation
 
-- 회수 성공: 원본 facility 0개, payload가 같은 item 1개, 지정 낙하 위치, physics/CCD/Pawn Ignore, 속도 0, 기존 held item 불변
-- 회수 spawn/class/payload/collision/silent unregister/Destroy 실패: 원본 facility 1개, item 0개, registry/NavModifier/lease 변화 없음
-- 배치 성공: 원본 item 0개, 새 placed facility 1개, empty hand와 최종 registry가 event observer에 보임
-- 배치 spawn/import/domain/carry commit 실패: 기존 item 1개가 계속 held, staged facility 0개, preview와 전체 physical snapshot 유지
-- 반복 입력, reentrant delegate, target/item/owner EndPlay 경합에서 복제·손실·stale registry 없음
-- 설비 item fixed-slot 거부, E pickup/G drop 성공과 actual held pose 유지
-- authored non-unit `HeldTransform.Scale` 무시 및 pickup/drop/rollback Root scale 보존
-- facility Actor scale→item, item Root scale→새 facility 누수 없음
-- Cube fallback과 Definition mesh simple-box validation
-- bath/machine/locker 기존 회수 gate 및 locker capacity/key-pool 회귀
+`ABathhouseFacilityActor`에 cooked runtime 직렬화 instance `FGuid RegistrationId`를 추가한다. Editor load와 duplicate/import에서 고유 ID를 자동 생성하며 Data Validation은 invalid/duplicate를 거부한다. CDO/runtime-spawned non-startup actor는 startup 정렬에 사용하지 않는다.
 
-## 검증과 인계
+`RegistrationId`는 Editor migration에서 생성·저장하고 duplicate/import 시 원본과 다른 값을 부여한다. cooked runtime의 `BeginPlay`에서 임의 GUID를 생성해 순서를 바꾸는 fallback은 금지한다. cooked map에 invalid/duplicate ID가 남아 있으면 해당 locker만 fail-closed하고 한 번 오류를 기록한다.
 
-- `git diff --check`
-- UE 5.8 Build.bat 정책으로 `BathhouseSimEditor Win64 Development` 빌드
-- 관련 `BathhouseSim.Placement`, physical carry automation 실행
-- 구현 완료 후 `.md/PROMPT_REVIEW.md`와 `.md/PROMPT_UNREAL.md`를 현재 작업만으로 작성
-- Editor 인계에는 Definition별 class/mesh 연결, 기존 Blueprint package 표현 비활성 확인과 PIE 양방향 변환 검증을 포함
+pre-placed locker `BeginPlay`는 slot delegate 준비, collision-off stage와 pending 제출만 수행한다. actor별 expansion delegate retry를 제거하고 subsystem 호출용 idempotent silent register/commit/fail-closed API를 제공한다.
+
+`UBathhouseFacilitySubsystem`은 Authority readiness, pending weak set과 permanent-failure/logged set을 소유한다. Initialize에서 world post-Actor-BeginPlay callback을 연결하고 Deinitialize에서 해제한다. Authority가 먼저 준비되면 post-begin에, 늦게 등록되면 등록 직후 한 번 reconcile한다. delayed Tick은 금지한다.
+
+post-Actor-BeginPlay 경계는 `UWorld::OnWorldBeginPlay`처럼 모든 pre-placed Actor의 `BeginPlay` 제출이 끝난 뒤 호출되는 기존 world lifecycle event를 사용한다. Authority registration과 world callback이 같은 프레임에 겹쳐도 reconciliation guard가 중첩 실행을 막고, 새 pending 또는 readiness revision이 없으면 no-op한다.
+
+Reconciliation:
+
+1. invalid/already-registered/duplicate 제출을 정리하고 `RegistrationId`로 정렬한다.
+2. Authority가 없으면 pending을 유지하고 transient readiness 진단만 한 번 기록한다.
+3. remaining tier slots에 들어가는 bank를 facility+capacity silent 등록한다. 큰 bank가 안 들어가도 뒤의 작은 bank 검사를 계속한다.
+4. bank 내부 실패는 해당 bank만 rollback/fail-closed하고, 성공 bank만 collision/Nav를 복원한다.
+5. batch 뒤 accepted가 있으면 ClothesLocker facility event와 capacity event를 각각 한 번 발행한다.
+
+`ULockerCapacitySubsystem`은 Authority 미준비, actual expansion limit와 invalid topology를 FText 비교 없이 typed result로 구분한다. 기존 atomic bank registration/rollback과 `bPublish=false`를 유지한다. actual limit/invalid·duplicate ID/topology는 actor별 한 번만 오류를 기록하고 startup retry에서 제거한다. runtime tier 상승, streaming 재정렬과 자동 재활성화는 범위 밖이다.
+
+typed result는 최소한 `Success`, `AuthorityNotReady`, `ExpansionLimitExceeded`, `InvalidTopology`, `AlreadyRegistered`를 구분한다. `AuthorityNotReady`만 pending을 유지하며, `AlreadyRegistered`는 용량을 다시 더하지 않는 idempotent 성공/no-op으로 처리한다. batch publication observer가 호출될 때는 accepted locker의 facility registry, capacity 합계와 collision/Navigation 상태가 모두 최종값이어야 한다.
+
+## Compatibility와 Editor 인계
+
+- 삭제는 rename이 아니므로 Core Redirect를 추가하지 않는다.
+- `EPlaceableFacilityMode` ordinal, `Mode`, release 값, `PackagePhysicalRoot` 이름과 fail-closed legacy carry API를 유지한다.
+- `PlacementFloor`, `RegistrationId`는 새 stable reflected 이름이다.
+- old/new Content 혼용 fallback을 만들지 않는다.
+
+즉시 삭제되는 property/default subobject는 deprecated shadow property로 한 cycle 유지하지 않는다. 따라서 Source 변경과 Content migration 사이의 중간 상태는 지원 대상이 아니며, 구현 단계에서는 삭제 symbol을 참조하는 Content 목록을 Unreal 인계 문서에 빠짐없이 남긴다. 기존 enum ordinal과 유지 대상으로 명시된 reflected 이름 외에는 요구 범위 밖 rename을 하지 않는다.
+
+구현 후 `.md/PROMPT_UNREAL.md`에 다음을 정확히 인계한다.
+
+- 모든 영향 Definition/Blueprint compile·resave와 stale preview/cell/NavModifier 제거 확인
+- footprint bottom local Z=0, PlacementFloor actual floor와 Project Settings Held/material 지정
+- body mesh Simple Collision/Nav relevance, helper Nav 비관련과 Recast `Dynamic`
+- locker instance ID 생성·고유성, unused preview Blueprint reference audit
+- PIE에서 모든 facility 높이/preview와 NavMesh 회수·복구·재배치 검증
+
+## 대상 Source
+
+- `Public|Private/Placement/FacilityPlacementSettings.*`, `FacilityPlacementDefinition.*`, `FacilityPlacementComponent.*`
+- `PlaceableFacilityItemActor.*`, `FacilityPlacementZoneActor.*`, `FacilityPlacementPreviewActor.*`
+- `PlayerFacilityPlacementComponent*`, `FacilityActorConversionTransaction.*`
+- `Public|Private/Facility/BathhouseFacilityActor*`, `BathhouseFacilitySubsystem.*`, `LockerCapacitySubsystem.*`, `BathhouseExpansionAuthority.*`
+- `Public|Private/Towel/TowelProcessingMachineActor.*`
+- `Private/Tests/FacilityPlacementAutomationTestProbe.*`, `FacilityPlacementAutomationTests.cpp`
+
+새 runtime module/plugin dependency는 추가하지 않는다.
+
+## Native Automation과 완료 조건
+
+- global Held location/rotation, authored scale 무시와 item Root scale 보존
+- scaled footprint→cell, grid 변경/non-multiple 실패와 38/40/50cm half-height 부양 회귀
+- Bounds Z와 footprint height에 독립적인 common floor transform/support trace
+- multi-mesh preview root-relative 복제, all-slot valid/invalid material과 실패 경로
+- stage/recovery/commit/rollback collision snapshot 및 기존 fault injection 무손실
+- helper nav validation, NavModifier 부재와 기존 zone/input/overlap/payload/recovery/key 회귀
+- Authority/locker order permutation, ID 정렬·중복, 1/4/8 bank fitting, log/publication once
+- Authority missing/late, pending duplicate와 capacity 이중 합산 없음
+- `git diff --check`, UE 5.8 `Build.bat BathhouseSimEditor Win64 Development`, 관련 Placement/Facility automation
+- 완료 후 현재 작업만 담은 `.md/PROMPT_REVIEW.md`, `.md/PROMPT_UNREAL.md`를 작성한다.
+- Content/PIE 미수행은 성공으로 보고하지 않고 Editor 검증으로 명시한다.

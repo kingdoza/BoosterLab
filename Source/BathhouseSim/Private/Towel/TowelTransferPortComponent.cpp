@@ -13,6 +13,7 @@ UTowelTransferPortComponent::UTowelTransferPortComponent()
 {
 	InitBoxExtent(FVector(30.0f));
 	SetCollisionProfileName(TEXT("BlockAllDynamic"));
+	SetCanEverAffectNavigation(false);
 }
 
 FPlayerInteractionQuery UTowelTransferPortComponent::QueryInteraction(const FPlayerInteractionContext& Context) const

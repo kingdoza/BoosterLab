@@ -128,7 +128,7 @@ void UPlayerFacilityPlacementComponent::HandleHeldObjectChanged(AActor* NewHeldO
 	PreviewFacility = Item;
 	AccumulatedYaw = 0.0f;
 	UFacilityPlacementDefinition* Definition = Item->GetDefinition();
-	if (!Definition || !Definition->PreviewActorClass || !GetWorld())
+	if (!Definition || !Definition->PlacedFacilityClass || !GetWorld())
 	{
 		SetPreviewFailure(
 			EFacilityPlacementFailureCode::InvalidDefinition,
@@ -136,10 +136,20 @@ void UPlayerFacilityPlacementComponent::HandleHeldObjectChanged(AActor* NewHeldO
 		return;
 	}
 	PreviewActor = GetWorld()->SpawnActor<AFacilityPlacementPreviewActor>(
-		Definition->PreviewActorClass,
+		AFacilityPlacementPreviewActor::StaticClass(),
 		Item->GetActorTransform());
 	if (AFacilityPlacementPreviewActor* SpawnedPreview = PreviewActor.Get())
 	{
+		FText PreviewFailure;
+		if (!SpawnedPreview->InitializeFromPlacedClass(Definition->PlacedFacilityClass, PreviewFailure))
+		{
+			SpawnedPreview->Destroy();
+			PreviewActor.Reset();
+			SetPreviewFailure(
+				EFacilityPlacementFailureCode::InvalidDefinition,
+				PreviewFailure.IsEmpty() ? LOCTEXT("PreviewInitializationFailed", "설비 배치 미리보기를 초기화하지 못했습니다.") : PreviewFailure);
+			return;
+		}
 		SpawnedPreview->SetActorEnableCollision(false);
 		SpawnedPreview->OnDestroyed.AddUniqueDynamic(this, &UPlayerFacilityPlacementComponent::HandlePreviewDestroyed);
 		RefreshPreview();

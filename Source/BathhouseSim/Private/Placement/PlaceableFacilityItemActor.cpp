@@ -4,6 +4,7 @@
 #include "Engine/StaticMesh.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Placement/FacilityPlacementDefinition.h"
+#include "Placement/FacilityPlacementSettings.h"
 #include "UObject/ConstructorHelpers.h"
 
 #define LOCTEXT_NAMESPACE "PlaceableFacilityItemActor"
@@ -92,9 +93,7 @@ FText APlaceableFacilityItemActor::GetPhysicalCarryDisplayName() const
 
 FTransform APlaceableFacilityItemActor::GetHeldTransform() const
 {
-	FTransform Result = HeldTransform;
-	Result.SetScale3D(FVector::OneVector);
-	return Result;
+	return GetDefault<UFacilityPlacementSettings>()->GetFacilityItemHeldTransform();
 }
 
 bool APlaceableFacilityItemActor::CanBeTakenBy(

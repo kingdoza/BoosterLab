@@ -7,6 +7,7 @@
 #include "Character/FirstPersonCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/ActorComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -29,6 +30,7 @@
 #include "Interaction/PlayerCarryComponent.h"
 #include "Interaction/PlayerInteractionComponent.h"
 #include "Misc/DataValidation.h"
+#include "Materials/Material.h"
 #include "PhysicsEngine/AggregateGeom.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "Placement/FacilityPlacementSettings.h"
@@ -65,6 +67,12 @@ bool FBathhouseFacilityPlacementMathTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Runtime rotation accessor clamps invalid config"), Settings->GetRotationStepDegrees(), 180.0f);
 	TestEqual(TEXT("Runtime hold accessor clamps invalid config"), Settings->GetRecoveryHoldSeconds(), 0.1f);
 	TestEqual(TEXT("Runtime recovery drop height clamps below the footprint floor"), Settings->GetRecoveryDropZOffsetCm(), 0.0f);
+	Settings->FacilityItemHeldTransform = FTransform(
+		FRotator(10.0f, 20.0f, 30.0f), FVector(1.0f, 2.0f, 3.0f), FVector(7.0f));
+	TestTrue(TEXT("Global facility held transform preserves location and rotation while normalizing scale"),
+		Settings->GetFacilityItemHeldTransform().GetLocation().Equals(FVector(1.0f, 2.0f, 3.0f))
+		&& Settings->GetFacilityItemHeldTransform().Rotator().Equals(FRotator(10.0f, 20.0f, 30.0f))
+		&& Settings->GetFacilityItemHeldTransform().GetScale3D().Equals(FVector::OneVector));
 
 	TestEqual(TEXT("Zone-local positive coordinates snap to the common grid"),
 		AFacilityPlacementZoneActor::QuantizeLocalCoordinate(24.0f, 10.0f), 20.0f);
@@ -140,12 +148,46 @@ bool FBathhouseFacilityPlacementMathTest::RunTest(const FString& Parameters)
 	UFacilityPlacementDefinition* ValidDefinition = NewObject<UFacilityPlacementDefinition>();
 	ValidDefinition->StableId = TEXT("DefinitionValidation");
 	ValidDefinition->FacilityTags.AddTag(PlacementTag);
-	ValidDefinition->PreviewActorClass = AFacilityPlacementPreviewActor::StaticClass();
 	ValidDefinition->PlacedFacilityClass = AFacilityPlacementAutomationActor::StaticClass();
 	ValidDefinition->RecoveryItemClass = APlaceableFacilityItemActor::StaticClass();
+	UFacilityPlacementSettings* GlobalSettings = GetMutableDefault<UFacilityPlacementSettings>();
+	const float SavedGridSize = GlobalSettings->GridSizeCm;
+	FIntPoint DerivedCells;
+	FText FootprintFailure;
+	GlobalSettings->GridSizeCm = 5.0f;
+	TestTrue(TEXT("Footprint full size derives two-by-two cells after a grid change"),
+		ValidDefinition->DeriveFootprintCells(DerivedCells, FootprintFailure)
+		&& DerivedCells == FIntPoint(2, 2));
+	GlobalSettings->GridSizeCm = 4.0f;
+	TestFalse(TEXT("Non-integral footprint-to-grid ratio fails closed"),
+		ValidDefinition->DeriveFootprintCells(DerivedCells, FootprintFailure));
+	GlobalSettings->GridSizeCm = SavedGridSize;
+	AFacilityPlacementAutomationActor* HeightFixture = NewObject<AFacilityPlacementAutomationActor>();
+	for (const float HalfHeight : { 38.0f, 40.0f, 50.0f })
+	{
+		HeightFixture->GetFacilityPlacementComponent()->GetPlacementFootprint()->SetBoxExtent(
+			FVector(5.0f, 5.0f, HalfHeight));
+		HeightFixture->GetFacilityPlacementComponent()->GetPlacementFootprint()->SetRelativeLocation(
+			FVector(0.0f, 0.0f, HalfHeight));
+		FTransform FinalTransform;
+		TestTrue(FString::Printf(TEXT("Half-height %.0f uses the common floor exactly once"), HalfHeight),
+			HeightFixture->GetFacilityPlacementComponent()->BuildPlacedActorTransform(
+				FTransform(FRotator::ZeroRotator, FVector(20.0f, 30.0f, 123.0f)),
+				FinalTransform,
+				FootprintFailure)
+			&& FMath::IsNearlyEqual(FinalTransform.GetLocation().Z, 123.0f));
+	}
 	FDataValidationContext DefinitionValidation;
 	TestEqual(TEXT("A complete facility definition normalizes base NotValidated to Valid"),
 		ValidDefinition->IsDataValid(DefinitionValidation), EDataValidationResult::Valid);
+	ValidDefinition->RecoveryItemClass = AFacilityPlacementItemAutomationActor::StaticClass();
+	FText DerivedItemFailure;
+	TestTrue(TEXT("A derived common facility item class passes runtime validation"),
+		ValidDefinition->ValidateRuntime(DerivedItemFailure));
+	FDataValidationContext DerivedItemValidation;
+	TestEqual(TEXT("A derived common facility item class passes Editor data validation"),
+		ValidDefinition->IsDataValid(DerivedItemValidation), EDataValidationResult::Valid);
+	ValidDefinition->RecoveryItemClass = APlaceableFacilityItemActor::StaticClass();
 
 	UFacilityPlacementDefinition* ExcludedStackDefinition = DuplicateObject<UFacilityPlacementDefinition>(
 		ValidDefinition, GetTransientPackage());
@@ -237,6 +279,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
+	UFacilityPlacementSettings* RuntimeSettings = GetMutableDefault<UFacilityPlacementSettings>();
+	const TSoftObjectPtr<UMaterialInterface> SavedValidPreviewMaterial = RuntimeSettings->ValidPreviewMaterial;
+	const TSoftObjectPtr<UMaterialInterface> SavedInvalidPreviewMaterial = RuntimeSettings->InvalidPreviewMaterial;
+	UMaterial* ValidPreviewMaterial = NewObject<UMaterial>();
+	UMaterial* InvalidPreviewMaterial = NewObject<UMaterial>();
+	ValidPreviewMaterial->BlendMode = BLEND_Translucent;
+	InvalidPreviewMaterial->BlendMode = BLEND_Translucent;
+	RuntimeSettings->ValidPreviewMaterial = ValidPreviewMaterial;
+	RuntimeSettings->InvalidPreviewMaterial = InvalidPreviewMaterial;
 	if (!GEngine)
 	{
 		AddError(TEXT("GEngine is required for the placement runtime test."));
@@ -283,12 +334,9 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 	{
 		Definition.StableId = StableId;
 		Definition.FacilityTags.AddTag(PlacementTag);
-		Definition.PreviewActorClass = AFacilityPlacementPreviewActor::StaticClass();
 		Definition.PlacedFacilityClass = PlacedClass;
 		Definition.RecoveryItemClass = APlaceableFacilityItemActor::StaticClass();
 		Definition.RecoveryItemMesh = nullptr;
-		Definition.FootprintCellsX = 1;
-		Definition.FootprintCellsY = 1;
 		Definition.LockerSlotCount = LockerSlotCount;
 	};
 
@@ -316,7 +364,7 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Complete Definition accepts the native Cube fallback"),
 		LockerDefinition->ValidateRuntime(FailureReason));
 	LockerDefinition->RecoveryItemClass = nullptr;
-	TestFalse(TEXT("Definition requires the exact common recovery item class"),
+	TestFalse(TEXT("Definition requires a common recovery item base or derived class"),
 		LockerDefinition->ValidateRuntime(FailureReason));
 	LockerDefinition->RecoveryItemClass = APlaceableFacilityItemActor::StaticClass();
 
@@ -394,7 +442,8 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 	RecoveryBlocker->Destroy();
 
 	UFacilityPlacementDefinition* ShowerDefinition = NewObject<UFacilityPlacementDefinition>();
-	ConfigureDefinition(*ShowerDefinition, TEXT("AutomationShower"), ABathhouseFacilityActor::StaticClass());
+	ConfigureDefinition(*ShowerDefinition, TEXT("AutomationShower"), AFacilityPlacementAutomationActor::StaticClass());
+	ShowerDefinition->RecoveryItemClass = AFacilityPlacementItemAutomationActor::StaticClass();
 	ABathhouseFacilityActor* ShowerSource = World->SpawnActorDeferred<ABathhouseFacilityActor>(
 		ABathhouseFacilityActor::StaticClass(), FTransform(FVector(6000.0f, 0.0f, 100.0f)));
 	ShowerSource->FacilityType = EBathhouseFacilityType::Shower;
@@ -416,6 +465,10 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 		World->RemoveFromRoot();
 		return false;
 	}
+	TestTrue(TEXT("Recovery spawns the configured derived facility item class"),
+		ShowerItem->IsA(AFacilityPlacementItemAutomationActor::StaticClass()));
+	TestTrue(TEXT("Recovery uses the derived facility item CDO scale"),
+		ShowerItem->GetActorScale3D().Equals(FVector(0.25f)));
 	const UBathhouseFacilityPlacementInstanceData* ShowerPayload =
 		Cast<UBathhouseFacilityPlacementInstanceData>(ShowerItem->GetPlacementPayload().InstanceData);
 	TestTrue(TEXT("Facility payload preserves authoritative values"), ShowerPayload
@@ -443,8 +496,12 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 	Carry->RegisterComponent();
 	const FVector ItemScale(0.5f, 0.75f, 1.25f);
 	ShowerItem->SetActorScale3D(ItemScale);
-	ShowerItem->HeldTransform = FTransform(FRotator(0.0f, 20.0f, 0.0f), FVector(12.0f, 3.0f, -8.0f), FVector(4.0f));
+	UFacilityPlacementSettings* MutablePlacementSettings = GetMutableDefault<UFacilityPlacementSettings>();
+	const FTransform SavedGlobalHeldTransform = MutablePlacementSettings->FacilityItemHeldTransform;
+	MutablePlacementSettings->FacilityItemHeldTransform = FTransform(
+		FRotator(0.0f, 20.0f, 0.0f), FVector(12.0f, 3.0f, -8.0f), FVector(4.0f));
 	TestTrue(TEXT("Authored HeldTransform scale is ignored"), ShowerItem->GetHeldTransform().GetScale3D().Equals(FVector::OneVector));
+	MutablePlacementSettings->FacilityItemHeldTransform = SavedGlobalHeldTransform;
 	TestTrue(TEXT("Facility item supports FreeDrop only"),
 		ShowerItem->GetPhysicalCarryCapabilities() == EPhysicalCarryCapability::FreeDrop);
 	FPlayerInteractionContext TakeContext;
@@ -581,6 +638,115 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 	TestTrue(FString::Printf(TEXT("Held item produces valid placement preview: %s"),
 		*PlacementInput->CurrentPlacementQuery.FailureReason.ToString()),
 		PlacementInput->CurrentPlacementQuery.bSucceeded);
+	if (AFacilityPlacementPreviewActor* LivePreview = PlacementInput->PreviewActor.Get())
+	{
+		const TArray<TObjectPtr<UStaticMeshComponent>> InitialMeshes = LivePreview->GetPreviewMeshes();
+		TestEqual(TEXT("Native preview clones both eligible Static Mesh components"), InitialMeshes.Num(), 2);
+		const UStaticMeshComponent* NestedPreviewMesh = nullptr;
+		for (const UStaticMeshComponent* Mesh : InitialMeshes)
+		{
+			if (Mesh && Mesh->GetName().Contains(TEXT("AutomationPreviewBodySecondary")))
+			{
+				NestedPreviewMesh = Mesh;
+				break;
+			}
+		}
+		TestTrue(FString::Printf(TEXT("Nested preview mesh preserves its Actor-root-relative transform; actual=%s"),
+			*(NestedPreviewMesh ? NestedPreviewMesh->GetRelativeLocation().ToString() : FString(TEXT("missing")))),
+			NestedPreviewMesh
+			&& NestedPreviewMesh->GetRelativeLocation().Equals(FVector(20.0f, 0.0f, 0.0f), 0.01f));
+		LivePreview->SetPlacementValidity(false, FText::GetEmpty());
+		TestTrue(TEXT("Preview invalidity swaps every slot without recreating components"),
+			LivePreview->GetPreviewMeshes() == InitialMeshes
+			&& !LivePreview->GetPreviewMeshes().ContainsByPredicate([InvalidPreviewMaterial](const UStaticMeshComponent* Mesh)
+			{
+				if (!Mesh || Mesh->GetNumMaterials() <= 0)
+				{
+					return true;
+				}
+				for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+				{
+					if (Mesh->GetMaterial(Slot) != InvalidPreviewMaterial)
+					{
+						return true;
+					}
+				}
+				return false;
+			}));
+		LivePreview->SetPlacementValidity(true, FText::GetEmpty());
+
+		AFacilityPlacementAutomationActor* PreviewCDO =
+			AFacilityPlacementAutomationActor::StaticClass()
+				->GetDefaultObject<AFacilityPlacementAutomationActor>();
+		UBoxComponent* PreviewFootprint = PreviewCDO
+			? PreviewCDO->GetFacilityPlacementComponent()->GetPlacementFootprint() : nullptr;
+		if (PreviewFootprint)
+		{
+			const FVector SavedFootprintExtent = PreviewFootprint->GetUnscaledBoxExtent();
+			PreviewFootprint->SetBoxExtent(SavedFootprintExtent + FVector(1.0f, 0.0f, 0.0f));
+			FText GeometryFailure;
+			TestFalse(TEXT("Preview geometry snapshot rejects a changed authoritative CDO footprint"),
+				LivePreview->ValidateSourceGeometry(
+					AFacilityPlacementAutomationActor::StaticClass(), GeometryFailure));
+			PreviewFootprint->SetBoxExtent(SavedFootprintExtent);
+			GeometryFailure = FText::GetEmpty();
+			TestTrue(TEXT("Preview geometry snapshot accepts the restored authoritative CDO footprint"),
+				LivePreview->ValidateSourceGeometry(
+					AFacilityPlacementAutomationActor::StaticClass(), GeometryFailure));
+		}
+	}
+
+	const TCHAR* BlueprintPreviewClasses[] =
+	{
+		TEXT("/Game/Bathhouse/Blueprints/Facility/BP_Bath.BP_Bath_C"),
+		TEXT("/Game/Bathhouse/Blueprints/Facility/BP_Shower.BP_Shower_C"),
+		TEXT("/Game/Bathhouse/Blueprints/Facility/BP_ClothesLocker.BP_ClothesLocker_C"),
+		TEXT("/Game/Bathhouse/Blueprints/Facility/BP_ClothesLocker_4.BP_ClothesLocker_4_C"),
+		TEXT("/Game/Bathhouse/Blueprints/Facility/BP_ClothesLocker_8.BP_ClothesLocker_8_C"),
+		TEXT("/Game/Bathhouse/Blueprints/Towel/BP_Washer.BP_Washer_C"),
+		TEXT("/Game/Bathhouse/Blueprints/Towel/BP_Dryer.BP_Dryer_C")
+	};
+	for (const TCHAR* ClassPath : BlueprintPreviewClasses)
+	{
+		UClass* BlueprintClass = LoadObject<UClass>(nullptr, ClassPath);
+		TestNotNull(FString::Printf(TEXT("Blueprint preview class loads through the cooked class-default path: %s"), ClassPath),
+			BlueprintClass);
+		if (!BlueprintClass)
+		{
+			continue;
+		}
+		AFacilityPlacementPreviewActor* BlueprintPreview =
+			World->SpawnActor<AFacilityPlacementPreviewActor>();
+		FText BlueprintPreviewFailure;
+		const bool bInitialized = BlueprintPreview
+			&& BlueprintPreview->InitializeFromPlacedClass(BlueprintClass, BlueprintPreviewFailure);
+		TestTrue(FString::Printf(TEXT("Blueprint SCS preview initializes without spawning its gameplay Actor: %s (%s)"),
+			ClassPath, *BlueprintPreviewFailure.ToString()), bInitialized);
+		if (bInitialized)
+		{
+			TestTrue(TEXT("Blueprint SCS preview contains at least one eligible body mesh"),
+				!BlueprintPreview->GetPreviewMeshes().IsEmpty());
+			for (const UStaticMeshComponent* Mesh : BlueprintPreview->GetPreviewMeshes())
+			{
+				const FString MeshName = Mesh ? Mesh->GetName().ToLower() : FString();
+				const bool bExcludedHelper = MeshName.Contains(TEXT("footprint"))
+					|| MeshName.Contains(TEXT("helper")) || MeshName.Contains(TEXT("slot"))
+					|| MeshName.Contains(TEXT("pile")) || MeshName.Contains(TEXT("water"))
+					|| MeshName.Contains(TEXT("contents"));
+				bool bAllSlotsReplaced = Mesh && Mesh->GetNumMaterials() > 0;
+				for (int32 Slot = 0; Mesh && Slot < Mesh->GetNumMaterials(); ++Slot)
+				{
+					bAllSlotsReplaced &= Mesh->GetMaterial(Slot) == InvalidPreviewMaterial;
+				}
+				TestFalse(TEXT("Blueprint SCS preview excludes helper presentation meshes"), bExcludedHelper);
+				TestTrue(TEXT("Blueprint SCS preview replaces every material slot"), bAllSlotsReplaced);
+			}
+		}
+		if (BlueprintPreview)
+		{
+			BlueprintPreview->Destroy();
+		}
+	}
 
 	const TWeakObjectPtr<AFacilityPlacementPreviewActor> PreviewBeforeFailure = PlacementInput->PreviewActor;
 	const FTransform ItemTransformBeforeFailure = ShowerItem->GetActorTransform();
@@ -597,7 +763,7 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 		&& !ShowerItem->GetItemRoot()->IsSimulatingPhysics());
 	TestTrue(TEXT("Failed placement preserves preview"),
 		PreviewBeforeFailure.IsValid() && PlacementInput->PreviewActor == PreviewBeforeFailure);
-	ShowerDefinition->PlacedFacilityClass = ABathhouseFacilityActor::StaticClass();
+	ShowerDefinition->PlacedFacilityClass = AFacilityPlacementAutomationActor::StaticClass();
 	PlacementInput->RefreshPreview();
 
 	int32 PlacementNotifications = 0;
@@ -679,7 +845,9 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 	Machine->FacilityPlacement->Definition = MachineDefinition;
 	Machine->FinishSpawning(FTransform(FVector(9000.0f, 0.0f, 100.0f)));
 	if (!Machine->HasActorBegunPlay()) Machine->DispatchBeginPlay();
-	TestTrue(TEXT("Empty waiting machine passes recovery gate"), Machine->QueryFacilityRecovery().bSucceeded);
+	const FFacilityPlacementTransactionResult MachineRecoveryQuery = Machine->QueryFacilityRecovery();
+	TestTrue(FString::Printf(TEXT("Empty waiting machine passes recovery gate: %s"),
+		*MachineRecoveryQuery.FailureReason.ToString()), MachineRecoveryQuery.bSucceeded);
 	Machine->Inventory->Count = 1;
 	TestFalse(TEXT("Machine inventory blocks recovery"), Machine->QueryFacilityRecovery().bSucceeded);
 	Machine->Inventory->Count = 0;
@@ -702,6 +870,8 @@ bool FBathhouseFacilityPlacementRuntimeTest::RunTest(const FString& Parameters)
 	World->DestroyWorld(false);
 	GEngine->DestroyWorldContext(World);
 	World->RemoveFromRoot();
+	RuntimeSettings->ValidPreviewMaterial = SavedValidPreviewMaterial;
+	RuntimeSettings->InvalidPreviewMaterial = SavedInvalidPreviewMaterial;
 	return true;
 }
 
@@ -747,11 +917,10 @@ bool FBathhouseFacilityConversionSafetyTest::RunTest(const FString& Parameters)
 	{
 		Definition.StableId = StableId;
 		Definition.FacilityTags.AddTag(PlacementTag);
-		Definition.PreviewActorClass = AFacilityPlacementPreviewActor::StaticClass();
 		Definition.PlacedFacilityClass = PlacedClass;
 		Definition.RecoveryItemClass = APlaceableFacilityItemActor::StaticClass();
-		Definition.FootprintCellsX = CellsX;
-		Definition.FootprintCellsY = CellsY;
+		(void)CellsX;
+		(void)CellsY;
 		Definition.LockerSlotCount = LockerSlots;
 	};
 
@@ -761,7 +930,7 @@ bool FBathhouseFacilityConversionSafetyTest::RunTest(const FString& Parameters)
 	{
 		AFacilityPlacementAutomationActor* Actor =
 			World->SpawnActorDeferred<AFacilityPlacementAutomationActor>(
-				AFacilityPlacementAutomationActor::StaticClass(),
+				Definition.PlacedFacilityClass,
 				FTransform(Location));
 		Actor->ConfigureForTest(Definition, Type);
 		Actor->FinishSpawning(FTransform(Location));
@@ -775,6 +944,16 @@ bool FBathhouseFacilityConversionSafetyTest::RunTest(const FString& Parameters)
 		for (TActorIterator<APlaceableFacilityItemActor> It(World); It; ++It)
 		{
 			Count += IsValid(*It) ? 1 : 0;
+		}
+		return Count;
+	};
+	auto CountPlacedActorsForDefinition = [&](const UFacilityPlacementDefinition* ExpectedDefinition)
+	{
+		int32 Count = 0;
+		for (TActorIterator<AFacilityPlacementAutomationActor> It(World); It; ++It)
+		{
+			Count += IsValid(*It)
+				&& It->GetFacilityPlacementComponent()->GetDefinition() == ExpectedDefinition ? 1 : 0;
 		}
 		return Count;
 	};
@@ -870,6 +1049,8 @@ bool FBathhouseFacilityConversionSafetyTest::RunTest(const FString& Parameters)
 	const FPlacementFaultCase PlacementFaults[] =
 	{
 		{ FFacilityActorConversionTransaction::ETestFault::PlacementSpawn, TEXT("spawn") },
+		{ FFacilityActorConversionTransaction::ETestFault::PlacementCollisionSnapshotDuplicate, TEXT("duplicate collision snapshot") },
+		{ FFacilityActorConversionTransaction::ETestFault::PlacementCollisionSnapshotMissing, TEXT("missing collision snapshot") },
 		{ FFacilityActorConversionTransaction::ETestFault::PlacementImport, TEXT("import") },
 		{ FFacilityActorConversionTransaction::ETestFault::PlacementDomainRegistration, TEXT("domain registration") },
 		{ FFacilityActorConversionTransaction::ETestFault::PlacementCarryCommit, TEXT("carry commit") }
@@ -894,11 +1075,54 @@ bool FBathhouseFacilityConversionSafetyTest::RunTest(const FString& Parameters)
 			&& PlacementItem->GetItemRoot()->GetCollisionEnabled() == HeldCollisionBefore
 			&& PlacementItem->GetItemRoot()->IsSimulatingPhysics() == bHeldPhysicsBefore
 			&& PlacementItem->GetItemRoot()->BodyInstance.bUseCCD == bHeldCCDBefore);
+		TestEqual(FString::Printf(TEXT("Injected placement %s failure leaves no staged facility"), FaultCase.Name),
+			CountPlacedActorsForDefinition(Definition), 0);
 	}
 	FFacilityActorConversionTransaction::ClearTestFault();
 	TestTrue(TEXT("Fault fixture can recover its held item through the carry owner"),
 		Carry->RecoverHeldPhysicalObject(PlacementItem));
 	PlacementItem->Destroy();
+
+	UFacilityPlacementDefinition* ConstructionCollisionDefinition =
+		NewObject<UFacilityPlacementDefinition>();
+	ConfigureDefinition(
+		*ConstructionCollisionDefinition,
+		TEXT("ConstructionCollisionAutomation"),
+		AFacilityPlacementConstructionCollisionAutomationActor::StaticClass());
+	AFacilityPlacementAutomationActor* ConstructionSource = SpawnFacility(
+		*ConstructionCollisionDefinition,
+		FVector(11000.0f, 0.0f, 100.0f));
+	TestTrue(TEXT("Construction collision fixture enables Actor collision after FinishSpawning"),
+		ConstructionSource && ConstructionSource->GetActorEnableCollision());
+	FailureReason = FText::GetEmpty();
+	APlaceableFacilityItemActor* ConstructionItem = ConstructionSource
+		? FFacilityActorConversionTransaction::RecoverFacilityToItem(*ConstructionSource, FailureReason)
+		: nullptr;
+	TestNotNull(FString::Printf(TEXT("Construction collision fixture recovers an item: %s"),
+		*FailureReason.ToString()), ConstructionItem);
+	if (ConstructionItem && Carry->TryTakePhysicalObject(ConstructionItem, FailureReason))
+	{
+		AActor* RebuiltConstructionActor = FFacilityActorConversionTransaction::PlaceItemAsFacility(
+			*ConstructionItem,
+			FTransform(FRotator::ZeroRotator, FVector(11500.0f, 0.0f, 100.0f)),
+			*Zone,
+			*Carry,
+			FailureReason);
+		TestTrue(FString::Printf(TEXT("Placement restores the post-Construction authored collision value: %s"),
+			*FailureReason.ToString()),
+			RebuiltConstructionActor && RebuiltConstructionActor->GetActorEnableCollision());
+		if (RebuiltConstructionActor)
+		{
+			TestFalse(TEXT("Successful placement consumes the collision snapshot"),
+				CastChecked<IPlaceableFacility>(RebuiltConstructionActor)
+					->GetFacilityPlacementComponent()->HasActorCollisionSnapshot());
+			RebuiltConstructionActor->Destroy();
+		}
+	}
+	else
+	{
+		AddError(TEXT("Construction collision fixture could not hold its recovered item."));
+	}
 
 	FTransform ScaledSourceTransform(FRotator::ZeroRotator, FVector(12000.0f, 0.0f, 100.0f));
 	ScaledSourceTransform.SetScale3D(FVector(3.0f, 0.5f, 2.0f));
@@ -975,7 +1199,7 @@ bool FBathhouseFacilityConversionSafetyTest::RunTest(const FString& Parameters)
 			CDOPlacementTransform.GetScale3D().Equals(ScaleActorDefaultScale));
 		AActor* PlacedScaleActor = FFacilityActorConversionTransaction::PlaceItemAsFacility(
 			*ScaleItem,
-			RequestedPlacementTransform,
+			CDOPlacementTransform,
 			*Zone,
 			*Carry,
 			FailureReason);
@@ -993,6 +1217,22 @@ bool FBathhouseFacilityConversionSafetyTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("CDO-derived candidate matches the deferred-spawn Actor transform"),
 			TypedPlacedScale
 			&& TypedPlacedScale->GetActorTransform().Equals(CDOPlacementTransform));
+		const UBoxComponent* PlacedFootprint = TypedPlacedScale
+			? TypedPlacedScale->GetFacilityPlacementComponent()->GetPlacementFootprint()
+			: nullptr;
+		const FVector PlacedBottomCenter = PlacedFootprint
+			? PlacedFootprint->GetComponentTransform().TransformPosition(
+				FVector(0.0f, 0.0f, -PlacedFootprint->GetUnscaledBoxExtent().Z))
+			: FVector::ZeroVector;
+		TestTrue(FString::Printf(
+			TEXT("Deferred-spawn footprint keeps the final candidate floor height; actual=%.3f expected=%.3f"),
+			PlacedBottomCenter.Z,
+			RequestedPlacementTransform.GetLocation().Z),
+			PlacedFootprint
+			&& FMath::IsNearlyEqual(
+				PlacedBottomCenter.Z,
+				RequestedPlacementTransform.GetLocation().Z,
+				0.1f));
 		TestTrue(FString::Printf(TEXT("Placement uses target CDO footprint; actual=%s"),
 			*PlacedFootprintExtent.ToString()),
 			TypedPlacedScale
@@ -1097,6 +1337,270 @@ bool FBathhouseFacilityConversionSafetyTest::RunTest(const FString& Parameters)
 	World->DestroyWorld(false);
 	GEngine->DestroyWorldContext(World);
 	World->RemoveFromRoot();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FBathhouseFacilityStartupReconciliationTest,
+	"BathhouseSim.Placement.StartupLockerReconciliation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBathhouseFacilityStartupReconciliationTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	AddExpectedError(
+		TEXT("was rejected permanently"),
+		EAutomationExpectedErrorFlags::Contains,
+		4);
+	const FGameplayTag PlacementTag = FGameplayTag::RequestGameplayTag(TEXT("Facility.Placeable"));
+	auto MakeDefinition = [&](const TCHAR* Name, const int32 Slots)
+	{
+		UFacilityPlacementDefinition* Definition = NewObject<UFacilityPlacementDefinition>();
+		Definition->StableId = Name;
+		Definition->FacilityTags.AddTag(PlacementTag);
+		Definition->PlacedFacilityClass = AFacilityPlacementLockerAutomationActor::StaticClass();
+		Definition->RecoveryItemClass = APlaceableFacilityItemActor::StaticClass();
+		Definition->LockerSlotCount = Slots;
+		return Definition;
+	};
+	auto CreateWorld = [&](const TCHAR* BaseName, FWorldContext*& OutContext)
+	{
+		const FName WorldName = MakeUniqueObjectName(nullptr, UWorld::StaticClass(), BaseName);
+		OutContext = &GEngine->CreateNewWorldContext(EWorldType::Game);
+		UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, WorldName, GetTransientPackage());
+		World->AddToRoot();
+		OutContext->SetCurrentWorld(World);
+		return World;
+	};
+	auto SpawnStartupLocker = [&](UWorld& World, UFacilityPlacementDefinition& Definition,
+		const FGuid& Id, const int32 Slots, const FVector& Location)
+	{
+		AFacilityPlacementLockerAutomationActor* Locker =
+			World.SpawnActorDeferred<AFacilityPlacementLockerAutomationActor>(
+				AFacilityPlacementLockerAutomationActor::StaticClass(), FTransform(Location));
+		Locker->ConfigureStartupForTest(Definition, Id, Slots);
+		Locker->FinishSpawning(FTransform(Location));
+		return Locker;
+	};
+	auto SpawnAuthority = [&](UWorld& World, UBathhouseExpansionDefinition& Expansion)
+	{
+		AFacilityPlacementExpansionAutomationAuthority* Authority =
+			World.SpawnActorDeferred<AFacilityPlacementExpansionAutomationAuthority>(
+				AFacilityPlacementExpansionAutomationAuthority::StaticClass(), FTransform::Identity);
+		Authority->ConfigureForTest(Expansion);
+		Authority->FinishSpawning(FTransform::Identity);
+		return Authority;
+	};
+	auto CleanupWorld = [](UWorld* World, FWorldContext* Context)
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		World->RemoveFromRoot();
+		(void)Context;
+	};
+
+	FWorldContext* Context = nullptr;
+	UWorld* World = CreateWorld(TEXT("StartupLockerOrderingWorld"), Context);
+	UBathhouseExpansionDefinition* Expansion = NewObject<UBathhouseExpansionDefinition>();
+	Expansion->Tiers = { { 5, 5 } };
+	AFacilityPlacementExpansionAutomationAuthority* StartupAuthority = SpawnAuthority(*World, *Expansion);
+	UFacilityPlacementDefinition* FourSlotDefinition = MakeDefinition(TEXT("StartupFour"), 4);
+	UFacilityPlacementDefinition* EightSlotDefinition = MakeDefinition(TEXT("StartupEight"), 8);
+	UFacilityPlacementDefinition* OneSlotDefinition = MakeDefinition(TEXT("StartupOne"), 1);
+	#if WITH_EDITOR
+	AFacilityPlacementLockerAutomationActor* DuplicateModeFixture =
+		NewObject<AFacilityPlacementLockerAutomationActor>();
+	const FGuid SerializedId(0, 0, 9, 1);
+	DuplicateModeFixture->ConfigureStartupForTest(*OneSlotDefinition, SerializedId, 1);
+	DuplicateModeFixture->PostDuplicate(EDuplicateMode::PIE);
+	TestEqual(TEXT("PIE duplication preserves the serialized locker RegistrationId"),
+		DuplicateModeFixture->GetRegistrationId(), SerializedId);
+	DuplicateModeFixture->PostDuplicate(EDuplicateMode::Normal);
+	const FGuid NormalDuplicateId = DuplicateModeFixture->GetRegistrationId();
+	TestTrue(TEXT("Normal Editor duplication generates a distinct locker RegistrationId"),
+		NormalDuplicateId.IsValid() && NormalDuplicateId != SerializedId);
+	DuplicateModeFixture->PostEditImport();
+	TestTrue(TEXT("Editor import generates another distinct locker RegistrationId"),
+		DuplicateModeFixture->GetRegistrationId().IsValid()
+		&& DuplicateModeFixture->GetRegistrationId() != NormalDuplicateId);
+	#endif
+	AFacilityPlacementLockerAutomationActor* FourSlot = SpawnStartupLocker(
+		*World, *FourSlotDefinition, FGuid(0, 0, 0, 1), 4, FVector(100.0f, 0.0f, 0.0f));
+	AFacilityPlacementLockerAutomationActor* EightSlot = SpawnStartupLocker(
+		*World, *EightSlotDefinition, FGuid(0, 0, 0, 2), 8, FVector(200.0f, 0.0f, 0.0f));
+	AFacilityPlacementLockerAutomationActor* OneSlot = SpawnStartupLocker(
+		*World, *OneSlotDefinition, FGuid(0, 0, 0, 3), 1, FVector(300.0f, 0.0f, 0.0f));
+	UFacilityPlacementDefinition* DuplicateDefinitionA = MakeDefinition(TEXT("StartupDuplicateA"), 1);
+	UFacilityPlacementDefinition* DuplicateDefinitionB = MakeDefinition(TEXT("StartupDuplicateB"), 1);
+	AFacilityPlacementLockerAutomationActor* DuplicateA = SpawnStartupLocker(
+		*World, *DuplicateDefinitionA, FGuid(0, 0, 0, 4), 1, FVector(400.0f, 0.0f, 0.0f));
+	AFacilityPlacementLockerAutomationActor* DuplicateB = SpawnStartupLocker(
+		*World, *DuplicateDefinitionB, FGuid(0, 0, 0, 4), 1, FVector(500.0f, 0.0f, 0.0f));
+	ULockerCapacitySubsystem* Lockers = World->GetSubsystem<ULockerCapacitySubsystem>();
+	UBathhouseFacilitySubsystem* Facilities = World->GetSubsystem<UBathhouseFacilitySubsystem>();
+	UFacilityPlacementEventAutomationProbe* Probe = NewObject<UFacilityPlacementEventAutomationProbe>();
+	Probe->Bind(nullptr, Lockers);
+	int32 FacilityPublications = 0;
+	const FDelegateHandle FacilityHandle = Facilities->OnFacilityAvailabilityChanged.AddLambda(
+		[&](const EBathhouseFacilityType Type)
+		{
+			FacilityPublications += Type == EBathhouseFacilityType::ClothesLocker ? 1 : 0;
+		});
+	Facilities->SubmitStartupLocker(FourSlot);
+	Facilities->SubmitStartupLocker(FourSlot);
+	World->InitializeActorsForPlay(FURL());
+	for (AActor* StartupActor : { static_cast<AActor*>(StartupAuthority), static_cast<AActor*>(FourSlot),
+		static_cast<AActor*>(EightSlot), static_cast<AActor*>(OneSlot),
+		static_cast<AActor*>(DuplicateA), static_cast<AActor*>(DuplicateB) })
+	{
+		if (StartupActor && !StartupActor->HasActorBegunPlay())
+		{
+			StartupActor->DispatchBeginPlay();
+		}
+	}
+	World->BeginPlay();
+	TestEqual(TEXT("ID-sorted 4/8/1 banks skip the oversized bank and accept fitting banks"),
+		Lockers->GetInstalledLockerCapacity(), 5);
+	TestTrue(TEXT("Accepted startup lockers restore authored collision and activate their domain"),
+		FourSlot->GetActorEnableCollision() && OneSlot->GetActorEnableCollision()
+		&& FourSlot->GetFacilityPlacementComponent()->IsPlacedDomainActive()
+		&& OneSlot->GetFacilityPlacementComponent()->IsPlacedDomainActive());
+	TestTrue(TEXT("Oversized and duplicate-ID startup lockers remain fail-closed"),
+		!EightSlot->GetActorEnableCollision() && !DuplicateA->GetActorEnableCollision()
+		&& !DuplicateB->GetActorEnableCollision()
+		&& !EightSlot->GetFacilityPlacementComponent()->IsPlacedDomainActive());
+	TestEqual(TEXT("Startup reconciliation publishes facility availability once"), FacilityPublications, 1);
+	TestEqual(TEXT("Startup reconciliation publishes capacity once"), Probe->CapacityChangeCount, 1);
+	Facilities->SubmitStartupLocker(FourSlot);
+	TestEqual(TEXT("Accepted startup locker resubmission is a complete capacity no-op"),
+		Lockers->GetInstalledLockerCapacity(), 5);
+	TestEqual(TEXT("Accepted startup locker resubmission does not publish a second batch"),
+		FacilityPublications, 1);
+	AFacilityPlacementLockerAutomationActor* AcceptedIdDuplicate = SpawnStartupLocker(
+		*World, *OneSlotDefinition, FourSlot->GetRegistrationId(), 1, FVector(600.0f, 0.0f, 0.0f));
+	if (!AcceptedIdDuplicate->HasActorBegunPlay())
+	{
+		AcceptedIdDuplicate->DispatchBeginPlay();
+	}
+	TestFalse(TEXT("A different startup locker cannot reuse an accepted RegistrationId"),
+		AcceptedIdDuplicate->GetActorEnableCollision()
+		|| AcceptedIdDuplicate->GetFacilityPlacementComponent()->IsPlacedDomainActive());
+	TestEqual(TEXT("Accepted-ID duplicate leaves installed capacity unchanged"),
+		Lockers->GetInstalledLockerCapacity(), 5);
+	Facilities->OnFacilityAvailabilityChanged.Remove(FacilityHandle);
+	Probe->Unbind();
+	CleanupWorld(World, Context);
+
+	FWorldContext* LateContext = nullptr;
+	UWorld* LateWorld = CreateWorld(TEXT("StartupLockerLateAuthorityWorld"), LateContext);
+	UFacilityPlacementDefinition* LateDefinition = MakeDefinition(TEXT("StartupLateAuthority"), 1);
+	AFacilityPlacementLockerAutomationActor* LateLocker = SpawnStartupLocker(
+		*LateWorld, *LateDefinition, FGuid(0, 0, 1, 1), 1, FVector::ZeroVector);
+	ULockerCapacitySubsystem* LateLockers = LateWorld->GetSubsystem<ULockerCapacitySubsystem>();
+	LateWorld->InitializeActorsForPlay(FURL());
+	if (!LateLocker->HasActorBegunPlay())
+	{
+		LateLocker->DispatchBeginPlay();
+	}
+	LateWorld->BeginPlay();
+	TestEqual(TEXT("Authority-not-ready keeps the startup locker pending without capacity"),
+		LateLockers->GetInstalledLockerCapacity(), 0);
+	TestFalse(TEXT("Pending startup locker keeps collision disabled"), LateLocker->GetActorEnableCollision());
+	UBathhouseExpansionDefinition* LateExpansion = NewObject<UBathhouseExpansionDefinition>();
+	LateExpansion->Tiers = { { 1, 1 } };
+	AFacilityPlacementExpansionAutomationAuthority* LateAuthority = SpawnAuthority(*LateWorld, *LateExpansion);
+	if (!LateAuthority->HasActorBegunPlay())
+	{
+		LateAuthority->DispatchBeginPlay();
+	}
+	TestEqual(TEXT("Late authority reconciles the pending locker exactly once"),
+		LateLockers->GetInstalledLockerCapacity(), 1);
+	TestTrue(TEXT("Late-authority success restores collision and placed domain"),
+		LateLocker->GetActorEnableCollision()
+		&& LateLocker->GetFacilityPlacementComponent()->IsPlacedDomainActive());
+	FText DuplicateFailure;
+	TestEqual(TEXT("Typed registration reports AlreadyRegistered without double counting"),
+		LateLockers->RegisterLockerBankTyped(
+			LateLocker,
+			TArray<ULockerActionSlotComponent*>(),
+			1,
+			DuplicateFailure,
+			false),
+		ELockerBankRegistrationResult::AlreadyRegistered);
+	TestEqual(TEXT("AlreadyRegistered leaves capacity unchanged"), LateLockers->GetInstalledLockerCapacity(), 1);
+	CleanupWorld(LateWorld, LateContext);
+
+	FWorldContext* ReentrantContext = nullptr;
+	UWorld* ReentrantWorld = CreateWorld(TEXT("StartupLockerReentrantWorld"), ReentrantContext);
+	UBathhouseExpansionDefinition* ReentrantExpansion = NewObject<UBathhouseExpansionDefinition>();
+	ReentrantExpansion->Tiers = { { 3, 3 } };
+	AFacilityPlacementExpansionAutomationAuthority* ReentrantAuthority =
+		SpawnAuthority(*ReentrantWorld, *ReentrantExpansion);
+	UFacilityPlacementDefinition* ReentrantDefinition = MakeDefinition(TEXT("StartupReentrant"), 1);
+	AFacilityPlacementLockerAutomationActor* FirstReentrantLocker = SpawnStartupLocker(
+		*ReentrantWorld, *ReentrantDefinition, FGuid(0, 0, 2, 1), 1, FVector::ZeroVector);
+	UBathhouseFacilitySubsystem* ReentrantFacilities =
+		ReentrantWorld->GetSubsystem<UBathhouseFacilitySubsystem>();
+	ULockerCapacitySubsystem* ReentrantLockers =
+		ReentrantWorld->GetSubsystem<ULockerCapacitySubsystem>();
+	UFacilityPlacementEventAutomationProbe* ReentrantProbe =
+		NewObject<UFacilityPlacementEventAutomationProbe>();
+	ReentrantProbe->Bind(nullptr, ReentrantLockers);
+	int32 ReentrantFacilityPublications = 0;
+	AFacilityPlacementLockerAutomationActor* CallbackLocker = nullptr;
+	const FDelegateHandle ReentrantHandle =
+		ReentrantFacilities->OnFacilityAvailabilityChanged.AddLambda(
+			[&](const EBathhouseFacilityType Type)
+			{
+				if (Type != EBathhouseFacilityType::ClothesLocker)
+				{
+					return;
+				}
+				++ReentrantFacilityPublications;
+				if (ReentrantFacilityPublications != 1)
+				{
+					return;
+				}
+				ReentrantFacilities->SubmitStartupLocker(FirstReentrantLocker);
+				CallbackLocker = SpawnStartupLocker(
+					*ReentrantWorld,
+					*ReentrantDefinition,
+					FGuid(0, 0, 2, 2),
+					1,
+					FVector(100.0f, 0.0f, 0.0f));
+				if (!CallbackLocker->HasActorBegunPlay())
+				{
+					CallbackLocker->DispatchBeginPlay();
+				}
+				ReentrantFacilities->UnregisterExpansionAuthority(ReentrantAuthority);
+				FText AuthorityFailure;
+				TestTrue(TEXT("Authority can be restored during startup publication"),
+					ReentrantFacilities->RegisterExpansionAuthority(
+						ReentrantAuthority, AuthorityFailure));
+			});
+	ReentrantWorld->InitializeActorsForPlay(FURL());
+	for (AActor* StartupActor : {
+		static_cast<AActor*>(ReentrantAuthority),
+		static_cast<AActor*>(FirstReentrantLocker) })
+	{
+		if (StartupActor && !StartupActor->HasActorBegunPlay())
+		{
+			StartupActor->DispatchBeginPlay();
+		}
+	}
+	ReentrantWorld->BeginPlay();
+	TestEqual(TEXT("Publication callback submission is reconciled by an immediate tail pass"),
+		ReentrantLockers->GetInstalledLockerCapacity(), 2);
+	TestTrue(TEXT("Callback-submitted startup locker reaches its final active collision state"),
+		CallbackLocker && CallbackLocker->GetActorEnableCollision()
+		&& CallbackLocker->GetFacilityPlacementComponent()->IsPlacedDomainActive());
+	TestEqual(TEXT("Reentrant startup work publishes exactly one event per accepted batch"),
+		ReentrantFacilityPublications, 2);
+	TestEqual(TEXT("Reentrant startup capacity publishes exactly once per accepted batch"),
+		ReentrantProbe->CapacityChangeCount, 2);
+	ReentrantFacilities->OnFacilityAvailabilityChanged.Remove(ReentrantHandle);
+	ReentrantProbe->Unbind();
+	CleanupWorld(ReentrantWorld, ReentrantContext);
 	return true;
 }
 

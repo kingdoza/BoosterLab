@@ -5,6 +5,7 @@
 #include "Facility/BathhouseExpansionAuthority.h"
 #include "Facility/LockerActionSlotComponent.h"
 #include "Placement/FacilityPlacementPayload.h"
+#include "Placement/PlaceableFacilityItemActor.h"
 #include "Placement/FacilityPlacementZoneActor.h"
 #include "FacilityPlacementAutomationTestProbe.generated.h"
 
@@ -12,6 +13,16 @@ class UFacilityPlacementDefinition;
 class UBathhouseExpansionDefinition;
 class ULockerCapacitySubsystem;
 class UPlayerCarryComponent;
+class UStaticMeshComponent;
+
+UCLASS(Transient, NotBlueprintable)
+class AFacilityPlacementItemAutomationActor final : public APlaceableFacilityItemActor
+{
+	GENERATED_BODY()
+
+public:
+	AFacilityPlacementItemAutomationActor();
+};
 
 USTRUCT()
 struct FFacilityPlacementNestedReferenceTestData
@@ -56,6 +67,13 @@ public:
 		EBathhouseFacilityType InType = EBathhouseFacilityType::Shower,
 		int32 InFacilityNumber = INDEX_NONE);
 	void SetInstanceScaleKeepingUnitFootprint(const FVector& InScale);
+
+protected:
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> AutomationPreviewBody;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> AutomationPreviewBodySecondary;
 };
 
 UCLASS(Transient, NotBlueprintable)
@@ -68,12 +86,24 @@ public:
 };
 
 UCLASS(Transient, NotBlueprintable)
+class AFacilityPlacementConstructionCollisionAutomationActor final
+	: public AFacilityPlacementAutomationActor
+{
+	GENERATED_BODY()
+
+public:
+	AFacilityPlacementConstructionCollisionAutomationActor();
+	virtual void OnConstruction(const FTransform& Transform) override;
+};
+
+UCLASS(Transient, NotBlueprintable)
 class UFacilityPlacementLockerSlotAutomationComponent final : public ULockerActionSlotComponent
 {
 	GENERATED_BODY()
 
 public:
 	UFacilityPlacementLockerSlotAutomationComponent();
+	void SetSlotIdForTest(FName InId) { LockerSlotId = InId; }
 };
 
 UCLASS(Transient, NotBlueprintable)
@@ -83,6 +113,10 @@ class AFacilityPlacementLockerAutomationActor final : public AFacilityPlacementA
 
 public:
 	AFacilityPlacementLockerAutomationActor();
+	void ConfigureStartupForTest(
+		UFacilityPlacementDefinition& InDefinition,
+		const FGuid& InRegistrationId,
+		int32 TotalSlots);
 };
 
 UCLASS(Transient, NotBlueprintable)

@@ -1,44 +1,30 @@
-# Unreal 작업 프롬프트 — 설비 회수 진행률 런타임 재연결 확인
+# Unreal 후속 검증 — 설비 설치 Transform 이중 보정 수정
 
-## 상태
+## Editor 작업 여부
 
-Editor 에셋 변경은 불필요하다. C++에서 Q hold elapsed와 자동 commit 소유권을 Placement Component Tick으로 유지하고, 플레이어 `BeginPlay()`에서 회수 진행률 provider를 Interaction에 다시 연결한다.
+Blueprint, DataAsset, Level과 Project Settings 수정은 필요하지 않다. 이번 변경은 실제 설치 transaction이 프리뷰의 최종 Transform을 그대로 사용하도록 하는 C++ 버그 수정이다.
 
-## 변경 금지
+## 선행 조건
 
-- `IA_RecoverFacility` 또는 `IMC_FirstPerson`에 Hold Trigger를 추가하지 않는다.
-- `WBP_InteractionPrompt`에 Percent binding, Tick/Event Graph 진행률 계산 또는 회수 실행 로직을 추가하지 않는다.
-- 설비 Definition, Blueprint, Level Actor를 이번 작업 때문에 수정하거나 저장하지 않는다.
+UE 5.8 `BathhouseSimEditor Win64 Development` 전체 빌드와 `BathhouseSim.Placement` 및 전체 `BathhouseSim` 자동화는 성공했다. 새 DLL로 Editor를 실행한다.
 
-## 사전 조건
+## PIE 검증
 
-1. 현재 Editor에서 Live Coding을 실행하거나, Editor를 완전히 종료한 뒤 `BathhouseSimEditor Win64 Development`를 빌드하고 다시 실행한다.
-2. `/Game/Input/Actions/IA_RecoverFacility`가 Boolean이고 action-level Trigger가 없는지 확인만 한다.
-3. `/Game/Input/IMC_FirstPerson`의 Q → `IA_RecoverFacility` 매핑에 mapping-level Trigger가 없는지 확인만 한다.
-4. `/Game/Bathhouse/UI/WBP_InteractionPrompt`의 `RecoveryProgressBar` 이름과 native parent를 유지한다.
+같은 `PlacementZone.PlacementFloor`에 다음 설비를 각각 프리뷰하고 설치한다.
 
-## PIE 수용 기준
+- `/Game/Bathhouse/Blueprints/Facility/BP_Bath`
+- `/Game/Bathhouse/Blueprints/Facility/BP_ClothesLocker`
+- `/Game/Bathhouse/Blueprints/Towel/BP_Washer`
+- `/Game/Bathhouse/Blueprints/Towel/BP_Dryer`
 
-1. 회수 가능한 빈 설비를 응시하고 Q를 누른다.
-2. `RecoveryProgressBar`가 `0 → 1`로 연속 증가해야 한다.
-3. `RecoveryHoldSeconds`에 도달하면 Q를 계속 누르고 있어도 즉시 회수되어야 한다.
-4. 자동 회수 뒤 Q를 놓아도 추가 item, 추가 결과 또는 중복 event가 없어야 한다.
-5. 기준 시간 전에 Q를 놓으면 회수되지 않고 원본 설비가 유지되며 progress가 0으로 돌아가야 한다.
-6. hold 도중 시선을 떼거나 범위를 벗어나면 회수되지 않아야 한다.
-7. hold 도중 설비 조건이 바뀌면 회수되지 않아야 한다.
-   - Bath: 물 또는 사용 중 slot
-   - Washer/Dryer: contents 또는 processing
-   - Locker: reserved/occupied slot
-8. 다른 물건을 든 상태에서 자동 회수해도 기존 held object는 바뀌지 않아야 한다.
+각 설비에서 다음을 확인한다.
 
-## 저장
+1. 프리뷰의 footprint bottom이 `PlacementFloor`에 붙는다.
+2. LMB 설치 직후 실제 설비의 footprint bottom이 프리뷰와 같은 높이에 있다.
+3. Actor Z가 footprint 반높이만큼 두 번째로 상승하지 않는다.
+4. 설치 뒤 body collision과 Dynamic NavMesh가 기존 계약대로 복원된다.
+5. 회수 후 재설치해도 같은 결과가 반복된다.
 
-이번 작업은 native-only이므로 검증만으로 Editor asset이 dirty가 되어서는 안 된다. `Save All`을 사용하지 않는다.
+## 저장 정책
 
-## 보고
-
-- Editor 재시작 여부
-- progress 연속 증가 여부
-- release 전 자동 회수 여부
-- 조기 release/시선 이탈/조건 변경 취소 결과
-- 중복 item/event 또는 새 Error/Ensure 로그 여부
+이번 검증에서 Content 변경은 필요하지 않으며 `Save All`을 사용하지 않는다. 실제 asset 값이 의도치 않게 dirty가 되면 저장하지 않고 변경 원인을 먼저 확인한다.

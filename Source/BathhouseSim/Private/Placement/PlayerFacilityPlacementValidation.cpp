@@ -3,6 +3,7 @@
 #include "Camera/CameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Interaction/PlayerCarryComponent.h"
@@ -80,6 +81,12 @@ FFacilityPlacementTransactionResult UPlayerFacilityPlacementComponent::ValidateC
 		|| !Definition->ValidateRuntime(FailureReason) || !PlacedCDO || !Placement
 		|| !Carry || Carry->GetHeldObject() != Item || !Item->IsHeldForPlacement())
 		return FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::StateChanged, LOCTEXT("HeldFacilityChanged", "들고 있는 설비가 변경되었습니다."));
+	if (!PreviewActor->ValidateSourceGeometry(Definition->PlacedFacilityClass, FailureReason))
+	{
+		return FFacilityPlacementTransactionResult::Failed(
+			EFacilityPlacementFailureCode::InvalidFootprint,
+			FailureReason);
+	}
 	if (!TracePlacementZone(OutZone, Point) || !OutZone)
 		return FFacilityPlacementTransactionResult::Failed(EFacilityPlacementFailureCode::NoCompatibleZone, LOCTEXT("NoZone", "설치 가능한 구역을 바라보세요."));
 	const FTransform RequestedTransform = OutZone->MakeCandidateTransform(Point, AccumulatedYaw, bSnapHeld);
@@ -88,23 +95,6 @@ FFacilityPlacementTransactionResult UPlayerFacilityPlacementComponent::ValidateC
 		return FFacilityPlacementTransactionResult::Failed(
 			EFacilityPlacementFailureCode::InvalidComponents,
 			FailureReason);
-	}
-	if (UBoxComponent* Footprint = Placement->GetPlacementFootprint())
-	{
-		FTransform RelativeFootprint;
-		if (!Placement->GetFootprintRelativeToRoot(RelativeFootprint, FailureReason))
-		{
-			return FFacilityPlacementTransactionResult::Failed(
-				EFacilityPlacementFailureCode::InvalidComponents,
-				FailureReason);
-		}
-		const FVector CandidateScale = OutCandidate.GetScale3D().GetAbs();
-		const float HalfHeight = Footprint->GetUnscaledBoxExtent().Z
-			* RelativeFootprint.GetScale3D().GetAbs().Z * CandidateScale.Z;
-		const FVector RelativeOffset = OutCandidate.GetRotation().RotateVector(
-			RelativeFootprint.GetLocation() * CandidateScale);
-		OutCandidate.SetLocation(
-			OutCandidate.GetLocation() + OutZone->GetActorUpVector() * HalfHeight - RelativeOffset);
 	}
 	if (!OutZone->IsDefinitionAllowed(*Definition))
 	{
@@ -169,9 +159,13 @@ FFacilityPlacementTransactionResult UPlayerFacilityPlacementComponent::ValidateW
 	FCollisionObjectQueryParams FloorObjects;
 	FloorObjects.AddObjectTypesToQuery(ECC_WorldStatic);
 	FloorObjects.AddObjectTypesToQuery(ECC_WorldDynamic);
+	const FVector FloorNormal = Zone.GetPlacementFloor()
+		? Zone.GetPlacementFloor()->GetUpVector()
+		: Zone.GetActorUpVector();
 	const FVector Forward = FootprintTransform.GetUnitAxis(EAxis::X);
 	const FVector Right = FootprintTransform.GetUnitAxis(EAxis::Y);
-	const FVector BottomCenter = FootprintTransform.GetLocation() - FVector::UpVector * HalfExtent.Z;
+	const FVector BottomCenter = FootprintTransform.TransformPosition(
+		FVector(0.0f, 0.0f, -Footprint->GetUnscaledBoxExtent().Z));
 	for (const FVector2D Corner : { FVector2D(-1.0f, -1.0f), FVector2D(-1.0f, 1.0f), FVector2D(1.0f, -1.0f), FVector2D(1.0f, 1.0f) })
 	{
 		const FVector Sample = BottomCenter
@@ -180,8 +174,8 @@ FFacilityPlacementTransactionResult UPlayerFacilityPlacementComponent::ValidateW
 		FHitResult FloorHit;
 		if (!GetWorld()->LineTraceSingleByObjectType(
 			FloorHit,
-			Sample + FVector::UpVector * 5.0f,
-			Sample - FVector::UpVector * 25.0f,
+			Sample + FloorNormal * 5.0f,
+			Sample - FloorNormal * 25.0f,
 			FloorObjects,
 			Params))
 		{

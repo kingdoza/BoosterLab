@@ -5,18 +5,22 @@
 
 #define LOCTEXT_NAMESPACE "LockerCapacitySubsystem"
 
-bool ULockerCapacitySubsystem::ValidateLockerBankRegistration(
+ELockerBankRegistrationResult ULockerCapacitySubsystem::ValidateLockerBankRegistrationTyped(
 	const AActor* Bank,
 	const TArray<ULockerActionSlotComponent*>& Slots,
 	const int32 DefinitionSlotCount,
 	FText& OutFailureReason)
 {
-	CompactInvalidEntries();
+	CompactInvalidEntries(false);
+	if (IsLockerBankRegistered(Bank))
+	{
+		return ELockerBankRegistrationResult::AlreadyRegistered;
+	}
 	if (!IsValid(Bank) || DefinitionSlotCount <= 0 || Slots.Num() != DefinitionSlotCount
-		|| Slots.Contains(nullptr) || IsLockerBankRegistered(Bank))
+		|| Slots.Contains(nullptr))
 	{
 		OutFailureReason = LOCTEXT("InvalidBank", "락커 Definition과 실제 행동 슬롯 구성이 일치하지 않습니다.");
-		return false;
+		return ELockerBankRegistrationResult::InvalidTopology;
 	}
 	TSet<FName> Ids;
 	for (const ULockerActionSlotComponent* Slot : Slots)
@@ -24,23 +28,49 @@ bool ULockerCapacitySubsystem::ValidateLockerBankRegistration(
 		if (!Slot || !Slot->HasStableLockerSlotId() || Ids.Contains(Slot->GetLockerSlotId()))
 		{
 			OutFailureReason = LOCTEXT("DuplicateSlotId", "락커 행동 슬롯 식별자가 누락되었거나 중복되었습니다.");
-			return false;
+			return ELockerBankRegistrationResult::InvalidTopology;
 		}
 		Ids.Add(Slot->GetLockerSlotId());
 	}
-	return CanInstallLockerSlots(DefinitionSlotCount, OutFailureReason);
+	const UBathhouseFacilitySubsystem* Facilities = GetWorld()
+		? GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>() : nullptr;
+	if (!Facilities || !Facilities->GetExpansionAuthority())
+	{
+		OutFailureReason = LOCTEXT("AuthorityNotReady", "확장 단계 관리자가 아직 준비되지 않았습니다.");
+		return ELockerBankRegistrationResult::AuthorityNotReady;
+	}
+	if (InstalledLockerCapacity + DefinitionSlotCount > Facilities->GetMaxInstalledLockerSlots())
+	{
+		OutFailureReason = LOCTEXT("ExpansionLimit", "현재 확장 단계의 설치 가능한 락커 칸 수를 초과합니다.");
+		return ELockerBankRegistrationResult::ExpansionLimitExceeded;
+	}
+	return ELockerBankRegistrationResult::Success;
 }
 
-bool ULockerCapacitySubsystem::RegisterLockerBank(
+bool ULockerCapacitySubsystem::ValidateLockerBankRegistration(
+	const AActor* Bank,
+	const TArray<ULockerActionSlotComponent*>& Slots,
+	const int32 DefinitionSlotCount,
+	FText& OutFailureReason)
+{
+	const ELockerBankRegistrationResult Result = ValidateLockerBankRegistrationTyped(
+		Bank, Slots, DefinitionSlotCount, OutFailureReason);
+	return Result == ELockerBankRegistrationResult::Success
+		|| Result == ELockerBankRegistrationResult::AlreadyRegistered;
+}
+
+ELockerBankRegistrationResult ULockerCapacitySubsystem::RegisterLockerBankTyped(
 	AActor* Bank,
 	const TArray<ULockerActionSlotComponent*>& Slots,
 	const int32 DefinitionSlotCount,
 	FText& OutFailureReason,
 	const bool bPublish)
 {
-	if (!ValidateLockerBankRegistration(Bank, Slots, DefinitionSlotCount, OutFailureReason))
+	const ELockerBankRegistrationResult Validation = ValidateLockerBankRegistrationTyped(
+		Bank, Slots, DefinitionSlotCount, OutFailureReason);
+	if (Validation != ELockerBankRegistrationResult::Success)
 	{
-		return false;
+		return Validation;
 	}
 	FBankRecord Record;
 	Record.Bank = Bank;
@@ -55,7 +85,20 @@ bool ULockerCapacitySubsystem::RegisterLockerBank(
 	{
 		BroadcastMutation();
 	}
-	return true;
+	return ELockerBankRegistrationResult::Success;
+}
+
+bool ULockerCapacitySubsystem::RegisterLockerBank(
+	AActor* Bank,
+	const TArray<ULockerActionSlotComponent*>& Slots,
+	const int32 DefinitionSlotCount,
+	FText& OutFailureReason,
+	const bool bPublish)
+{
+	const ELockerBankRegistrationResult Result = RegisterLockerBankTyped(
+		Bank, Slots, DefinitionSlotCount, OutFailureReason, bPublish);
+	return Result == ELockerBankRegistrationResult::Success
+		|| Result == ELockerBankRegistrationResult::AlreadyRegistered;
 }
 
 bool ULockerCapacitySubsystem::UnregisterLockerBank(
@@ -96,8 +139,13 @@ bool ULockerCapacitySubsystem::CanInstallLockerSlots(const int32 AdditionalSlots
 {
 	const_cast<ULockerCapacitySubsystem*>(this)->CompactInvalidEntries();
 	const UBathhouseFacilitySubsystem* Facilities = GetWorld() ? GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>() : nullptr;
-	const int32 Limit = Facilities ? Facilities->GetMaxInstalledLockerSlots() : 0;
-	if (AdditionalSlots <= 0 || Limit <= 0 || InstalledLockerCapacity + AdditionalSlots > Limit)
+	if (!Facilities || !Facilities->GetExpansionAuthority())
+	{
+		OutFailureReason = LOCTEXT("AuthorityNotReady", "확장 단계 관리자가 아직 준비되지 않았습니다.");
+		return false;
+	}
+	const int32 Limit = Facilities->GetMaxInstalledLockerSlots();
+	if (AdditionalSlots <= 0 || InstalledLockerCapacity + AdditionalSlots > Limit)
 	{
 		OutFailureReason = LOCTEXT("ExpansionLimit", "현재 확장 단계의 설치 가능한 락커 칸 수를 초과합니다.");
 		return false;
@@ -284,7 +332,7 @@ void ULockerCapacitySubsystem::RecomputeInvariant()
 	bInvariantFault = InstalledLockerCapacity < GetReservedLeaseCount();
 }
 
-void ULockerCapacitySubsystem::CompactInvalidEntries()
+void ULockerCapacitySubsystem::CompactInvalidEntries(const bool bPublish)
 {
 	const int32 PreviousBanks = Banks.Num();
 	const int32 PreviousLeases = Leases.Num();
@@ -304,7 +352,7 @@ void ULockerCapacitySubsystem::CompactInvalidEntries()
 		}
 	}
 	RecomputeInvariant();
-	if (Banks.Num() != PreviousBanks || Leases.Num() != PreviousLeases)
+	if (bPublish && (Banks.Num() != PreviousBanks || Leases.Num() != PreviousLeases))
 	{
 		BroadcastMutation();
 	}

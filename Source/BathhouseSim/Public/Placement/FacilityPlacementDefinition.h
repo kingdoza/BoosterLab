@@ -5,7 +5,6 @@
 #include "GameplayTagContainer.h"
 #include "FacilityPlacementDefinition.generated.h"
 
-class AFacilityPlacementPreviewActor;
 class APlaceableFacilityItemActor;
 class UStaticMesh;
 
@@ -17,6 +16,7 @@ class BATHHOUSESIM_API UFacilityPlacementDefinition : public UPrimaryDataAsset
 public:
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 	bool ValidateRuntime(FText& OutFailureReason) const;
+	bool DeriveFootprintCells(FIntPoint& OutCells, FText& OutFailureReason) const;
 
 #if WITH_EDITOR
 	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
@@ -29,9 +29,6 @@ public:
 	FGameplayTagContainer FacilityTags;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Placement")
-	TSubclassOf<AFacilityPlacementPreviewActor> PreviewActorClass;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Placement")
 	TSubclassOf<AActor> PlacedFacilityClass;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Recovery Item")
@@ -39,12 +36,6 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Recovery Item")
 	TObjectPtr<UStaticMesh> RecoveryItemMesh = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "1", UIMin = "1"))
-	int32 FootprintCellsX = 1;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "1", UIMin = "1"))
-	int32 FootprintCellsY = 1;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Locker", meta = (ClampMin = "0", UIMin = "0"))
 	int32 LockerSlotCount = 0;

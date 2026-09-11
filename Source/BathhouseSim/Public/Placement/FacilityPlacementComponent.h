@@ -6,7 +6,6 @@
 #include "FacilityPlacementComponent.generated.h"
 
 class AFacilityPlacementZoneActor;
-class UNavModifierComponent;
 class UBoxComponent;
 class UFacilityPlacementDefinition;
 class UPlayerCarryComponent;
@@ -31,8 +30,7 @@ public:
 
 	void Configure(
 		UBoxComponent* InPlacementFootprint,
-		UPrimitiveComponent* InPackagePhysicalRoot,
-		UNavModifierComponent* InNavModifier);
+		UPrimitiveComponent* InPackagePhysicalRoot);
 
 	UFUNCTION(BlueprintPure, Category = "Facility Placement")
 	EPlaceableFacilityMode GetMode() const { return Mode; }
@@ -47,6 +45,8 @@ public:
 	bool IsOperational(FText& OutFailureReason) const;
 	bool ValidateFootprintContractForDefinition(const UFacilityPlacementDefinition& InDefinition, FText& OutFailureReason) const;
 	bool ValidateFootprintContract(FText& OutFailureReason) const;
+	bool ValidateNavigationContract(FText& OutFailureReason) const;
+	bool DeriveFootprintCells(FIntPoint& OutCells, FText& OutFailureReason) const;
 	bool BuildPlacedActorTransform(const FTransform& RequestedTransform, FTransform& OutTransform, FText& OutFailureReason) const;
 	bool GetFootprintRelativeToRoot(FTransform& OutTransform, FText& OutFailureReason) const;
 	bool GetRecoveryDropTransform(FTransform& OutTransform, FText& OutFailureReason) const;
@@ -58,9 +58,15 @@ public:
 	void ApplyHeldPresentation(class USceneComponent& HeldAnchor, const FTransform& HeldTransform);
 	void RestoreLastSafePackagedWorld();
 	void CaptureLastSafeTransform();
-	void PrepareForStagedPlacement(UFacilityPlacementDefinition& InDefinition);
+	bool PrepareForStagedPlacement(UFacilityPlacementDefinition& InDefinition, FText& OutFailureReason);
+	bool FinalizeStagedPlacementCollisionSnapshot(FText& OutFailureReason);
+	bool ValidateStagedPlacementCollisionSnapshot(FText& OutFailureReason) const;
 	void SetPlacedDomainActive(bool bActive);
-	void CommitStagedPlacement();
+	bool CommitStagedPlacement(FText& OutFailureReason);
+	bool CaptureAndDisableActorCollision(FText& OutFailureReason);
+	bool RestoreActorCollisionSnapshot(FText& OutFailureReason);
+	void ConsumeActorCollisionSnapshot();
+	bool HasActorCollisionSnapshot() const { return ActorCollisionSnapshotState != EActorCollisionSnapshotState::None; }
 	bool IsStagedPlacement() const { return bStagedPlacement; }
 	bool IsPlacedDomainActive() const { return bPlacedDomainActive; }
 
@@ -81,9 +87,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Facility Placement")
 	EPlaceableFacilityMode Mode = EPlaceableFacilityMode::Placed;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Facility Placement|Carry")
-	FTransform HeldTransform = FTransform::Identity;
-
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Facility Placement|Carry", meta = (ClampMin = "0.0"))
 	float ThrowImpulseStrength = 120.0f;
 
@@ -91,19 +94,22 @@ protected:
 	float UpwardThrowImpulseStrength = 15.0f;
 
 public:
-	FTransform GetHeldTransform() const { return HeldTransform; }
 	float GetThrowImpulseStrength() const { return ThrowImpulseStrength; }
 	float GetUpwardThrowImpulseStrength() const { return UpwardThrowImpulseStrength; }
 
 private:
+	enum class EActorCollisionSnapshotState : uint8
+	{
+		None,
+		PendingConstruction,
+		Captured
+	};
+
 	UPROPERTY(Transient)
 	TObjectPtr<UBoxComponent> PlacementFootprint = nullptr;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UPrimitiveComponent> PackagePhysicalRoot = nullptr;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UNavModifierComponent> NavModifier = nullptr;
 
 	TWeakObjectPtr<AActor> AssignedFixedSlot;
 	FTransform LastSafeTransform = FTransform::Identity;
@@ -111,4 +117,6 @@ private:
 	bool bFixedSlotBindingConflict = false;
 	bool bStagedPlacement = false;
 	bool bPlacedDomainActive = false;
+	EActorCollisionSnapshotState ActorCollisionSnapshotState = EActorCollisionSnapshotState::None;
+	bool bActorCollisionSnapshot = false;
 };

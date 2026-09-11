@@ -76,9 +76,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Facility Item")
 	TObjectPtr<UStaticMeshComponent> ItemRoot;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Facility Item|Carry")
-	FTransform HeldTransform = FTransform::Identity;
-
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Facility Item|Carry", meta = (ClampMin = "0.0"))
 	float ThrowImpulseStrength = 120.0f;
 

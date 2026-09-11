@@ -1,14 +1,32 @@
 #include "Tests/FacilityPlacementAutomationTestProbe.h"
 
 #include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Facility/LockerCapacitySubsystem.h"
 #include "Interaction/PlayerCarryComponent.h"
 #include "Placement/FacilityPlacementComponent.h"
 #include "Placement/FacilityPlacementDefinition.h"
 
+AFacilityPlacementItemAutomationActor::AFacilityPlacementItemAutomationActor()
+{
+	SetActorScale3D(FVector(0.25f));
+}
+
 AFacilityPlacementAutomationActor::AFacilityPlacementAutomationActor()
 {
 	FacilityType = EBathhouseFacilityType::Shower;
+	AutomationPreviewBody = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("AutomationPreviewBody"));
+	AutomationPreviewBody->SetupAttachment(GetRootComponent());
+	AutomationPreviewBodySecondary = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("AutomationPreviewBodySecondary"));
+	AutomationPreviewBodySecondary->SetupAttachment(AutomationPreviewBody);
+	AutomationPreviewBodySecondary->SetRelativeLocation(FVector(20.0f, 0.0f, 0.0f));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (CubeMesh.Succeeded())
+	{
+		AutomationPreviewBody->SetStaticMesh(CubeMesh.Object);
+		AutomationPreviewBodySecondary->SetStaticMesh(CubeMesh.Object);
+	}
 }
 
 void AFacilityPlacementAutomationActor::ConfigureForTest(
@@ -16,8 +34,10 @@ void AFacilityPlacementAutomationActor::ConfigureForTest(
 	const EBathhouseFacilityType InType,
 	const int32 InFacilityNumber)
 {
-	FacilityPlacement->PrepareForStagedPlacement(InDefinition);
-	FacilityPlacement->CommitStagedPlacement();
+	FText FailureReason;
+	ensure(FacilityPlacement->PrepareForStagedPlacement(InDefinition, FailureReason));
+	ensure(FacilityPlacement->FinalizeStagedPlacementCollisionSnapshot(FailureReason));
+	ensure(FacilityPlacement->CommitStagedPlacement(FailureReason));
 	FacilityType = InType;
 	FacilityNumber = InFacilityNumber;
 }
@@ -37,6 +57,21 @@ AFacilityPlacementScaleAutomationActor::AFacilityPlacementScaleAutomationActor()
 	SetActorScale3D(FVector(2.0f, 2.0f, 1.5f));
 }
 
+AFacilityPlacementConstructionCollisionAutomationActor::
+	AFacilityPlacementConstructionCollisionAutomationActor()
+{
+	SetActorEnableCollision(false);
+	AutomationPreviewBody->SetCanEverAffectNavigation(false);
+	AutomationPreviewBodySecondary->SetCanEverAffectNavigation(false);
+}
+
+void AFacilityPlacementConstructionCollisionAutomationActor::OnConstruction(
+	const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	SetActorEnableCollision(true);
+}
+
 UFacilityPlacementLockerSlotAutomationComponent::UFacilityPlacementLockerSlotAutomationComponent()
 {
 	LockerSlotId = TEXT("AutomationLockerSlot");
@@ -48,6 +83,25 @@ AFacilityPlacementLockerAutomationActor::AFacilityPlacementLockerAutomationActor
 	UFacilityPlacementLockerSlotAutomationComponent* Slot =
 		CreateDefaultSubobject<UFacilityPlacementLockerSlotAutomationComponent>(TEXT("AutomationLockerSlot"));
 	Slot->SetupAttachment(GetRootComponent());
+}
+
+void AFacilityPlacementLockerAutomationActor::ConfigureStartupForTest(
+	UFacilityPlacementDefinition& InDefinition,
+	const FGuid& InRegistrationId,
+	const int32 TotalSlots)
+{
+	ConfigureForTest(InDefinition, EBathhouseFacilityType::ClothesLocker);
+	RegistrationId = InRegistrationId;
+	bNetStartup = true;
+	for (int32 Index = 1; Index < TotalSlots; ++Index)
+	{
+		UFacilityPlacementLockerSlotAutomationComponent* Slot =
+			NewObject<UFacilityPlacementLockerSlotAutomationComponent>(
+				this, *FString::Printf(TEXT("AutomationLockerSlot_%d"), Index));
+		Slot->SetSlotIdForTest(*FString::Printf(TEXT("AutomationLockerSlot_%d"), Index));
+		Slot->SetupAttachment(GetRootComponent());
+		AddInstanceComponent(Slot);
+	}
 }
 
 void UFacilityPlacementEventAutomationProbe::Bind(

@@ -22,6 +22,8 @@ public:
 		RecoveryActivation,
 		RecoverySourceDestroy,
 		PlacementSpawn,
+		PlacementCollisionSnapshotDuplicate,
+		PlacementCollisionSnapshotMissing,
 		PlacementImport,
 		PlacementDomainRegistration,
 		PlacementCarryCommit
@@ -42,7 +44,7 @@ public:
 
 	static AActor* PlaceItemAsFacility(
 		APlaceableFacilityItemActor& ItemActor,
-		const FTransform& CandidateTransform,
+		const FTransform& FinalActorTransform,
 		const AFacilityPlacementZoneActor& Zone,
 		UPlayerCarryComponent& Carry,
 		FText& OutFailureReason);

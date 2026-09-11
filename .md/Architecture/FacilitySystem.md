@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-이 문서는 현재 구현된 facility slot, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point를 정의한다. 번호 기반 신발장/락커 topology는 deprecated compatibility로만 남는다. facility Actor는 canonical target에서 배치 상태만 소유하고 전용 회수 아이템과 typed persistent payload 변환은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
+이 문서는 facility slot, transform 기반 counter queue assignment, checkout overflow 배회 범위와 단일 physical key drop point를 정의한다. 번호 기반 신발장/락커 topology는 deprecated compatibility로만 남는다. facility Actor의 staged 변환과 2026-09-10 승인된 pre-placed locker reconciliation, collision/Navigation activation은 [PlacementSystem.md](PlacementSystem.md)를 따른다.
 
 ## Source Scope
 
@@ -19,6 +19,7 @@ Source/BathhouseSim/Private/Facility/
   BathhouseFacilitySlotComponent.cpp
   BathhouseFacilityActor.cpp
   BathhouseFacilitySubsystem.cpp
+  BathhouseFacilityStartup.cpp
   BathhouseCounterActor.cpp
   CustomerQueueOverflowWanderVolume.cpp
 
@@ -31,6 +32,7 @@ Source/BathhouseSim/Private/Tests/
 - 배치된 bathhouse facility와 다중 use slot 등록
 - slot reservation, occupancy, release와 대기 notification
 - unnumbered locker action slot과 generic facility 후보 조회
+- Expansion Authority readiness와 pre-placed locker pending/reconciliation 조율
 - check-in/checkout의 독립 FIFO queue, revision과 service 순서
 - service/queue/overflow assignment와 queue point 전체 transform 제공
 - checkout overflow customer의 authoring된 NavMesh 배회 범위 제공
@@ -78,6 +80,8 @@ Facility는 Montage, AnimNotify, Motion Warping과 prop socket 계약을 소유�
 - `FacilityType`과 `SelectionWeight`를 소유한다. `FacilityNumber`는 asset migration용 deprecated compatibility로만 보존한다.
 - 소유한 모든 `UBathhouseFacilitySlotComponent`를 등록·검증한다.
 - 시설의 domain state는 slot component가 소유하고 Blueprint는 표현 event만 받는다.
+- pre-placed locker instance는 cooked build에도 저장되는 자동 생성 `RegistrationId`를 가진다. UE Editor-only Actor GUID를 runtime 순서에 사용하지 않는다.
+- pre-placed locker는 개별 Authority 변경 delegate로 재시도하지 않고 subsystem reconciliation에 제출한다.
 - actor destruction 시 모든 reservation을 해제하고 subsystem에서 등록 해제한다.
 
 Blueprint event:
@@ -93,6 +97,9 @@ Blueprint event:
 `UWorldSubsystem`으로 동작한다.
 
 - facility BeginPlay/EndPlay 등록·해제
+- Expansion Authority readiness와 pre-placed locker pending weak set 소유
+- post-Actor-BeginPlay 또는 늦은 Authority 등록에서 한 번의 결정적 locker reconciliation 실행
+- persistent registration ID 정렬, 중복 제출 제거와 최종 facility/capacity publication batching
 - type/tag 기반 facility와 available slot 후보 조회
 - legacy numbered lookup/topology API는 migration wrapper로만 보존하고 신규 customer/key flow에서는 사용하지 않음
 - 예약 가능한 slot 중 random 선택
@@ -106,6 +113,17 @@ Customer와 key hook이 반복적인 world actor scan을 하지 않게 한다.
 1/4/8칸 묶음 락커는 하나의 `ABathhouseFacilityActor` 아래에 `ULockerActionSlotComponent`를 칸 수만큼 둔다. 이 component는 기존 slot 예약/점유 계약을 재사용하고 내부 stable `LockerSlotId`만 가지며 플레이어 표시 번호와 key number는 갖지 않는다.
 
 탈의와 착의는 각각 random available slot 하나를 행동 동안만 reserve/use/release한다. 설치된 operational slot 총합, customer capacity lease와 묶음 회수 gate는 Placement System의 `ULockerCapacitySubsystem`이 소유하고 Facility는 lease 수를 복제하지 않는다.
+
+월드 시작 pre-placed locker는 `BeginPlay`에서 slot/delegate 준비를 idempotent하게 끝낸 뒤 facility/capacity에 즉시 등록하지 않고 pending으로 제출한다. Actor collision도 reconciliation 성공 전까지 비활성화한다. Facility Subsystem은 Authority 준비 여부를 용량 값 `0`과 구분하고 다음 순서로 처리한다.
+
+1. pending actor와 `RegistrationId`를 검증하고 ID로 정렬한다.
+2. Authority가 없으면 pending을 유지하고 실제 tier 초과 오류를 만들지 않는다.
+3. Authority가 있으면 `ULockerCapacitySubsystem`의 topology/remaining-capacity 검증으로 각 bank를 silent 등록한다.
+4. 큰 bank가 남은 칸에 들어가지 않으면 그 bank만 거부하고 뒤의 작은 bank 검사를 계속한다.
+5. 성공 bank는 facility+capacity 등록을 모두 끝낸 뒤 placed collision/Navigation을 활성화한다.
+6. 전체 batch 뒤 ClothesLocker availability 한 번과 capacity 변경 한 번만 발행한다.
+
+invalid/duplicate ID, 잘못된 slot topology와 실제 tier 초과는 actor별 영구 startup 오류를 한 번만 기록한다. accepted ID는 owner Actor와 함께 추적하므로 이미 등록된 actor나 같은 pending/accepted actor 제출은 no-op이고, 다른 actor의 동일 ID만 거부한다. publication callback 중 pending/Authority revision이 바뀌면 reconciliation tail pass가 즉시 이어지며 용량을 중복 합산하지 않는다. runtime tier 상승, streaming 재정렬과 거부 locker 자동 활성화는 이번 범위 밖이다.
 
 ## Reservation Flow
 
@@ -193,6 +211,7 @@ Counter는 customer routine phase, navigation request와 character rotation을 �
 Editor authoring 값:
 
 - facility type/number와 selection weight
+- pre-placed locker instance의 자동 생성 persistent registration ID. 사용자가 수동으로 순서를 authoring하지 않는다.
 - 시설별 slot component transform과 facing
 - Bath slot별 발바닥 기준의 NavMesh 위 `ApproachOffset`과 NavMesh 밖일 수 있는 정확한 action transform
 - check-in/checkout service point
@@ -212,7 +231,8 @@ Blueprint 조회·표현 API:
 - 기존 `FCustomerQueueTargetTask` reflected type은 StateTree asset 교체가 끝날 때까지 deprecated 상태로 보존한다.
 - `ReturnedKeyPointReferences`, `OnReturnedKeySlotsChanged`는 deprecated compatibility이며 새 runtime의 source of truth가 아니다.
 - `ShoeLocker`, `FacilityNumber`, numbered facility/key-topology API는 한 migration cycle 보존하되 신규 StateTree와 key validation에서 사용하지 않는다.
-- reflected symbol rename/delete가 없으므로 Core Redirect를 추가하지 않는다.
+- locker Actor의 개별 `OnExpansionAuthorityChanged` 재등록 경로는 제거하고 Facility Subsystem의 startup reconciliation만 사용한다.
+- Placement의 `PlacementNavModifier` 즉시 제거는 [PlacementSystem.md](PlacementSystem.md)의 migration을 따르며, 그 밖의 Facility reflected symbol은 rename/delete하지 않는다.
 
 ## Dependencies
 
@@ -222,12 +242,15 @@ Blueprint 조회·표현 API:
 - Towel -> Facility actor/slot contract
 - Interaction -> Facility의 generic facility/key-hook validation
 - Facility -> Placement의 placed-facility query, typed payload와 Actor 변환 계약
+- Facility Subsystem -> Locker Capacity Subsystem의 startup bank 검증·silent 등록·batch publication 계약
 - Facility는 Customer, Interaction과 UI concrete class에 의존하지 않는다.
 
 ## Manual Review Points
 
 - key number와 locker slot이 대응하지 않고 `ShoeLocker`가 신규 runtime에서 선택되지 않는지 확인한다.
 - 1/4/8칸 locker bank의 action slot이 독립적으로 reserve/use되고 플레이어 표시 번호를 만들지 않는지 확인한다.
+- Authority/locker BeginPlay 순서를 바꿔도 stable ID 순서, accepted bank와 publication 횟수가 같은지 확인한다.
+- Authority 미준비가 tier 초과 오류로 기록되지 않고 실제 초과 bank만 collision/domain 비활성 상태로 남는지 확인한다.
 - 하나의 slot을 두 customer가 동시에 reserve/use하지 않는지 확인한다.
 - check-in/checkout queue가 독립적으로 전진하는지 확인한다.
 - 각 lane의 front customer만 service 가능한지 확인한다.

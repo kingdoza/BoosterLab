@@ -8,11 +8,15 @@
 #include "Facility/LockerCapacitySubsystem.h"
 #include "Interaction/PhysicalCarryFixedSlot.h"
 #include "Interaction/PlayerCarryComponent.h"
-#include "NavModifierComponent.h"
 #include "Placement/FacilityPlacementComponent.h"
 #include "Placement/FacilityPlacementDefinition.h"
+#include "Placement/FacilityPlacementSettings.h"
 #include "Placement/FacilityPlacementZoneActor.h"
 #include "Placement/FacilityActorConversionTransaction.h"
+#if WITH_EDITOR
+#include "EngineUtils.h"
+#include "Misc/DataValidation.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "BathhouseFacilityActor"
 
@@ -22,6 +26,8 @@ ABathhouseFacilityActor::ABathhouseFacilityActor()
 	PackagePhysicalRoot = CreateDefaultSubobject<UBoxComponent>(TEXT("PackagePhysicalRoot"));
 	SetRootComponent(PackagePhysicalRoot);
 	PackagePhysicalRoot->SetBoxExtent(FVector(5.0f));
+	PackagePhysicalRoot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PackagePhysicalRoot->SetCanEverAffectNavigation(false);
 	PackagePhysicalRoot->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 	PackagePhysicalRoot->BodyInstance.bUseCCD = true;
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
@@ -29,11 +35,11 @@ ABathhouseFacilityActor::ABathhouseFacilityActor()
 	PlacementFootprint = CreateDefaultSubobject<UBoxComponent>(TEXT("PlacementFootprint"));
 	PlacementFootprint->SetupAttachment(SceneRoot);
 	PlacementFootprint->SetBoxExtent(FVector(5.0f, 5.0f, 50.0f));
+	PlacementFootprint->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f));
 	PlacementFootprint->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PlacementFootprint->SetCanEverAffectNavigation(false);
-	PlacementNavModifier = CreateDefaultSubobject<UNavModifierComponent>(TEXT("PlacementNavModifier"));
 	FacilityPlacement = CreateDefaultSubobject<UFacilityPlacementComponent>(TEXT("FacilityPlacement"));
-	FacilityPlacement->Configure(PlacementFootprint, PackagePhysicalRoot, PlacementNavModifier);
+	FacilityPlacement->Configure(PlacementFootprint, PackagePhysicalRoot);
 	BathWaterState = CreateDefaultSubobject<UBathWaterStateComponent>(TEXT("BathWaterState"));
 }
 
@@ -49,18 +55,28 @@ void ABathhouseFacilityActor::BeginPlay()
 			Slot->OnSlotStateChanged.AddDynamic(this, &ABathhouseFacilityActor::HandleSlotStateChanged);
 		}
 	}
-	if (UBathhouseFacilitySubsystem* Subsystem = GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>())
-	{
-		ExpansionAuthorityChangedHandle = Subsystem->OnExpansionAuthorityChanged.AddUObject(
-			this,
-			&ABathhouseFacilityActor::HandleExpansionAuthorityChanged);
-	}
-
 	if (FacilityPlacement && FacilityPlacement->GetMode() == EPlaceableFacilityMode::Placed
 		&& !FacilityPlacement->IsStagedPlacement())
 	{
 		FText FailureReason;
-		if (!RegisterPlacedDomain(FailureReason))
+		if (FacilityType == EBathhouseFacilityType::ClothesLocker && IsNetStartupActor())
+		{
+			if (!FacilityPlacement->CaptureAndDisableActorCollision(FailureReason))
+			{
+				FacilityPlacement->SetPlacedDomainActive(false);
+				UE_LOG(LogTemp, Error, TEXT("Startup locker %s has invalid authoring or collision state: %s"), *GetName(), *FailureReason.ToString());
+			}
+			else if (UBathhouseFacilitySubsystem* Subsystem = GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>())
+			{
+				FacilityPlacement->SetPlacedDomainActive(false);
+				Subsystem->SubmitStartupLocker(this);
+			}
+			else
+			{
+				FailStartupLockerDomain();
+			}
+		}
+		else if (!RegisterPlacedDomain(FailureReason))
 		{
 			FacilityPlacement->SetPlacedDomainActive(false);
 			UE_LOG(LogTemp, Error, TEXT("Facility %s could not register its placed state: %s"), *GetName(), *FailureReason.ToString());
@@ -71,14 +87,6 @@ void ABathhouseFacilityActor::BeginPlay()
 void ABathhouseFacilityActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bEndingPlay = true;
-	if (UBathhouseFacilitySubsystem* Subsystem = GetWorld() ? GetWorld()->GetSubsystem<UBathhouseFacilitySubsystem>() : nullptr)
-	{
-		if (ExpansionAuthorityChangedHandle.IsValid())
-		{
-			Subsystem->OnExpansionAuthorityChanged.Remove(ExpansionAuthorityChangedHandle);
-		}
-	}
-	ExpansionAuthorityChangedHandle.Reset();
 	UnregisterPlacedDomain(EndPlayReason == EEndPlayReason::Destroyed);
 
 	for (UBathhouseFacilitySlotComponent* Slot : FacilitySlots)
@@ -92,6 +100,66 @@ void ABathhouseFacilityActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	Super::EndPlay(EndPlayReason);
 }
+
+#if WITH_EDITOR
+void ABathhouseFacilityActor::PostLoad()
+{
+	Super::PostLoad();
+	if (!IsTemplate() && FacilityType == EBathhouseFacilityType::ClothesLocker && !RegistrationId.IsValid())
+	{
+		RegistrationId = FGuid::NewGuid();
+		MarkPackageDirty();
+	}
+}
+
+void ABathhouseFacilityActor::PostDuplicate(const EDuplicateMode::Type DuplicateMode)
+{
+	Super::PostDuplicate(DuplicateMode);
+	if (DuplicateMode != EDuplicateMode::PIE
+		&& !IsTemplate() && FacilityType == EBathhouseFacilityType::ClothesLocker)
+	{
+		RegistrationId = FGuid::NewGuid();
+		MarkPackageDirty();
+	}
+}
+
+void ABathhouseFacilityActor::PostEditImport()
+{
+	Super::PostEditImport();
+	if (!IsTemplate() && FacilityType == EBathhouseFacilityType::ClothesLocker)
+	{
+		RegistrationId = FGuid::NewGuid();
+		MarkPackageDirty();
+	}
+}
+
+EDataValidationResult ABathhouseFacilityActor::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+	if (!IsTemplate() && FacilityType == EBathhouseFacilityType::ClothesLocker)
+	{
+		if (!RegistrationId.IsValid())
+		{
+			Context.AddError(NSLOCTEXT("BathhouseFacilityActor", "InvalidRegistrationId", "Pre-placed locker requires a valid RegistrationId."));
+			Result = EDataValidationResult::Invalid;
+		}
+		if (const UWorld* World = GetWorld())
+		{
+			for (TActorIterator<ABathhouseFacilityActor> It(World); It; ++It)
+			{
+				if (*It != this && It->FacilityType == EBathhouseFacilityType::ClothesLocker
+					&& It->RegistrationId == RegistrationId)
+				{
+					Context.AddError(NSLOCTEXT("BathhouseFacilityActor", "DuplicateRegistrationId", "Locker RegistrationId must be unique in the world."));
+					Result = EDataValidationResult::Invalid;
+					break;
+				}
+			}
+		}
+	}
+	return Result == EDataValidationResult::NotValidated ? EDataValidationResult::Valid : Result;
+}
+#endif
 
 void ABathhouseFacilityActor::FellOutOfWorld(const UDamageType& DamageType)
 {
@@ -230,7 +298,10 @@ FText ABathhouseFacilityActor::GetPhysicalCarryDisplayName() const
 	return LOCTEXT("FacilityPackage", "포장 설비");
 }
 
-FTransform ABathhouseFacilityActor::GetHeldTransform() const { return FTransform::Identity; }
+FTransform ABathhouseFacilityActor::GetHeldTransform() const
+{
+	return GetDefault<UFacilityPlacementSettings>()->GetFacilityItemHeldTransform();
+}
 bool ABathhouseFacilityActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
 	(void)Carry;

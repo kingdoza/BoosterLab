@@ -5,7 +5,6 @@
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "Interaction/PhysicalCarryFixedSlot.h"
-#include "NavModifierComponent.h"
 #include "Placement/FacilityPlacementCollisionUtils.h"
 #include "Placement/FacilityPlacementDefinition.h"
 #include "Placement/FacilityPlacementSettings.h"
@@ -19,12 +18,10 @@ UFacilityPlacementComponent::UFacilityPlacementComponent()
 
 void UFacilityPlacementComponent::Configure(
 	UBoxComponent* InPlacementFootprint,
-	UPrimitiveComponent* InPackagePhysicalRoot,
-	UNavModifierComponent* InNavModifier)
+	UPrimitiveComponent* InPackagePhysicalRoot)
 {
 	PlacementFootprint = InPlacementFootprint;
 	PackagePhysicalRoot = InPackagePhysicalRoot;
-	NavModifier = InNavModifier;
 }
 
 void UFacilityPlacementComponent::BeginPlay()
@@ -55,7 +52,7 @@ void UFacilityPlacementComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
 	AssignedFixedSlot.Reset();
 	PlacementFootprint = nullptr;
 	PackagePhysicalRoot = nullptr;
-	NavModifier = nullptr;
+	ActorCollisionSnapshotState = EActorCollisionSnapshotState::None;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -78,77 +75,6 @@ bool UFacilityPlacementComponent::IsOperational(FText& OutFailureReason) const
 		return false;
 	}
 	return ValidateFootprintContract(OutFailureReason);
-}
-
-bool UFacilityPlacementComponent::ValidateFootprintContractForDefinition(
-	const UFacilityPlacementDefinition& InDefinition,
-	FText& OutFailureReason) const
-{
-	if (!PlacementFootprint)
-	{
-		OutFailureReason = LOCTEXT("MissingFootprint", "설비 배치 영역을 확인할 수 없습니다.");
-		return false;
-	}
-	const float Grid = GetDefault<UFacilityPlacementSettings>()->GetGridSizeCm();
-	const FVector FullSize = PlacementFootprint->GetScaledBoxExtent() * 2.0f;
-	const FVector Expected(InDefinition.FootprintCellsX * Grid, InDefinition.FootprintCellsY * Grid, FullSize.Z);
-	if (InDefinition.FootprintCellsX < 1 || InDefinition.FootprintCellsY < 1
-		|| !FMath::IsNearlyEqual(FullSize.X, Expected.X, 0.5f)
-		|| !FMath::IsNearlyEqual(FullSize.Y, Expected.Y, 0.5f))
-	{
-		OutFailureReason = LOCTEXT("FootprintGridMismatch", "설비 배치 영역이 정의의 전역 그리드 셀 크기와 일치하지 않습니다.");
-		return false;
-	}
-	return true;
-}
-
-bool UFacilityPlacementComponent::ValidateFootprintContract(FText& OutFailureReason) const
-{
-	if (!Definition || !PlacementFootprint)
-	{
-		OutFailureReason = LOCTEXT("MissingFootprint", "설비 배치 영역을 확인할 수 없습니다.");
-		return false;
-	}
-	return ValidateFootprintContractForDefinition(*Definition, OutFailureReason);
-}
-
-bool UFacilityPlacementComponent::BuildPlacedActorTransform(
-	const FTransform& RequestedTransform,
-	FTransform& OutTransform,
-	FText& OutFailureReason) const
-{
-	const AActor* Owner = GetOwner();
-	const USceneComponent* Root = Owner ? Owner->GetRootComponent() : nullptr;
-	if (!Root)
-	{
-		OutFailureReason = LOCTEXT("MissingPlacedRoot", "배치 설비 클래스의 루트 컴포넌트를 확인할 수 없습니다.");
-		return false;
-	}
-	const FVector RootScale = Root->GetRelativeScale3D();
-	if (RootScale.ContainsNaN() || RootScale.GetAbsMin() <= UE_KINDA_SMALL_NUMBER)
-	{
-		OutFailureReason = LOCTEXT("InvalidPlacedScale", "배치 설비 클래스의 기본 루트 스케일이 올바르지 않습니다.");
-		return false;
-	}
-	OutTransform = RequestedTransform;
-	OutTransform.SetScale3D(RootScale);
-	return true;
-}
-
-bool UFacilityPlacementComponent::GetFootprintRelativeToRoot(
-	FTransform& OutTransform,
-	FText& OutFailureReason) const
-{
-	const AActor* Owner = GetOwner();
-	const USceneComponent* Root = Owner ? Owner->GetRootComponent() : nullptr;
-	if (!Root || !PlacementFootprint)
-	{
-		OutFailureReason = LOCTEXT("MissingFootprintRoot", "배치 설비의 루트 또는 배치 영역을 확인할 수 없습니다.");
-		return false;
-	}
-	OutTransform = PlacementFootprint->GetComponentTransform().GetRelativeTransform(
-		Root->GetComponentTransform());
-	return true;
 }
 
 bool UFacilityPlacementComponent::CanEnablePackagedCollision(FText& OutFailureReason) const
@@ -235,10 +161,6 @@ bool UFacilityPlacementComponent::ApplyMode(
 	}
 	const EPlaceableFacilityMode Previous = Mode;
 	Mode = NewMode;
-	if (NavModifier)
-	{
-		NavModifier->SetNavigationRelevancy(NewMode == EPlaceableFacilityMode::Placed);
-	}
 	bPlacedDomainActive = NewMode == EPlaceableFacilityMode::Placed;
 	if (NewMode == EPlaceableFacilityMode::Placed)
 	{
@@ -266,22 +188,60 @@ bool UFacilityPlacementComponent::ApplyMode(
 	return true;
 }
 
-void UFacilityPlacementComponent::PrepareForStagedPlacement(
-	UFacilityPlacementDefinition& InDefinition)
+bool UFacilityPlacementComponent::PrepareForStagedPlacement(
+	UFacilityPlacementDefinition& InDefinition,
+	FText& OutFailureReason)
 {
+	AActor* Owner = GetOwner();
+	if (!IsValid(Owner) || ActorCollisionSnapshotState != EActorCollisionSnapshotState::None)
+	{
+		OutFailureReason = LOCTEXT("StagedCollisionSnapshotUnavailable", "설비 배치 collision snapshot을 시작할 수 없습니다.");
+		return false;
+	}
+	bActorCollisionSnapshot = Owner->GetActorEnableCollision();
+	ActorCollisionSnapshotState = EActorCollisionSnapshotState::PendingConstruction;
+	Owner->SetActorEnableCollision(false);
 	Definition = &InDefinition;
 	Mode = EPlaceableFacilityMode::Placed;
 	bStagedPlacement = true;
 	SetPlacedDomainActive(false);
+	return true;
+}
+
+bool UFacilityPlacementComponent::FinalizeStagedPlacementCollisionSnapshot(FText& OutFailureReason)
+{
+	AActor* Owner = GetOwner();
+	if (!IsValid(Owner) || !bStagedPlacement
+		|| ActorCollisionSnapshotState != EActorCollisionSnapshotState::PendingConstruction)
+	{
+		OutFailureReason = LOCTEXT("StagedCollisionSnapshotNotPending", "설비 배치 collision snapshot을 확정할 수 없습니다.");
+		return false;
+	}
+	// A deferred actor is forced collision-off before Construction. Preserve the
+	// pre-Construction authored value unless Construction explicitly re-enables it.
+	bActorCollisionSnapshot = bActorCollisionSnapshot || Owner->GetActorEnableCollision();
+	ActorCollisionSnapshotState = EActorCollisionSnapshotState::Captured;
+	Owner->SetActorEnableCollision(false);
+	return true;
+}
+
+bool UFacilityPlacementComponent::ValidateStagedPlacementCollisionSnapshot(
+	FText& OutFailureReason) const
+{
+	const AActor* Owner = GetOwner();
+	if (!IsValid(Owner) || !bStagedPlacement
+		|| ActorCollisionSnapshotState != EActorCollisionSnapshotState::Captured
+		|| Owner->GetActorEnableCollision())
+	{
+		OutFailureReason = LOCTEXT("InvalidStagedCollisionSnapshot", "설비 배치 collision snapshot 상태가 올바르지 않습니다.");
+		return false;
+	}
+	return true;
 }
 
 void UFacilityPlacementComponent::SetPlacedDomainActive(const bool bActive)
 {
 	bPlacedDomainActive = bActive;
-	if (NavModifier)
-	{
-		NavModifier->SetNavigationRelevancy(bActive);
-	}
 	if (PackagePhysicalRoot)
 	{
 		PackagePhysicalRoot->SetSimulatePhysics(false);
@@ -289,12 +249,50 @@ void UFacilityPlacementComponent::SetPlacedDomainActive(const bool bActive)
 	}
 }
 
-void UFacilityPlacementComponent::CommitStagedPlacement()
+bool UFacilityPlacementComponent::CommitStagedPlacement(FText& OutFailureReason)
 {
+	if (!ValidateStagedPlacementCollisionSnapshot(OutFailureReason)
+		|| !RestoreActorCollisionSnapshot(OutFailureReason))
+	{
+		return false;
+	}
 	bStagedPlacement = false;
 	Mode = EPlaceableFacilityMode::Placed;
 	SetPlacedDomainActive(true);
 	CaptureLastSafeTransform();
+	return true;
+}
+
+bool UFacilityPlacementComponent::CaptureAndDisableActorCollision(FText& OutFailureReason)
+{
+	AActor* Owner = GetOwner();
+	if (!IsValid(Owner) || ActorCollisionSnapshotState != EActorCollisionSnapshotState::None)
+	{
+		OutFailureReason = LOCTEXT("CollisionSnapshotUnavailable", "설비 Actor collision 상태를 캡처할 수 없습니다.");
+		return false;
+	}
+	bActorCollisionSnapshot = Owner->GetActorEnableCollision();
+	ActorCollisionSnapshotState = EActorCollisionSnapshotState::Captured;
+	Owner->SetActorEnableCollision(false);
+	return true;
+}
+
+bool UFacilityPlacementComponent::RestoreActorCollisionSnapshot(FText& OutFailureReason)
+{
+	AActor* Owner = GetOwner();
+	if (!IsValid(Owner) || ActorCollisionSnapshotState != EActorCollisionSnapshotState::Captured)
+	{
+		OutFailureReason = LOCTEXT("MissingCollisionSnapshot", "복원할 설비 Actor collision 상태가 없습니다.");
+		return false;
+	}
+	Owner->SetActorEnableCollision(bActorCollisionSnapshot);
+	ActorCollisionSnapshotState = EActorCollisionSnapshotState::None;
+	return true;
+}
+
+void UFacilityPlacementComponent::ConsumeActorCollisionSnapshot()
+{
+	ActorCollisionSnapshotState = EActorCollisionSnapshotState::None;
 }
 
 void UFacilityPlacementComponent::PublishModeChanged(

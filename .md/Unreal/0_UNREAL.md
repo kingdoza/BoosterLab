@@ -12,12 +12,12 @@
 
 | 영역 | 권장 문서 | 포함 범위 |
 |---|---|---|
-| Placement | `PlacementSystem.md` | Zone, footprint, preview, placed/item Definition, grid와 Navigation authoring |
-| Facility | `FacilitySystem.md` | 설비 Blueprint, slot, counter, locker와 expansion authoring |
+| Placement | [PlacementSystem.md](PlacementSystem.md) | Zone, footprint, preview, placed/item Definition, grid와 Navigation authoring |
+| Facility | [FacilitySystem.md](FacilitySystem.md) | 설비 Blueprint, slot, counter, locker와 expansion authoring |
 | Customer AI | `CustomerAISystem.md` | Character/AIController Blueprint, StateTree schema/state/task/binding |
 | Interaction/UI | `InteractionUISystem.md` | Input Mapping, Widget hierarchy, BindWidget와 표시 asset |
 | Towel | `TowelSystem.md` | 수건 설비·표현 Blueprint, mesh/material과 presentation 설정 |
-| World | `WorldSystem.md` | map actor, World Settings, RecastNavMesh와 유일 Authority |
+| World | [WorldSystem.md](WorldSystem.md) | map actor, World Settings, RecastNavMesh와 유일 Authority |
 
 아직 실제 작업으로 검증되지 않은 시스템 문서는 미리 추측해 만들지 않는다. 문서가 없으면 해당 영역은 Editor 기준선 미확정 상태이며, 기능 명세에서 필요할 때 읽기 전용 Unreal MCP 조사를 수행한다.
 

@@ -1,73 +1,123 @@
-# Unreal Architecture Prompt — Facility Placement Authoring Simplification
+# 기능 계약 — 설비 배치 Authoring 단순화와 초기화 안정화
 
-## 목적
+## 승인 상태
 
-현재 설비 배치 시스템의 중복 authoring과 공통 설정 위치를 정리하는 설계를 작성한다. 아래 명시된 항목만 설계 범위로 삼고 구현은 진행하지 않는다.
+- 사용자 요구사항과 `.md/QNA_FEATURE_SPEC.md`, `.md/QNA_ARCHITECTURE.md` 답변을 2026-09-10(KST) 승인 입력으로 사용한다.
+- 미답변과 사용자 동작 미확정 사항은 없다.
+- 현재 구현의 48/50/60cm 부양, 대형 `NavArea_Null` 영역과 일시적 락커 등록 오류는 목표 동작이 아니라 수정 대상이다.
 
-## 필수 설계 범위
+## 목적과 범위
 
-1. 설비 공통 `HeldTransform`을 `UFacilityPlacementSettings`의 Developer Settings 항목으로 노출한다.
-   - 모든 `APlaceableFacilityItemActor`가 동일한 설정값을 사용하게 한다.
-   - 런타임에는 기존 계약대로 위치와 회전만 적용하고 Scale은 무시한다.
-   - 기존 reflected `HeldTransform`의 호환·폐기 방법만 필요한 범위에서 정한다.
+- 설비 아이템의 공통 Held 위치·회전을 Project Settings 한 곳에서 조정한다.
+- 설치 footprint 크기와 전역 grid로 필요한 셀 수를 자동 계산한다.
+- 모든 설비의 footprint 바닥을 PlacementZone의 명시적 바닥 plane에 맞춘다.
+- 설비 class-default 외형을 사용하는 범용 반투명 프리뷰를 제공한다.
+- 실제 설비 메시 collision만 Unreal의 동적 NavMesh 생성에 반영한다.
+- 월드 시작 락커 등록을 확장 Authority와 Actor의 `BeginPlay` 순서에서 분리한다.
 
-2. 설비 설치 시 `PlacementFootprint`의 바닥면이 `PlacementZone`의 실제 바닥면에 맞도록 한다.
-   - Zone Bounds의 두께 때문에 설비가 그 두께만큼 위로 뜨면 안 된다.
-   - `PlacementFootprint`의 상대 위치와 높이를 이용한 바닥 정렬 책임을 명확히 한다.
-   - 기존 X/Y grid snap과 회전 동작은 변경하지 않는다.
+## 사용자·Authoring 계약
 
-3. 설비 셀 크기의 이중 authoring을 폐기하고 `PlacementFootprint.BoxExtent`를 단일 정본으로 사용한다.
-   - `FootprintCellsX/Y`를 사용자가 별도로 맞추는 계약을 제거한다.
-   - 필요한 셀 수는 `PlacementFootprint`의 scaled 전체 X/Y 크기와 전역 `GridSizeCm`으로 계산한다.
-   - 검증은 전체 크기가 전역 grid 단위로 나누어떨어지는지만 확인한다.
-   - 기존 serialized `FootprintCellsX/Y`의 호환·폐기 방법만 필요한 범위에서 정한다.
+- 설비 아이템 Held 설정은 모든 설비가 공유하며 위치와 회전만 적용한다. 입력된 Scale은 무시한다.
+- `PlacementFootprint`의 scaled 전체 X/Y 크기는 전역 grid 크기의 정수배여야 한다.
+- Definition에 별도 X/Y cell 수를 입력하지 않는다.
+- PlacementZone은 Bounds 두께와 독립적인 바닥 plane을 가진다.
+- 설비 Actor의 local 설치 바닥과 `PlacementFootprint` 바닥면은 모두 local Z=0에 맞춘다.
+- 설치 가능 프리뷰 머터리얼과 설치 불가 프리뷰 머터리얼은 Project Settings에서 각각 지정한다.
+- 프리뷰는 새로 설치될 설비의 class-default 빈 상태·대기 상태 외관을 보여준다.
+- 프리뷰 외형은 설비의 표시 가능한 class-default Static Mesh를 사용하고 원래 머터리얼 전체를 선택된 프리뷰 머터리얼로 교체한다.
+- 실제 몸체 메시의 기존 collision과 Navigation relevancy가 설치 장애물의 정본이다.
+- Placement helper, 상호작용 영역, 슬롯과 Action/Approach Point는 Navigation에 영향을 주지 않는다.
+- RecastNavMesh Runtime Generation은 `Dynamic`을 사용한다.
 
-## 수용 기준
+## 성공·실패·복구 계약
 
-- 공통 Held 위치·회전은 Project Settings 한 곳에서 조정할 수 있다.
-- PlacementZone Bounds 두께와 무관하게 설치 설비의 footprint 바닥면이 zone 바닥면에 정렬된다.
-- 전역 grid 또는 footprint 크기를 변경할 때 Definition의 셀 수를 별도로 수정하지 않는다.
-- 기존 배치 충돌, 구역 포함, 바닥 지지, preview, 회수 및 Actor 변환 계약은 이번 변경에 필요한 부분 외에는 유지한다.
+- 프리뷰, staged placement와 recovery unregistration 동안 설비 Actor collision은 Navigation에 반영되지 않는다.
+- placement commit 뒤 새 설비의 domain 등록이 확정된 경우에만 authored Actor collision을 복원한다.
+- recovery rollback은 원본 설비의 이전 Actor collision과 domain 등록을 정확히 복원한다.
+- 프리뷰 mesh나 유효/무효 머터리얼을 만들 수 없으면 배치를 fail-closed하고 held 설비 아이템을 유지한다.
+- Authority 미준비 락커는 오류 용량 0으로 거부하지 않고 pending 상태로 유지한다.
+- 월드 시작 락커는 고정된 persistent registration ID 순서로 한 번 reconciliation한다.
+- 현재 tier 한도 안에 들어가는 락커만 활성화하며 한도를 넘는 락커만 fail-closed한다.
+- 초과 락커는 설정 오류를 한 번만 기록하고 facility, capacity와 Navigation domain을 활성화하지 않는다.
+- reconciliation은 facility 변경 한 번과 capacity 변경 한 번만 최종 공개한다.
+- Authority 미준비 상태는 실제 확장 한도 초과 오류와 구분한다.
 
-## 설계 제한
+## 수용 시나리오
 
-- 새 gameplay 기능, UI, 입력, 설비별 예외를 추가하지 않는다.
-- 요구사항 밖의 구조 개편이나 책임 재분배를 제안하지 않는다.
-- 필요한 실제 Source와 관련 Placement 아키텍처 문서만 확인한다.
-- 설계 결과는 현재 workflow에 따라 관련 아키텍처 정본과 `.md/PROMPT_IMPLEMENTATION.md`에 반영한다.
+### FP-AS-01 공통 Held 설정
 
-## 추가 문제 및 필수 설계 범위
+- Given 서로 다른 설비 아이템이 있고 Project Settings에 공통 Held Transform이 설정됨
+- When 플레이어가 각 아이템을 듦
+- Then 모든 아이템이 같은 위치·회전을 사용하고 각 아이템의 물리 Scale은 보존됨
 
-4. PIE 시작 시 설비 주변 NavMesh가 실제 설비보다 과도하게 사라지는 문제를 해결한다.
-   - 현재 `Placed` 전환에서 `PlacementNavModifier`의 Navigation relevancy를 켜고, RecastNavMesh가 `Dynamic Modifiers Only`로 동작하면서 에디터의 정적 NavMesh 위에 런타임 `NavArea_Null` 영역이 추가되는 것이 직접 원인이다.
-   - `UNavModifierComponent`가 적절한 navigation primitive를 찾지 못하면 설비별 `FailsafeExtent`를 사용하고, 일부 설비에서는 상호작용용 Box까지 형상 후보가 되어 실제 몸체보다 큰 영역이 제거된다.
-   - 공통 `PlacementNavModifier`와 설비별 `FailsafeExtent`를 설치 장애물의 정본으로 사용하지 않는다.
-   - 설치 설비의 기존 실제 몸체 충돌 primitive만 navigation geometry의 정본으로 지정하고, 상호작용 Box, 슬롯, `PlacementFootprint`, Action/Approach Point는 항상 Navigation에 영향을 주지 않게 한다.
-   - preview, staged placement와 recovery unregistration 중에는 몸체의 Navigation 영향을 끄고, placement commit으로 domain 등록이 확정된 뒤에만 켠다. rollback은 이전 Navigation 상태를 정확히 복원한다.
-   - 일반 collision geometry의 런타임 생성·제거를 사용할 경우 RecastNavMesh Runtime Generation을 `Dynamic`으로 맞춘다. raw geometry 전환과 호환되지 않는 `Dynamic Modifiers Only`를 그대로 유지하지 않는다.
-   - Recast agent radius에 따른 정상적인 통행 여유 외에는 실제 몸체보다 큰 `NavArea_Null` 박스가 생기지 않아야 하며, 모든 Facility/Queue Approach Point는 생성된 NavMesh 위에 남아야 한다.
+### FP-AS-02 footprint 파생 셀
 
-5. 월드 시작 시 락커와 확장 Authority의 `BeginPlay` 순서에 의존하는 등록 실패를 제거한다.
-   - 현재 락커가 Authority보다 먼저 시작하면 최대 설치 칸 수를 `0`으로 조회해 최초 등록이 실패하고 오류를 출력한다. 락커는 `OnExpansionAuthorityChanged`를 먼저 구독하므로 Authority가 이후 정상 등록되면 `HandleExpansionAuthorityChanged()`에서 재등록을 시도하며, 실제 tier 제한에 여유가 있으면 뒤늦게 등록된다.
-   - 위 일시적 미준비 상태를 실제 `ExpansionLimit` 초과와 같은 영구 실패로 취급하지 않는다.
-   - 확장 Authority 준비 전의 pre-placed 락커는 pending 상태로 수집하고, Authority 등록 완료 시 한 번의 명시적인 reconciliation 단계에서 결정적으로 등록한다.
-   - reconciliation은 중복 등록, 용량 이중 합산과 중복 publication을 만들지 않아야 하며 성공한 락커의 facility/capacity/Navigation domain을 함께 활성화한다.
-   - Authority가 준비된 뒤에도 전체 authored 락커 칸이 현재 tier의 `MaxInstalledLockerSlots`를 실제로 초과하면 이는 재시도로 해결되지 않는 설정 오류다. 초과 락커는 fail-closed로 유지하고 transient 초기화 메시지와 구분되는 명확한 오류를 한 번만 기록한다.
-   - Actor 간 `BeginPlay` 우연한 순서나 지연 Tick에 의존하지 않고, readiness와 pending registration의 owner를 기존 Facility/Locker subsystem 경계 안에서 정한다.
+- Given footprint 전체 X/Y 크기와 전역 grid가 정수배 관계임
+- When Definition을 검증하거나 배치 후보를 계산함
+- Then 별도 cell 입력 없이 필요한 X/Y 셀 수가 계산됨
+- And 정수배가 아니면 명확한 authoring 오류로 배치가 거부됨
 
-6. 설비별로 48cm, 50cm, 60cm 떠서 설치되는 높이 계산을 바로잡는다.
-   - 현재 `MakeCandidateTransform()`이 후보 Z를 `ZoneBounds` 상단인 `ZoneHalfHeight`로 올린 뒤, `ValidateCurrentPlacement()`가 `PlacementFootprint` 반높이를 다시 더한다. 현재 footprint 상대 Z가 0이므로 결과적으로 `ZoneHalfHeight + FootprintHalfHeight`가 Actor 높이에 그대로 합산된다.
-   - 현재 authoring 값에서는 목욕탕 `10 + 38 = 48cm`, 세탁기·건조기 `10 + 40 = 50cm`, 옷장 `10 + 50 = 60cm`로 실제 증상과 일치한다. 이를 설비별 보정값으로 해결하지 않는다.
-   - 설치 높이의 정본을 `ZoneBounds` 상단이나 카메라 trace 충돌점이 아닌, Bounds 두께와 독립적인 PlacementZone의 명시적 바닥 plane으로 정한다.
-   - `PlacementFootprint` 바닥면과 설비 실제 설치 바닥면의 관계를 하나의 authoring 계약으로 고정한다. 현재 Blueprint CDO처럼 footprint 중심이 Actor 바닥 원점에 놓인 자산은 footprint 상대 Z 또는 공통 pivot 계약을 교정하여 footprint 바닥과 실제 설비 바닥이 일치하게 migration한다.
-   - 공통 transform 계산은 zone 바닥 plane과 회전·scale이 적용된 footprint 상대 transform으로 Actor 위치를 한 번만 역산해야 한다. Zone 반높이와 footprint 반높이를 별도 단계에서 중복 가산하지 않는다.
-   - preview transform, 최종 spawned Actor, footprint 포함 검사와 네 모서리 floor-support trace가 모두 같은 후보 transform을 사용해야 한다.
+### FP-AS-03 동일 바닥 설치
 
-## 추가 수용 기준
+- Given 서로 높이가 다른 목욕탕·세탁기·건조기·락커와 같은 PlacementZone 바닥 plane이 있음
+- When 같은 바닥 위치에 각각 preview하고 설치함
+- Then footprint 바닥이 모두 같은 plane에 맞고 Bounds/footprint 두께를 더하지 않음
 
-- PIE 전후에 설비의 실제 몸체와 무관한 대형 NavMesh 구멍이 새로 생기지 않는다.
-- 설비 회수 후 해당 몸체가 차지하던 Navigation 영역이 복구되고, 재배치 후 새 위치만 다시 반영된다.
-- Authority와 락커의 `BeginPlay` 순서가 어느 쪽이 먼저여도 허용 범위 내 pre-placed 락커의 최종 등록 결과와 publication 횟수가 같다.
-- 실제 tier 한도를 초과한 락커만 등록 거부되며, Authority 미준비는 영구적인 용량 초과 오류로 기록되지 않는다.
-- 목욕탕, 세탁기, 건조기와 옷장의 설치 바닥 높이가 동일한 zone floor plane에 맞고, `ZoneBounds.BoxExtent.Z`나 설비별 `PlacementFootprint.BoxExtent.Z`를 변경해도 공중 부양 오차가 생기지 않는다.
-- 위 변경은 기존 zone tag 호환성, X/Y grid snap, 회전, 충돌 검사와 회수 transaction 계약을 변경하지 않는다.
+### FP-AS-04 범용 프리뷰
+
+- Given 설비 class에 하나 이상의 표시 가능한 class-default Static Mesh가 있음
+- When 설비 아이템을 들고 preview를 시작함
+- Then 범용 preview가 동일 mesh와 root 기준 상대 transform으로 외형을 구성함
+- And 설치 가능 시 초록 반투명, 불가능 시 빨강 반투명 머터리얼로 모든 material slot을 교체함
+
+### FP-AS-05 동적 Navigation
+
+- Given 실제 몸체 mesh collision이 Navigation relevant이고 helper는 Navigation 비관련임
+- When 설비를 회수하고 다른 위치에 다시 설치함
+- Then 이전 몸체 영역의 NavMesh가 복구되고 새 몸체 위치만 agent radius만큼 통행 여유를 가짐
+- And 별도 대형 `NavArea_Null` 박스가 생기지 않음
+
+### FP-AS-06 락커 초기 등록 순서
+
+- Given 같은 락커와 Authority가 서로 다른 `BeginPlay` 순서로 시작함
+- When 월드 시작 reconciliation이 완료됨
+- Then 등록 락커, 설치 용량과 publication 횟수가 모두 같음
+
+### FP-AS-07 락커 확장 한도 초과
+
+- Given persistent ID가 고정된 pre-placed 락커의 총 칸 수가 현재 tier 한도를 초과함
+- When reconciliation함
+- Then ID 순서로 수용 가능한 락커만 활성화되고 나머지는 비활성 상태와 단일 설정 오류를 유지함
+
+### FP-AS-08 transaction rollback
+
+- Given placement 또는 recovery가 domain 확정 전에 실패함
+- When rollback함
+- Then 원본 Actor·held identity·collision·Navigation·facility와 capacity 상태가 시작 전과 같음
+
+## 유지 계약
+
+- zone tag 호환성, X/Y grid snap, LCtrl 동작과 휠 Yaw 회전은 변경하지 않는다.
+- 배치 충돌, zone 포함, 네 모서리 바닥 지지, Q 회수 조건과 Actor 교체 transaction을 유지한다.
+- 열쇠 수와 번호는 확장 단계에만 종속되고 락커와 일대일 대응하지 않는다.
+- 세탁기·건조기 내용물, 목욕탕 물·손님과 락커 사용 상태에 따른 회수 제한을 유지한다.
+
+## Migration 승인 사항
+
+- 기존 per-item/legacy `HeldTransform`, Definition의 `FootprintCellsX/Y`, `PreviewActorClass`를 즉시 제거한다.
+- 기존 공통 `PlacementNavModifier` native component를 즉시 제거한다.
+- 영향받는 Blueprint와 Definition은 같은 Editor migration에서 compile·resave한다.
+- 락커 instance에는 cooked build에서도 유지되는 자동 생성 persistent registration ID를 저장한다. UE Editor-only Actor GUID는 사용하지 않는다.
+
+## 비목표
+
+- 새 입력, UI, gameplay 기능과 설비별 예외를 추가하지 않는다.
+- runtime contents나 물·작동 상태를 preview에 복제하지 않는다.
+- 별도 Navigation modifier, 몸체 primitive 배열과 component tag 기반 Navigation 형상을 추가하지 않는다.
+- 구체적인 시설 확장 밸런스 수치와 기존 회수 조건을 변경하지 않는다.
+
+## 구현 경로 판단
+
+- 공통 reflected property와 native default subobject를 즉시 제거하므로 일부 설비만 먼저 migration하면 나머지 asset이 깨진다.
+- 따라서 이 작업은 대표 설비만 분리하는 수직 구현 대신 모든 영향 Definition·설비 Blueprint를 같은 migration 단위로 처리한다.
+- 실제 asset 이름과 component 상태는 코드 리뷰 후 Unreal Editor 단계에서 조회·수정·PIE 검증한다.

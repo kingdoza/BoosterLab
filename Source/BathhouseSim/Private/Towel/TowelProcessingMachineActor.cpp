@@ -6,8 +6,8 @@
 #include "TimerManager.h"
 #include "Interaction/PhysicalCarryFixedSlot.h"
 #include "Interaction/PlayerCarryComponent.h"
-#include "NavModifierComponent.h"
 #include "Placement/FacilityPlacementComponent.h"
+#include "Placement/FacilityPlacementSettings.h"
 #include "Placement/FacilityPlacementDefinition.h"
 #include "Placement/FacilityPlacementZoneActor.h"
 #include "Placement/FacilityActorConversionTransaction.h"
@@ -26,6 +26,8 @@ ATowelProcessingMachineActor::ATowelProcessingMachineActor()
 	PackagePhysicalRoot = CreateDefaultSubobject<UBoxComponent>(TEXT("PackagePhysicalRoot"));
 	SetRootComponent(PackagePhysicalRoot);
 	PackagePhysicalRoot->SetBoxExtent(FVector(5.0f));
+	PackagePhysicalRoot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PackagePhysicalRoot->SetCanEverAffectNavigation(false);
 	PackagePhysicalRoot->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 	PackagePhysicalRoot->BodyInstance.bUseCCD = true;
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
@@ -33,11 +35,11 @@ ATowelProcessingMachineActor::ATowelProcessingMachineActor()
 	PlacementFootprint = CreateDefaultSubobject<UBoxComponent>(TEXT("PlacementFootprint"));
 	PlacementFootprint->SetupAttachment(SceneRoot);
 	PlacementFootprint->SetBoxExtent(FVector(5.0f, 5.0f, 50.0f));
+	PlacementFootprint->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f));
 	PlacementFootprint->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PlacementFootprint->SetCanEverAffectNavigation(false);
-	PlacementNavModifier = CreateDefaultSubobject<UNavModifierComponent>(TEXT("PlacementNavModifier"));
 	FacilityPlacement = CreateDefaultSubobject<UFacilityPlacementComponent>(TEXT("FacilityPlacement"));
-	FacilityPlacement->Configure(PlacementFootprint, PackagePhysicalRoot, PlacementNavModifier);
+	FacilityPlacement->Configure(PlacementFootprint, PackagePhysicalRoot);
 	Inventory = CreateDefaultSubobject<UTowelInventoryComponent>(TEXT("TowelInventory"));
 	Inventory->ConfigureDefaults(ETowelState::None, 0, 10);
 	TransferPort = CreateDefaultSubobject<UTowelTransferPortComponent>(TEXT("TransferPort"));
@@ -132,7 +134,10 @@ bool ATowelProcessingMachineActor::CommitPlaceableFacilityMode(const EPlaceableF
 }
 
 FText ATowelProcessingMachineActor::GetPhysicalCarryDisplayName() const { return LOCTEXT("TowelMachinePackage", "포장 수건 처리기"); }
-FTransform ATowelProcessingMachineActor::GetHeldTransform() const { return FTransform::Identity; }
+FTransform ATowelProcessingMachineActor::GetHeldTransform() const
+{
+	return GetDefault<UFacilityPlacementSettings>()->GetFacilityItemHeldTransform();
+}
 bool ATowelProcessingMachineActor::CanBeTakenBy(const UPlayerCarryComponent& Carry, FText& OutFailureReason) const
 {
 	(void)Carry;

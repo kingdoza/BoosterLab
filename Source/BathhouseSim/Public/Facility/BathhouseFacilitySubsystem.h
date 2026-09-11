@@ -19,6 +19,9 @@ class BATHHOUSESIM_API UBathhouseFacilitySubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+	void SubmitStartupLocker(ABathhouseFacilityActor* Locker);
 	bool RegisterFacility(ABathhouseFacilityActor* Facility, bool bPublish = true);
 	bool UnregisterFacility(ABathhouseFacilityActor* Facility, bool bPublish = true);
 	bool IsFacilityRegistered(const ABathhouseFacilityActor* Facility) const;
@@ -50,9 +53,24 @@ public:
 	FOnExpansionAuthorityChangedNative OnExpansionAuthorityChanged;
 
 private:
+	void HandleWorldBeginPlay();
+	void ReconcileStartupLockers();
+	void MarkStartupLockerPermanentFailure(ABathhouseFacilityActor& Locker, const FText& FailureReason);
 	void CompactRegistrations();
 
 	TArray<TWeakObjectPtr<ABathhouseFacilityActor>> RegisteredFacilities;
 	TMultiMap<int32, TWeakObjectPtr<AActor>> RegisteredKeyHooks;
 	TWeakObjectPtr<ABathhouseExpansionAuthority> ExpansionAuthority;
+	TSet<TWeakObjectPtr<ABathhouseFacilityActor>> PendingStartupLockers;
+	TSet<TWeakObjectPtr<ABathhouseFacilityActor>> PermanentStartupFailures;
+	TSet<TWeakObjectPtr<ABathhouseFacilityActor>> LoggedStartupFailures;
+	TMap<FGuid, TWeakObjectPtr<ABathhouseFacilityActor>> AcceptedStartupRegistrationOwners;
+	FDelegateHandle WorldBeginPlayHandle;
+	uint64 PendingStartupRevision = 0;
+	uint64 AuthorityReadinessRevision = 0;
+	uint64 LastReconciledPendingRevision = MAX_uint64;
+	uint64 LastReconciledAuthorityRevision = MAX_uint64;
+	bool bStartupSubmissionClosed = false;
+	bool bReconcilingStartupLockers = false;
+	bool bLoggedAuthorityNotReady = false;
 };
